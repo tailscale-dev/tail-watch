@@ -50,7 +50,7 @@ pings, path type) to say why a check failed. A monitor outside the tailnet can't
 
 ## Architecture
 
-```
+```text
                  +--------------------------------------------+
                  | collector (tag:monitor)                    |
                  |                                            |
@@ -107,7 +107,8 @@ file.
 - For multiple sites, run a collector on a separate small host or VM next to each subnet
   router, on the same LAN. LAN checks then keep working when the site's WAN link is down.
   The central collector checks the routers. Site collectors report metrics and alerts
-  outward whenever they have a path.
+  outward whenever they have a path. Mark these targets `network: local` so
+  they do not inherit a Tailscale router dependency.
 - Don't run the collector on the subnet router itself. A router-hosted collector reaches
   the LAN directly and never crosses the tunnel, so it can't see `tunnel`-layer failures,
   and it goes down with the thing it is supposed to report on.
@@ -129,8 +130,13 @@ Gotcha for `icmp`: `netcheck` and `magicsock` build their pingers with
 traffic skips the tunnel. The collector needs the opposite, so it must not copy that
 line.
 
-In kernel mode the host's routing table already sends tailnet and subnet-routed traffic
-into `tailscale0`, so an ordinary dialer reaches every target. The `prober` check
+Checks use ordinary host sockets. `network: tailnet` (the default) requires
+kernel-mode tailscaled and installed routes; Linux collectors monitoring remote
+subnets must enable `tailscale set --accept-routes`. Preflight checks route
+acceptance, and deployment must verify effective routes. An advertised route alone
+is not proof that host sockets use it. Use `network: local` for directly monitored
+LAN devices; these targets do not learn tailnet dependencies or use disco probes.
+The `prober` check
 constructors in the table show the logic to copy. The next section explains why checks
 reimplement that logic over `netEnv` instead of calling the constructors directly.
 
@@ -166,7 +172,7 @@ layer, checking from the bottom up:
 | Layer | Condition | Alert |
 |---|---|---|
 | `control` | The handling node is offline in the collector's netmap | Page on the router or node, then suppress everything behind it |
-| `tunnel` | Handling node is online in control but `tsping` fails | Page, "no WireGuard path to <router>". Usually NAT, firewall, or a stuck magicsock |
+| `tunnel` | Handling node is online in control but `tsping` fails | Page, "no WireGuard path to router". Usually NAT, firewall, or a stuck magicsock |
 | `lan` | `tsping` to the router works but ICMP or TCP to the device fails | Page on the device |
 | `service` | Device answers ICMP but the port or HTTP check fails | Page on the service |
 | `degraded` | Reachable, but the path moved from direct to DERP or peer relay, or latency is 3x the 1h baseline | Warn, no page |
@@ -182,13 +188,31 @@ the problem is in the host's IP stack, firewall, or service, not in the tunnel.
 
 ### Dependency learning
 
-On startup and every 10 minutes, the collector runs one `tsping` per LAN target. It
-records `NodeIP` as that target's parent. No hand-written parent config is needed. If a
-subnet is routed by an HA pair, `NodeIP` follows whichever router is primary, which is
-the one that matters.
+For `network: tailnet` LAN targets, learning runs at startup and every ten minutes,
+and reconciles when primary routes change or presence reseeds. It records the
+handling node's stable identity and uses its Tailscale IP for reachability probes.
+A failed learning ping retains the previous handler unless a current primary-route
+change supersedes it. Local targets have no learned tailnet parent.
 
-An optional `parent:` override in the config covers cases the ping can't see. One example
-is a device behind a second switch that is itself monitored.
+A learned parent reuses a configured target only if its checks are exactly
+`[tsping]` and it addresses that node. Otherwise create a separate implicit
+reachability target, even when a service target already covers the router. Service
+failures on a router must not suppress its LAN. Explicit `parent:` overrides may
+name a target with exactly one `icmp` or `tsping` check, such as a core switch.
+Keep physical dependencies separate from the Tailscale handling-node lookup.
+
+Validate the combined configured and learned graph before every update. Reject a
+cycle and retain the old graph. Apply accepted updates atomically to alerting:
+children moved from a down router to a healthy one are released immediately,
+without waiting for the old router to recover.
+
+First-pass completion means attempts finished, not that discovery succeeded.
+Continuously seeded presence and resolved handlers for all remote LAN targets
+make a reconciliation authoritative for removing unresolved implicit incidents.
+If no remote LAN targets are configured, config alone proves no learned router
+is required.
+Persist stable node identity and target definition for open learned incidents;
+recreate those targets before checks start and retain them through failed discovery.
 
 ### Presence watcher
 
@@ -225,7 +249,10 @@ parent is DOWN.
   `flap_window`.
 - If a target's parent goes DOWN, the target moves to `SUPPRESSED`. Its failures don't
   page. The router's alert lists how many dependents it took down. When the parent
-  recovers, the dependents re-check at once and return to UP or DOWN.
+  recovers, or a topology update removes every down ancestor, enqueue dependent
+  rechecks within one second. Eight workers run them with per-check timeouts; all
+  checks need not start within one second. An already-DOWN child stays DOWN and
+  retains its own incident. Release resets counters and excludes pre-release results.
 - With quorum on, a DOWN needs agreement from `quorum` collectors. Sharing state across
   collectors is phase 3. Before then, run quorum in Alertmanager over each collector's
   metrics.
@@ -245,7 +272,7 @@ Slack channel for everything.
 
 | Event | When | Severity |
 |---|---|---|
-| `target.down` | `UP -> DOWN` | `page`, or the target's `severity` override |
+| `target.down` | `UP`, `UNKNOWN` or released `SUPPRESSED` to `DOWN` | `page`, or the target's `severity` override |
 | `target.recovered` | `DOWN -> UP` | Same as the `target.down` it resolves |
 | `target.flapping` | Target crossed `flap_limit` | `warn` |
 | `target.degraded` | Path fell back to DERP or peer relay, or latency spiked (phase 2) | `warn` |
@@ -254,11 +281,14 @@ Slack channel for everything.
 
 Two rules keep the noise down:
 
-- Suppressed targets don't emit events. The parent's `target.down` lists them in
+- Suppressed targets do not emit events until a released target independently
+  reaches its failure threshold. The parent's `target.down` lists them in
   `dependents`, and the parent's `target.recovered` lists them too.
-- A `target.recovered` always goes to every sink that received the matching
-  `target.down`, even if the sink's filters would otherwise drop it. A page with no
-  resolve is worse than no page.
+- Recoveries bypass changed filters for eligible sinks selected for the matching
+  down. They wait behind pending downs. A never-attempted down dropped from the queue
+  discards its recovery; an attempted down keeps its recovery eligible even if no
+  response was received. Receivers must tolerate unknown resolve IDs, because a
+  request may have been accepted before its response was lost.
 
 Targets can set `severity: warn` in config. Use this for things like printers that should
 show up in Slack but never page anyone.
@@ -350,7 +380,7 @@ The MVP uses a Slack incoming webhook URL, which needs no bot or OAuth setup.
 - Messages use Block Kit with a plain-text `text` fallback for notifications and
   screen readers. Example `target.down`:
 
-  ```
+  ```text
   :red_circle: DOWN  nyc-nas  tcp:445  (service)
   10.20.0.50 at nyc, behind nyc-router, direct path, 18 ms
   dial tcp 10.20.0.50:445: connect: connection refused
@@ -373,75 +403,80 @@ resolved, which keeps busy channels readable. Incoming webhooks can't do either.
 
 ### Delivery
 
-- Each sink has its own goroutine and a bounded queue (`queue_size`, default 1000
-  events), held in memory or on disk (see "Queue modes"). Probes hand events to the
-  dispatcher and never block on network calls to Slack or a webhook.
-- Delivery within a sink is in order, so a receiver never sees `recovered` before
-  `down` for the same target. A slow webhook doesn't delay Slack.
-- When a queue is full, the oldest event is dropped and counted. A newer event reflects
-  current state, which matters more.
-- Events queued while the collector's own uplink is down go out when it returns, with
-  their original `time`. Any event delivered more than 1m after its `time` carries
-  `"late": true`.
-- Webhook URLs and Slack URLs are secrets. They come from `*_env` or `*_file` keys, never
-  from the YAML itself, and logs redact everything after the host.
+Transitions get sequence numbers and enter a bounded shared FIFO under the alert
+state lock. One drainer invokes consumers outside the lock. Notification intake is
+also bounded and non-blocking. Overflow counts a drop and retains a dirty target
+snapshot with its latest notification-visible state and sequence, respecting flap
+damping. The notifier reconciles dirty snapshots once capacity returns, even if no
+new transitions arrive. A stable UP with an open incident gets a recovery intent;
+a stable DOWN without an incident gets a down. Intermediate unreported blips may
+coalesce. Acknowledgment of a snapshot never clears a newer dirty generation.
 
-### Queue modes
+Each sink has a network worker and a bounded queue (`queue_size`, default 1000).
+A slow receiver does not delay another worker. One coordinator serializes incident
+mutations, queue intents and persistence; a slow disk can delay all durable enqueues
+but not checks. Overflow drops the oldest queued event with a counter and updates
+its incident delivery state. Expiry and permanent failures are explicit delivery
+limits, so resolution is not unconditional.
 
-Each sink sets `queue: memory` (the default) or `queue: disk`.
+Each incident records per-sink pending, attempted, acknowledged and dropped state,
+retaining whether any request was attempted. Mark durable events attempted before
+sending, then record acknowledgments through the coordinator. Recoveries wait for
+their down to succeed or become terminal; only sinks eligible under the rules above
+receive them. An unattempted down and recovery may share one ordered batch, committing
+their attempt states together. Events keep their original `time`; those first attempted
+over one minute later carry `late: true`, fixed with their body for subsequent retries.
+URLs, secrets and headers come from `*_env` or `*_file` keys and are never persisted.
 
-- `memory`: a restart or crash loses whatever is still queued. This is fine for Slack,
-  where a message about a blip from before the restart has little value, and the
-  heartbeat already covers a dead collector.
-- `disk`: for receivers that open and close tickets. There, a lost `down` or
-  `recovered` leaves a ticket wrong until a human notices. Requires `state_dir`.
+### Queue modes and atomic persistence
 
-Layout under `state_dir` (for example `/var/lib/tsmon`, created with mode 0700):
+Each sink chooses `queue: memory` (default) or `queue: disk`. Disk mode requires
+`collector.state_dir`. Memory pending payloads are lost on restart and marked dropped;
+retain whether their down was attempted when deciding recovery eligibility. When
+`state_dir` is configured, one versioned file, `notification-state.json`, atomically stores:
 
-```
-state_dir/
-  queue/<sink>/000000000142-evt_01JAB3K9T6M4X2Q8R7N5W0YZCD.json   one pending event per file
-  incidents.json                                                  open incidents, see below
-```
+- Open and closing incidents, target definitions and original down IDs.
+- Per-sink delivery state and monotonically allocated queue sequences.
+- All pending disk-sink event intents, plus active batch IDs and first-attempt bodies.
 
-- Enqueue writes the event to a temp file, fsyncs it, and renames it into place. The
-  event counts as queued only after the rename. On load, temp files are ignored and
-  removed. Events are state changes, not check results, so they are rare and an fsync
-  per event costs nothing noticeable.
-- The sink deletes the file after a `2xx` or a permanent failure. If the process dies
-  between the `2xx` and the delete, the event is sent again after restart. This is
-  at-least-once delivery, and receivers dedupe on `id`.
-- On startup the sink loads files in sequence order, drops those older than `max_age`
-  (counted as `expired`), applies `queue_size` (oldest dropped first), and resumes.
-- In batched mode, events are still stored one per file. A batch is only assembled at
-  send time, and all of its files are deleted after a `2xx`.
-- Files hold event payloads only. URLs, secrets, and headers are read from the
-  environment at send time and never written to disk. Payloads contain internal
-  addresses and hostnames, which is why the directory is 0700.
-- If a write fails (disk full, read-only filesystem), that event goes to the in-memory
-  queue instead. The sink logs once and increments `tsmon_notify_persist_errors_total`.
-  Losing durability is better than losing the alert.
+Write a same-directory temporary file, fsync it, rename it, and fsync the directory.
+An incident mutation and all corresponding durable event intents commit together;
+only after commit may workers see new disk-backed events. Separate `incidents.json`
+and per-event queue files are superseded. Directories use mode 0700; files use 0600.
+
+A recovery moves an incident to closing and creates durable intents in one commit.
+Retain the closing record until its deliveries are acknowledged or explicitly
+dropped. A new outage can open a new incident while old recovery intents retry.
+Worker results update the same snapshot. A crash after commit replays intents with
+the same IDs, including retries after a receiver accepted a request. This is
+at-least-once delivery, subject to expiry, overflow and permanent failures.
+
+On startup, replay in per-sink order and apply limits together with delivery-state
+updates. Discard abandoned temporary files. Corrupt committed state is an actionable
+startup error; never silently forget incidents. A failed write retains all event and
+incident mutations together in memory, logs durability degradation and increments
+`tsmon_notify_persist_errors_total{sink="state"}`. Retry the full current snapshot;
+crash durability is unavailable until a commit succeeds.
+
+Disk retries preserve batch IDs and body bytes across restarts. If any member of an
+already-attempted batch expires, drop the whole batch and count each event, rather
+than mutate its body. Whole-state snapshots trade write volume for a simple atomic
+contract; bound queues and measure commit latency.
 
 ### Open incidents
 
-A persistent queue alone doesn't make restarts safe. Suppose the collector restarts
-while `nyc-nas` is down. The in-memory state machine forgets that, so when `nyc-nas`
-comes back it goes `UNKNOWN -> UP` without a word, and the receiver's ticket never
-closes.
+Track incidents in memory even without persistence, for recovery routing. Persist
+them with queue intents when `state_dir` is set. Each includes target identity and
+definition, check, original down ID, `since`, severity and per-sink delivery state.
+Learned targets also retain stable node identity and address.
 
-So when `state_dir` is set, the collector also keeps `incidents.json`. Each entry is one
-open `target.down`: target, check, event `id`, `since`, and the sinks it went to. The file
-is rewritten (temp file, fsync, rename) whenever an incident opens or closes. After a
-restart:
-
-- A target with an open incident starts in `DOWN`, not `UNKNOWN`, and doesn't send a
-  second `target.down`.
-- When it recovers, `target.recovered` carries the original `down_event_id` and a
-  `duration_seconds` measured from the original `since`. It goes to the sinks recorded
-  in the incident, even if the config for those sinks' filters has changed since.
-- Incidents for targets or sinks removed from the config are closed with a
-  `target.recovered` that has `"reason": "removed"`, so no ticket stays open forever.
-  A removed sink can't receive it, so its entry is just dropped and logged.
+Before checks start, recreate recorded implicit reachability targets and restore
+open incidents as DOWN without another page. Closing incidents replay recovery
+intents without restoring DOWN. Recovery retains its original down ID and start time.
+Explicitly removed configured targets close with `reason: removed`. Unresolved
+implicit incidents remain open until authoritative topology reconciliation confirms
+removal; failed discovery alone never closes them. Removed sinks are skipped and
+logged. Retain persisted incident metadata even when all sinks use memory queues.
 
 ### Egress path
 
@@ -470,7 +505,7 @@ change.
 ```yaml
 collector:
   listen: 127.0.0.1:9109  # /metrics and prober status page
-  state_dir: /var/lib/tsmon  # optional; enables queue: disk and open-incident tracking
+  state_dir: /var/lib/tsmon  # optional; atomic incident and disk-delivery snapshot
 
 defaults:
   interval: 30s
@@ -514,6 +549,7 @@ heartbeat:
 targets:
   - name: nyc-core-switch
     addr: 10.20.0.1
+    network: tailnet          # use local for a directly monitored site LAN
     checks: [icmp]
   - name: nyc-nas
     addr: 10.20.0.50
@@ -553,7 +589,8 @@ The collector only sees and reaches what policy allows. Minimal grant:
 }
 ```
 
-If a target never appears in the collector's netmap, the fix is almost always a missing
+For remote tailnet targets, if an address never appears in the collector's netmap,
+the fix is often a missing
 grant. The collector should log that plainly at startup ("target X: no peer handles
 10.20.0.50; check grants to tag:monitor"). It should not keep retrying quietly.
 
@@ -572,11 +609,12 @@ standard series for free (result, latency, attempts, and so on), labeled `name` 
 - `tsmon_failure_layer_total{target,layer}` counter.
 - `tsmon_notify_sent_total{sink,type}` and `tsmon_notify_failed_total{sink,reason}`,
   where reason is `timeout`, `http_5xx`, `http_429`, or `http_4xx_permanent`.
-- `tsmon_notify_dropped_total{sink,reason}`: `queue_full`, `expired`, or `permanent`.
+- `tsmon_notify_dropped_total{sink,reason}`: `queue_full`, `expired`, `permanent`,
+  or `restart` for lost memory-sink pending payloads.
 - `tsmon_notify_persist_errors_total{sink}`: disk writes that failed and fell back to
   memory.
 - `tsmon_notify_batch_size{sink}` histogram, batched webhook sinks only.
-- `tsmon_open_incidents` gauge, from `incidents.json` when `state_dir` is set.
+- `tsmon_open_incidents` gauge, from the atomic snapshot when `state_dir` is set.
 - `tsmon_notify_queue_len{sink}` gauge and `tsmon_notify_latency_seconds{sink}`, time from
   event to confirmed delivery.
 
@@ -590,7 +628,7 @@ dashboard with no extra work.
 
 Layout, if built in this repo:
 
-```
+```text
 cmd/tsmon/
   tsmon.go          flags, config load, wiring
   netenv.go         netEnv interface + kernelEnv (phase 2 adds tsnetEnv.go)
@@ -601,7 +639,7 @@ cmd/tsmon/
   alert.go          per-target state machine, flap damping
   notify.go         Event type, dispatcher, filters, heartbeat
   queue.go          memory and disk queues behind one interface
-  incidents.go      open-incident tracking in state_dir/incidents.json
+  incidents.go      incident lifecycle and atomic notification snapshot coordinator
   webhook.go        generic webhook sink, HMAC signing, retry policy, batched mode
   slack.go          Slack incoming-webhook sink, Block Kit rendering, grouping
   notifytest.go     `tsmon notify-test` subcommand
@@ -679,16 +717,27 @@ settles the license and ownership questions.
   - A recovery reaches every sink that got the down, even when filters would drop it.
 - Batched mode: 250 events inside one window become batches of 100, 100, and 50, in
   order. A retried batch has identical body bytes and `batch_id`, with a fresh signature.
-- Disk queue crash points, run with a fake sink:
-  - Die after the temp write, before the rename. The event is gone and the temp file is
-    cleaned up.
-  - Die after the `2xx`, before the delete. The event is redelivered with the same `id`.
-  - Read-only `state_dir`. Events fall back to memory and still deliver.
-  - Files older than `max_age` at startup are expired, not sent.
-- Open incidents: restart while a target is down, then bring it back. Exactly one
-  `target.recovered` goes out, with the original `down_event_id`, and no second
-  `target.down`. Remove a down target from config and restart. It is closed with
-  `"reason": "removed"`.
+- Atomic snapshot crash points with fake sinks: before rename keeps the old state;
+  after commit but before worker distribution replays the new intent; after receiver
+  `2xx` but before acknowledgment commit may replay the same event ID. Test both
+  opening and closing incidents and multiple sinks, including the new-outage case
+  while an old recovery is retrying. A corrupt snapshot fails startup.
+- Failed writes keep incident and queue changes together in memory; a later commit
+  restores durability. Expiry and overflow also commit per-sink eligibility changes.
+- Recover while a down retries; drop a never-attempted down; lose an acknowledgment
+  after receiver acceptance. Assert the documented recovery eligibility in each case.
+- Overflow intake during recovery and leave the target UP. Reconciliation must resolve
+  its open incident without waiting for another outage; newer dirty generations survive.
+- Restart with an implicit incident while presence and learning fail. Do not emit a
+  removed recovery. Later authoritative reconciliation can establish actual removal.
+- Fail a router management service while its reachability target passes: LAN devices
+  remain alertable. Move suppressed children to healthy HA router B while A stays down:
+  release them and page any child that still fails. Reject a mixed-edge parent cycle.
+- Enqueue more than eight slow rechecks, enforce FIFO concurrency and exclude old
+  pre-release results. Verify concurrent producers cannot reorder DOWN and recovery.
+- Local LAN checks survive loss of the Tailscale router without acquiring its parent.
+  Remote Linux subnet checks fail preflight if subnet-route acceptance is disabled.
+
 - Golden-file tests for the JSON payload and the Slack Block Kit output, so a change to
   the public contract shows up as a diff in review.
 - Slack grouping under `tstest.Clock`: 25 events inside `group_wait` become one message

@@ -1,0 +1,3 @@
+# OpenSpec tracks one task per checkbox line, so tasks cannot wrap.
+config:
+  MD013: false

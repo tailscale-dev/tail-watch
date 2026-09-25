@@ -1,0 +1,47 @@
+schema: spec-driven
+
+context: |
+  Product: tail-watch, a tailnet reachability monitor. The binary is `tsmon`.
+  Source design: tailnet-reachability-monitor-design.md at the repo root. It is
+  the reference for behavior; OpenSpec specs are the contract once archived.
+
+  Tech stack:
+  - Go (version pinned in mise.toml and go.mod), module
+    github.com/tailscale-dev/tail-watch.
+  - Library dependency: tailscale.com (prober, net/ping, client/local,
+    ipn, ipn/ipnstate, tailcfg, util/backoff, tstest, tsweb). Upgrade only
+    tailscale.com; never `go get -u ./...` (breaks the pinned gvisor).
+  - Runtime: a separate process on a host running tailscaled in kernel mode,
+    tagged tag:monitor. It uses host sockets for checks and the LocalAPI for
+    Ping, WatchIPNBus and Status. tsnet is phase 2.
+  - Tooling: mise (go, bun, openspec), golangci-lint, govulncheck.
+
+  Code layout: all collector code is `package main` in cmd/tsmon/, one file
+  per concern (tsmon.go, netenv.go, config.go, checks.go, presence.go,
+  classify.go, alert.go, notify.go, queue.go, incidents.go, webhook.go,
+  slack.go, notifytest.go). Tests sit next to the code as *_test.go.
+
+  Conventions:
+  - Every network access goes through the netEnv interface, never
+    package-level dialers.
+  - Time-dependent logic takes a clock (tstest.Clock in tests), not
+    time.Now directly. prober scheduling stays separate from alert timing.
+  - Structured logging with log/slog. Secrets (URLs, HMAC keys, headers)
+    come from *_env / *_file config keys and are never logged or persisted.
+  - Metrics use the "tsmon" Prometheus namespace.
+  - Tests: table-driven unit tests, httptest.Server for sinks, golden files
+    for public payloads. No mocks of types we do not own.
+
+rules:
+  proposal:
+    - Name the design-doc section(s) the change implements.
+    - State the phase (MVP = phase 1) and list deferred phase 2/3 items as non-goals.
+  specs:
+    - Every requirement uses SHALL/MUST and has at least one scenario.
+    - Name config keys, metric names, event types and payload fields exactly as the design doc does.
+  design:
+    - Record any place the change deviates from the design doc, and why.
+  tasks:
+    - Each task names the file(s) it touches.
+    - Pair each behavior task with its test task.
+    - End with a validation group (go build, go vet, go test ./..., golangci-lint, govulncheck, markdownlint).
