@@ -2,15 +2,25 @@
 
 ## Toolchain
 
-- Go and Bun are pinned in `mise.toml`; run commands through `mise exec --` or
-  `mise run <task>` (`css`, `build`, `dev`). Bun replaces Node/Yarn; the
-  lockfile is `bun.lock`, and `build:css` uses `bun --bun` so no Node.js is
-  needed.
-- Bun blocks `@parcel/watcher`'s postinstall (a build-from-source fallback);
-  leave it untrusted, the prebuilt binary is used.
-- Tailwind CSS v4 is configured CSS-first in `css/input.css` (no
-  `tailwind.config.js`). The generated `static/css/base.css` is committed, so
-  run `mise run css` after changing templates or theme.
+- Go and Bun are pinned in `mise.toml`. Run commands through `mise exec --`
+  or `mise run <task>` (`build`, `test`, `lint`, `check`).
+- Bun is only the package manager for mise's npm backend (the OpenSpec CLI).
+  `mise.toml` sets `npm.package_manager` to `bun`. There is no Node app and
+  no `package.json`.
+- `mise run build` writes `bin/tsmon`. `mise run check` builds, tests, and
+  lints.
+
+## Layout
+
+- Collector code is `package main` in `cmd/tsmon/`: `tsmon.go`, `netenv.go`,
+  `config.go`, `checks.go`, and `results.go`. Tests sit next to that code.
+- Later phase-1 changes add `presence.go`, `classify.go`, `alert.go`, and the
+  notification files in the same directory.
+- Create only one `prober.Prober` per process. `prober.New()` registers
+  metrics on the default Prometheus registry and panics if called again.
+  Unit tests call check methods directly and do not construct a `Prober`.
+- Every network access goes through `netEnv`. Do not add a package-level
+  dialer. `tsping` name resolution may fall back to the host resolver.
 
 ## Upgrading Go dependencies
 

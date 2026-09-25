@@ -1,22 +1,15 @@
-FROM oven/bun:1.4.2-alpine AS css
+FROM golang:1.27-alpine AS build
 
 WORKDIR /src
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
-COPY css ./css
-COPY tmpl ./tmpl
-RUN bun run build:css
-
-FROM golang:1.27-alpine AS builder
-
-RUN mkdir -p /app/bin
-WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-COPY --from=css /src/static/css/base.css ./static/css/base.css
 ENV CGO_ENABLED=0
-RUN go build -o /app/bin/what .
+RUN go build -o /out/tsmon ./cmd/tsmon
 
 FROM alpine:3.24
-COPY --from=builder /app/bin/what /app/bin/what
 
-CMD ["/app/bin/what"]
+RUN adduser -D -H -u 65532 tsmon
+COPY --from=build /out/tsmon /usr/local/bin/tsmon
+USER tsmon
+ENTRYPOINT ["/usr/local/bin/tsmon"]

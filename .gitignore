@@ -20,8 +20,5 @@
 # Go workspace file
 go.work
 
-# node
-node_modules
-
 # build output
 bin/

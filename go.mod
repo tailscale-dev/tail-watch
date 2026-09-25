@@ -1,4 +1,4 @@
-module github.com/tailscale-dev/service-design
+module github.com/tailscale-dev/tail-watch
 
 go 1.27.1
 

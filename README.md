@@ -1,94 +1,157 @@
-# service-design
+# tsmon
 
-A template repository for creating tsnet services that "feel like Tailscale".
-This will be for an imaginary service named "What", for recording and sharing
-what you've been working on.
+tsmon is a reachability collector for a tailnet. It runs beside a
+kernel-mode `tailscaled`, probes the targets in a YAML file, and serves
+a status page, Prometheus metrics, and a health check.
 
-## Essential parts
+It answers a different question from the online/offline webhook: not
+whether control thinks a node is connected, but whether traffic to that
+node or to a subnet behind it actually gets through.
 
-- [ ] A `README.md` file that describes the service and how to use it, including
-      installation instructions.
-- [ ] A Dockerfile that builds the service.
-- [ ] Tailwind configuration in `css/input.css`.
-- [ ] The base HTML skeleton in `tmp/base.html`.
-- [ ] A static asset folder `static/`.
-- [ ] A `main.go` file that serves the static assets and the HTML skeleton over
-      [tsnet](https://tailscale.com/kb/1244/tsnet/).
-- [ ] The font [Inter](https://rsms.me/inter/).
+## Requirements
 
-Some other things to consider:
+- A host running `tailscaled` in kernel mode. Userspace networking cannot
+  carry ICMP to LAN addresses, so this build refuses it at startup.
+- Tag the host `tag:monitor`. tsmon logs a warning when that tag is
+  missing, because ACL grants are usually written for the tag.
+- The process must be able to open the LocalAPI socket. On Linux that is
+  `/var/run/tailscale/tailscaled.sock` unless you pass `--socket`.
 
-- Users will run this in potentially many environments, so it should be as
-  self-contained as possible given the constraints of your service.
-- Any external dependencies (aside from Tailscale) MUST be documented clearly in
-  plain English in the README.
-- The service should be as easy to run as possible. If it requires a database,
-  it should be created automatically.
-- All configuration should be done in environment variables with flag overrides,
-  and documented in the README.
-- The main page of the service should contain everything users need to know in
-  order to interact with it.
-- Tailscale is your method of authentication. You should not need to implement
-  any authentication logic.
-- Commit the generated CSS to the repository. This makes it easier to run the
-  service without having to install Bun and Tailwind.
-- Make your service one word. This makes it easier to use in URLs and
-  documentation, not to mention pronouncing it.
-- Try [Alpine.js](http://alpinejs.dev/) or [HTMX](https://htmx.org/) for
-  client-side interactivity.
+ICMP needs either unprivileged ping (`net.ipv4.ping_group_range`) or
+`CAP_NET_RAW`. If neither is available, ICMP checks fail with that
+guidance and TCP, HTTP, and tsping checks still run.
 
-## Optional parts
+## Remote subnets and local LANs
 
-- [ ] A [Nix flake](https://nixos.wiki/wiki/Flakes) for users on NixOS. This
-      should export a NixOS module that can be imported into a users' deployment
-      flake.
-- [ ] Deployment instructions for [fly.io](https://fly.io).
+`network` selects the path a target is supposed to take:
 
-## Development
+- `tailnet` (the default) means IP checks should use Tailscale. On Linux,
+  a target whose address is a literal non-Tailscale IP is treated as a
+  remote subnet. Startup fails until the host accepts subnet routes:
 
-Install [mise](https://mise.jdx.dev), which provides the pinned versions of Go
-and Bun from `mise.toml`. Clone the repo and run:
+  ```bash
+  tailscale set --accept-routes
+  ```
 
-```sh
-mise install
-mise run css
-go run . --tsnet-verbose
+  An advertised route is not an installed route. After accepting routes,
+  check the route the host will actually use:
+
+  ```bash
+  ip route get 10.20.0.1
+  ```
+
+  The answer should go out the Tailscale interface (`tailscale0`), not a
+  local gateway. Repeat that for each remote subnet you monitor.
+
+- `local` means the host's ordinary route, including a LAN the collector
+  is plugged into at a site. These checks keep working when that site's
+  Tailscale router is down. They cannot use `tsping`. Put a `network:
+  local` device in its own target; do not point an HTTP check at a
+  different host than the target's `addr`.
+
+`examples/tsmon.yaml` has both kinds of target. `nyc-core-switch` and
+`nyc-nas` are remote subnet devices behind `nyc-subnet-router`.
+`lab-printer` is on the collector's own LAN.
+
+## Build and run
+
+```bash
+mise run build
+./bin/tsmon --config examples/tsmon.yaml
 ```
 
-Then authenticate with your Tailscale account and visit your service.
+Config path order is `--config`, then `TSMON_CONFIG`, then
+`/etc/tsmon/tsmon.yaml`.
 
-## On designing tools
+Validate a file without contacting tailscaled:
 
-When you are designing tools, you are designing things that will be used
-productively. These things will be copied from, studied from, and transformed as
-people learn how to wield them. It is a lot better to start out with something
-very simple (and even a little bit ugly) that is easy to understand and modify,
-than it is to start out with something complex and beautiful that is hard to
-understand and modify. Twitter succeeded because it was as easy to use as
-sending an SMS to 40404. It was not because it was a beautiful website. The main
-difference that makes something a tool is it being adaptable to a given usecase.
-[tclip](https://tailscale.dev/blog/tclip) is a tool because it's a place to put
-data to share with your coworkers. It can be part of a greater flow or just a
-one-off thing to share code snippets with friends. The point is that it's
-adaptable enough to be used in usecases that you may have never dreamed
-possible.
+```bash
+./bin/tsmon check-config --config examples/tsmon.yaml
+```
 
-When you are designing such a tool, start with the problem you want to solve. In
-the case of "what", here is such a problem statement:
+Run every check once, print a line each, and exit non-zero on failure:
 
-> The standup flow is forward-looking and reality can and will diverge from what
-> we hope we will get done. What if there was a place to explicitly share what
-> we've already accomplished?
+```bash
+./bin/tsmon --once --config examples/tsmon.yaml
+```
 
-Everything else should flow out from there. The goal is to share with your
-coworkers what you've done, what if there was a text box that you could only
-update at the end of your workday with a summary of what you accomplished? How
-would it look like to see what other people are doing? What are the most
-important parts of this? How would you hook things in to drive people towards
-this tool? What is the minimal expression that can help you test your
-hypothesis?
+`--version` prints the build version. `--log-level` (or `TSMON_LOG_LEVEL`)
+is `debug`, `info`, `warn`, or `error`. Logs are JSON on stderr. Debug
+logs include every check result.
 
-The rest will come from trial, error, experimentation, failure, and eventual
-success.
+| Flag | Env | Default |
+| --- | --- | --- |
+| `--config` | `TSMON_CONFIG` | `/etc/tsmon/tsmon.yaml` |
+| `--listen` | | `127.0.0.1:9109` or `collector.listen` |
+| `--socket` | | platform LocalAPI socket |
+| `--log-level` | `TSMON_LOG_LEVEL` | `info` |
+| `--once` | | run one pass and exit |
+| `--version` | | print the version and exit |
 
-Start from the problem, and the solution will follow.
+HTTP endpoints on the listen address:
+
+- `/` prober status page
+- `/metrics` Prometheus text, `tsmon_` series labeled `target`, `check`,
+  `site`, and `class`
+- `/healthz` returns `200` and `ok`
+
+SIGINT and SIGTERM stop new work, cancel running checks, and exit 0.
+
+## Docker
+
+The image listens as user `tsmon` (uid 65532) and does not embed a
+Tailscale node. Use host networking so checks share the host routes, and
+mount the LocalAPI socket. That socket has to be readable by uid 65532,
+or pass a `--user` / `--group-add` that can read it.
+
+```bash
+docker build -t tsmon .
+docker run --rm --network host \
+  -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock \
+  -v /etc/tsmon/tsmon.yaml:/etc/tsmon/tsmon.yaml:ro \
+  tsmon
+```
+
+`collector.state_dir` is accepted and unused until notification delivery
+lands. Do not put secrets in the config file.
+
+## ACLs
+
+The collector sees only what policy allows. A missing grant shows up as
+`no peer handles <addr>; check grants to tag:monitor`.
+
+```jsonc
+{
+  "tagOwners": { "tag:monitor": ["autogroup:admin"] },
+  "grants": [
+    {
+      "src": ["tag:monitor"],
+      "dst": ["tag:router", "tag:server"],
+      "ip": ["*"]
+    },
+    {
+      "src": ["tag:monitor"],
+      "dst": ["10.20.0.0/16"],
+      "ip": ["icmp:*", "tcp:22", "tcp:445", "tcp:443", "tcp:5001"]
+    }
+  ]
+}
+```
+
+## Checks
+
+| Check | Passes when |
+| --- | --- |
+| `icmp` | one echo reply arrives before the timeout |
+| `tcp:<port>` | a TCP handshake completes; the socket is closed without sending |
+| `http:<url>` | status is 2xx or 3xx; optional `\|text` must appear in the first 1 MiB |
+| `tsping` | tailscaled reports a disco pong for the target address |
+
+`http` does not follow redirects. `insecure_tls: true` on a target skips
+certificate verification for devices that present a private certificate.
+`tls` checks are rejected until phase 2.
+
+An explicit `parent` must name another target whose only check is `icmp`
+or `tsping`. Parent cycles are rejected. Learned tailnet parents arrive
+in a later change; keep a router's reachability target separate from any
+service check on that same node.
