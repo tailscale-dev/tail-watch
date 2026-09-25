@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to retry publishing assets for (e.g. v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/ci.yml
+
+  release-please:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+
+  publish:
+    needs: release-please
+    if: >-
+      always() && !cancelled() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Run here because tags created with GITHUB_TOKEN do not trigger workflows.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+      - name: Verify release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git show-ref --verify "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "$RELEASE_TAG")"
+          gh release view "$RELEASE_TAG"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: v2.18.2
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

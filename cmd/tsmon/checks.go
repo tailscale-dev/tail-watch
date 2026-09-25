@@ -25,6 +25,8 @@ import (
 )
 
 const (
+	checkICMP      = "icmp"
+	checkTSPing    = "tsping"
 	httpBodyLimit  = 1 << 20
 	httpExcerpt    = 300
 	statusCacheTTL = 30 * time.Second
@@ -40,9 +42,9 @@ type check interface {
 
 func parseCheck(s string) (check, error) {
 	switch {
-	case s == "icmp":
+	case s == checkICMP:
 		return icmpCheck{}, nil
-	case s == "tsping":
+	case s == checkTSPing:
 		return tspingCheck{}, nil
 	case strings.HasPrefix(s, "tls:"):
 		return nil, errors.New("tls checks are not supported in this version")
@@ -68,8 +70,8 @@ func parseCheck(s string) (check, error) {
 
 type icmpCheck struct{}
 
-func (icmpCheck) String() string { return "icmp" }
-func (icmpCheck) Kind() string   { return "icmp" }
+func (icmpCheck) String() string { return checkICMP }
+func (icmpCheck) Kind() string   { return checkICMP }
 
 func (c icmpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, error) {
 	res := Result{Target: t, Check: c.String(), Kind: c.Kind()}
@@ -79,7 +81,8 @@ func (c icmpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, erro
 		return res, err
 	}
 	p := ping.New(ctx, func(format string, args ...any) {
-		slog.Debug(fmt.Sprintf(format, args...))
+		//nolint:sloglint // Checks use the CLI-configured process logger.
+		slog.DebugContext(ctx, fmt.Sprintf(format, args...))
 	}, env)
 	p.Unprivileged = env.UnprivilegedICMP()
 	defer func() { _ = p.Close() }()
@@ -154,7 +157,8 @@ func (c tcpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, error
 		return res, err
 	}
 	if cerr := conn.Close(); cerr != nil {
-		slog.Debug("close tcp", "err", cerr)
+		//nolint:sloglint // Checks use the CLI-configured process logger.
+		slog.DebugContext(ctx, "close tcp", "err", cerr)
 	}
 	return res, nil
 }
@@ -174,7 +178,7 @@ func (c httpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, erro
 	res := Result{Target: t, Check: c.String(), Kind: c.Kind()}
 	start := time.Now()
 	transport := &http.Transport{
-		Proxy:             func(*http.Request) (*url.URL, error) { return nil, nil },
+		Proxy:             nil, // Probe the target directly, ignoring environment proxies.
 		DialContext:       env.Dial,
 		DisableKeepAlives: true,
 		ForceAttemptHTTP2: false,
@@ -182,7 +186,9 @@ func (c httpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, erro
 	if t != nil && t.InsecureTLS {
 		// Devices such as a NAS often present a self-signed certificate.
 		// Certificate expiry is the phase-2 tls check.
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // per-target insecure_tls opt-in
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // Per-target insecure_tls opt-in.
+		}
 	}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{
@@ -233,8 +239,8 @@ type tspingCheck struct {
 	resolver *tsResolver
 }
 
-func (tspingCheck) String() string { return "tsping" }
-func (tspingCheck) Kind() string   { return "tsping" }
+func (tspingCheck) String() string { return checkTSPing }
+func (tspingCheck) Kind() string   { return checkTSPing }
 
 func (c tspingCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, error) {
 	r := c.resolver
@@ -289,7 +295,7 @@ func noMatchingPeer(err error, pr *ipnstate.PingResult) bool {
 }
 
 // pathKind reports direct, peer_relay, or derp from a pong.
-func pathKind(pr *ipnstate.PingResult) (kind, detail string) {
+func pathKind(pr *ipnstate.PingResult) (string, string) {
 	if pr == nil {
 		return "", ""
 	}
@@ -351,7 +357,11 @@ type statusCache struct {
 	st    *ipnstate.Status
 }
 
-func newTSResolver(clock tstime.Clock, log *slog.Logger, fetch func(context.Context) (*ipnstate.Status, error)) *tsResolver {
+func newTSResolver(
+	clock tstime.Clock,
+	log *slog.Logger,
+	fetch func(context.Context) (*ipnstate.Status, error),
+) *tsResolver {
 	if clock == nil {
 		clock = tstime.StdClock{}
 	}
@@ -373,7 +383,7 @@ func (r *tsResolver) resolve(ctx context.Context, addr string) (netip.Addr, erro
 	if err == nil {
 		if ip, warn, ok := matchPeer(addr, st); ok {
 			if warn != "" && r.log != nil {
-				r.log.Warn(warn, "addr", addr)
+				r.log.WarnContext(ctx, warn, "addr", addr)
 			}
 			return ip, nil
 		}
@@ -419,6 +429,37 @@ type peerHit struct {
 	prio int
 }
 
+// matchPeerName ranks a peer's full DNS name, short DNS name, and hostname.
+func matchPeerName(ps *ipnstate.PeerStatus, want, suffix string) (peerHit, bool) {
+	if ps == nil {
+		return peerHit{}, false
+	}
+	ip, ok := peerTailscaleIP(ps)
+	if !ok {
+		return peerHit{}, false
+	}
+	dns := strings.TrimSuffix(ps.DNSName, ".")
+	short := dns
+	if suffix != "" {
+		suf := "." + suffix
+		if strings.HasSuffix(strings.ToLower(short), strings.ToLower(suf)) {
+			short = short[:len(short)-len(suf)]
+		}
+	}
+	hit := peerHit{ip: ip, dns: dns, host: ps.HostName}
+	switch {
+	case dns != "" && strings.EqualFold(dns, want):
+		hit.prio = 0
+	case short != "" && !strings.EqualFold(short, dns) && strings.EqualFold(short, want):
+		hit.prio = 1
+	case ps.HostName != "" && strings.EqualFold(ps.HostName, want):
+		hit.prio = 2
+	default:
+		return peerHit{}, false
+	}
+	return hit, true
+}
+
 func matchPeer(addr string, st *ipnstate.Status) (netip.Addr, string, bool) {
 	if st == nil {
 		return netip.Addr{}, "", false
@@ -430,32 +471,8 @@ func matchPeer(addr string, st *ipnstate.Status) (netip.Addr, string, bool) {
 	suffix := strings.TrimSuffix(magicSuffix(st), ".")
 	var hits []peerHit
 	consider := func(ps *ipnstate.PeerStatus) {
-		if ps == nil {
-			return
-		}
-		ip, ok := peerTailscaleIP(ps)
-		if !ok {
-			return
-		}
-		dns := strings.TrimSuffix(ps.DNSName, ".")
-		short := dns
-		if suffix != "" {
-			suf := "." + suffix
-			if strings.HasSuffix(strings.ToLower(short), strings.ToLower(suf)) {
-				short = short[:len(short)-len(suf)]
-			}
-		}
-		prio := -1
-		switch {
-		case dns != "" && strings.EqualFold(dns, want):
-			prio = 0
-		case short != "" && !strings.EqualFold(short, dns) && strings.EqualFold(short, want):
-			prio = 1
-		case ps.HostName != "" && strings.EqualFold(ps.HostName, want):
-			prio = 2
-		}
-		if prio >= 0 {
-			hits = append(hits, peerHit{ip: ip, dns: dns, host: ps.HostName, prio: prio})
+		if hit, ok := matchPeerName(ps, want, suffix); ok {
+			hits = append(hits, hit)
 		}
 	}
 	consider(st.Self)

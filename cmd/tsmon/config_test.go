@@ -10,6 +10,7 @@ import (
 )
 
 func TestParseDesignExample(t *testing.T) {
+	t.Parallel()
 	const src = `
 collector:
   listen: 127.0.0.1:9109
@@ -97,18 +98,29 @@ func TestDefaultsResolution(t *testing.T) {
 		{
 			name:     "per-target override",
 			src:      "defaults: {interval: 30s}\ntargets: [{name: nyc-subnet-router, addr: nyc-router, checks: [tsping], interval: 15s}]",
-			interval: 15 * time.Second, timeout: 5 * time.Second, fail: 3, window: 15 * time.Minute,
+			interval: 15 * time.Second,
+			timeout:  5 * time.Second,
+			fail:     3,
+			window:   15 * time.Minute,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg, err := parseConfig([]byte(tt.src))
 			if err != nil {
 				t.Fatal(err)
 			}
 			got := cfg.Targets[0]
-			if got.Interval != tt.interval || got.Timeout != tt.timeout || got.FailThreshold != tt.fail || got.FlapWindow != tt.window {
-				t.Fatalf("got interval=%s timeout=%s fail=%d window=%s", got.Interval, got.Timeout, got.FailThreshold, got.FlapWindow)
+			if got.Interval != tt.interval || got.Timeout != tt.timeout || got.FailThreshold != tt.fail ||
+				got.FlapWindow != tt.window {
+				t.Fatalf(
+					"got interval=%s timeout=%s fail=%d window=%s",
+					got.Interval,
+					got.Timeout,
+					got.FailThreshold,
+					got.FlapWindow,
+				)
 			}
 			if got.RecoverThreshold != 2 || got.FlapLimit != 4 || got.Severity != SeverityPage {
 				t.Fatalf("defaults: %+v", got)
@@ -119,7 +131,14 @@ func TestDefaultsResolution(t *testing.T) {
 
 func TestCheckParsing(t *testing.T) {
 	t.Parallel()
-	ok := []string{"icmp", "tcp:1", "tcp:65535", "tsping", "http:https://10.0.0.1/|DSM", "http:http://host.example/health"}
+	ok := []string{
+		"icmp",
+		"tcp:1",
+		"tcp:65535",
+		"tsping",
+		"http:https://10.0.0.1/|DSM",
+		"http:http://host.example/health",
+	}
 	for _, s := range ok {
 		if _, err := parseCheck(s); err != nil {
 			t.Errorf("parse %q: %v", s, err)
@@ -237,6 +256,7 @@ targets:
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := parseConfig([]byte(tt.src))
 			if err == nil {
 				t.Fatal("expected error")
@@ -278,6 +298,7 @@ func TestConfigPathAndMissingFile(t *testing.T) {
 }
 
 func TestExampleConfig(t *testing.T) {
+	t.Parallel()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("caller")
@@ -306,6 +327,7 @@ func TestExampleConfig(t *testing.T) {
 }
 
 func TestListenFlagOverride(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{Collector: CollectorConfig{Listen: "127.0.0.1:1"}}
 	if got := cfg.ListenAddr("127.0.0.1:2"); got != "127.0.0.1:2" {
 		t.Fatal(got)

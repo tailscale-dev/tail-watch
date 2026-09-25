@@ -96,7 +96,7 @@ func resolveConfigPath(flag, env string) string {
 }
 
 func loadConfig(path string) (*Config, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // The local operator explicitly selects the config path.
 	if err != nil {
 		return nil, fmt.Errorf("config file %s: %w", path, err)
 	}
@@ -152,6 +152,7 @@ type yamlDuration struct {
 	err error
 }
 
+//nolint:nilerr,unparam // YAML requires an error return; failures are collected in d.err for aggregate validation.
 func (d *yamlDuration) UnmarshalYAML(value *yaml.Node) error {
 	if value.Tag == "!!null" {
 		return nil
@@ -253,11 +254,27 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 		}
 		pi, ok := byName[t.Parent]
 		if !ok || t.Parent == "" {
-			errs = append(errs, fmt.Errorf("targets[%d].parent: target %s: parent %q does not name a target", i, targetLabel(t), t.Parent))
+			errs = append(
+				errs,
+				fmt.Errorf(
+					"targets[%d].parent: target %s: parent %q does not name a target",
+					i,
+					targetLabel(t),
+					t.Parent,
+				),
+			)
 			continue
 		}
 		if checksOK[pi] && !reachabilityOnly(cfg.Targets[pi]) {
-			errs = append(errs, fmt.Errorf("targets[%d].parent: target %s: parent %q must have exactly one icmp or tsping check", i, targetLabel(t), t.Parent))
+			errs = append(
+				errs,
+				fmt.Errorf(
+					"targets[%d].parent: target %s: parent %q must have exactly one icmp or tsping check",
+					i,
+					targetLabel(t),
+					t.Parent,
+				),
+			)
 		}
 	}
 	errs = append(errs, parentCycles(cfg.Targets, byName)...)
@@ -299,7 +316,10 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[str
 	case string(SeverityWarn):
 		t.Severity = SeverityWarn
 	default:
-		*errs = append(*errs, fmt.Errorf("%s.severity: target %s: severity %q must be page or warn", loc, targetLabel(t), rt.Severity))
+		*errs = append(
+			*errs,
+			fmt.Errorf("%s.severity: target %s: severity %q must be page or warn", loc, targetLabel(t), rt.Severity),
+		)
 	}
 	switch rt.Network {
 	case "", string(NetworkTailnet):
@@ -307,7 +327,10 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[str
 	case string(NetworkLocal):
 		t.Network = NetworkLocal
 	default:
-		*errs = append(*errs, fmt.Errorf("%s.network: target %s: network %q must be tailnet or local", loc, targetLabel(t), rt.Network))
+		*errs = append(
+			*errs,
+			fmt.Errorf("%s.network: target %s: network %q must be tailnet or local", loc, targetLabel(t), rt.Network),
+		)
 	}
 
 	applyDur(errs, loc+".interval", rt.Interval, &t.Interval)
@@ -321,10 +344,21 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[str
 		*errs = append(*errs, fmt.Errorf("%s.interval: target %s: interval must be positive", loc, targetLabel(t)))
 	}
 	if t.Timeout <= 0 || (t.Interval > 0 && t.Timeout >= t.Interval) {
-		*errs = append(*errs, fmt.Errorf("%s.timeout: target %s: timeout must be greater than 0 and less than interval %s", loc, targetLabel(t), t.Interval))
+		*errs = append(
+			*errs,
+			fmt.Errorf(
+				"%s.timeout: target %s: timeout must be greater than 0 and less than interval %s",
+				loc,
+				targetLabel(t),
+				t.Interval,
+			),
+		)
 	}
 	if t.FlapWindow <= 0 {
-		*errs = append(*errs, fmt.Errorf("%s.flap_window: target %s: flap_window must be positive", loc, targetLabel(t)))
+		*errs = append(
+			*errs,
+			fmt.Errorf("%s.flap_window: target %s: flap_window must be positive", loc, targetLabel(t)),
+		)
 	}
 	if t.FailThreshold < 1 {
 		*errs = append(*errs, fmt.Errorf("%s.fail_threshold: target %s: must be >= 1", loc, targetLabel(t)))
@@ -336,32 +370,56 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[str
 		*errs = append(*errs, fmt.Errorf("%s.flap_limit: target %s: must be >= 1", loc, targetLabel(t)))
 	}
 
-	if len(rt.Checks) == 0 {
-		*errs = append(*errs, fmt.Errorf("%s.checks: target %s: checks must not be empty", loc, targetLabel(t)))
-		return t, false
+	ok := resolveChecks(errs, loc, rt.Checks, &t)
+	return t, ok
+}
+
+func resolveChecks(errs *[]error, loc string, rawChecks []string, t *Target) bool {
+	if len(rawChecks) == 0 {
+		*errs = append(*errs, fmt.Errorf("%s.checks: target %s: checks must not be empty", loc, targetLabel(*t)))
+		return false
 	}
 	ok := true
 	seenChk := map[string]struct{}{}
-	for j, rawChk := range rt.Checks {
+	for j, rawChk := range rawChecks {
 		c, err := parseCheck(rawChk)
 		if err != nil {
 			ok = false
-			*errs = append(*errs, fmt.Errorf("%s.checks[%d]: target %s: check %q: %w", loc, j, targetLabel(t), rawChk, err))
+			*errs = append(
+				*errs,
+				fmt.Errorf("%s.checks[%d]: target %s: check %q: %w", loc, j, targetLabel(*t), rawChk, err),
+			)
 			continue
 		}
 		if _, dup := seenChk[c.String()]; dup {
-			*errs = append(*errs, fmt.Errorf("%s.checks[%d]: target %s: duplicate check %q", loc, j, targetLabel(t), c.String()))
+			*errs = append(
+				*errs,
+				fmt.Errorf("%s.checks[%d]: target %s: duplicate check %q", loc, j, targetLabel(*t), c.String()),
+			)
 		}
 		seenChk[c.String()] = struct{}{}
-		if t.Network == NetworkLocal && c.Kind() == "tsping" {
-			*errs = append(*errs, fmt.Errorf("%s.checks[%d]: target %s: tsping is not valid for network local", loc, j, targetLabel(t)))
+		if t.Network == NetworkLocal && c.Kind() == checkTSPing {
+			*errs = append(
+				*errs,
+				fmt.Errorf("%s.checks[%d]: target %s: tsping is not valid for network local", loc, j, targetLabel(*t)),
+			)
 		}
 		if h, isHTTP := c.(httpCheck); isHTTP && t.Addr != "" && !sameHost(t.Addr, h.host) {
-			*errs = append(*errs, fmt.Errorf("%s.checks[%d]: target %s: http URL host %q does not match addr %q", loc, j, targetLabel(t), h.host, t.Addr))
+			*errs = append(
+				*errs,
+				fmt.Errorf(
+					"%s.checks[%d]: target %s: http URL host %q does not match addr %q",
+					loc,
+					j,
+					targetLabel(*t),
+					h.host,
+					t.Addr,
+				),
+			)
 		}
 		t.Checks = append(t.Checks, c)
 	}
-	return t, ok
+	return ok
 }
 
 func applyDur(errs *[]error, loc string, v yamlDuration, dst *time.Duration) {
@@ -385,7 +443,7 @@ func reachabilityOnly(t Target) bool {
 		return false
 	}
 	k := t.Checks[0].Kind()
-	return k == "icmp" || k == "tsping"
+	return k == checkICMP || k == checkTSPing
 }
 
 func parentCycles(targets []Target, byName map[string]int) []error {

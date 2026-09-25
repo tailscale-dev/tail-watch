@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -15,7 +16,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -26,6 +26,7 @@ import (
 )
 
 func TestVersionAndCheckConfig(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code %d stderr %s", code, stderr.String())
@@ -44,7 +45,8 @@ func TestVersionAndCheckConfig(t *testing.T) {
 	if code := run([]string{"check-config", "--config", ok}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code %d stderr %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "a interval=30s timeout=5s") || !strings.Contains(stdout.String(), "checks=icmp") {
+	if !strings.Contains(stdout.String(), "a interval=30s timeout=5s") ||
+		!strings.Contains(stdout.String(), "checks=icmp") {
 		t.Fatalf("stdout %s", stdout.String())
 	}
 
@@ -59,17 +61,20 @@ func TestVersionAndCheckConfig(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // run installs a process-wide default logger.
 func TestMissingConfigDoesNotDial(t *testing.T) {
+	previousLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
 	sock := filepath.Join(t.TempDir(), "tailscaled.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = ln.Close() }()
+	t.Cleanup(func() { _ = ln.Close() })
 	accepted := make(chan struct{}, 1)
 	go func() {
-		c, err := ln.Accept()
-		if err == nil {
+		c, acceptErr := ln.Accept()
+		if acceptErr == nil {
 			accepted <- struct{}{}
 			_ = c.Close()
 		}
@@ -87,7 +92,9 @@ func TestMissingConfigDoesNotDial(t *testing.T) {
 	}
 }
 
+//nolint:gocognit // Independent preflight scenarios keep their assertions next to the inputs.
 func TestPreflight(t *testing.T) {
+	t.Parallel()
 	running := func() *ipnstate.Status {
 		tags := views.SliceOf([]string{"tag:monitor"})
 		return &ipnstate.Status{
@@ -104,18 +111,25 @@ func TestPreflight(t *testing.T) {
 	loop := []Target{{Name: "lo", Addr: "127.0.0.1", Network: NetworkTailnet, Checks: []check{tcpCheck{port: 9}}}}
 
 	t.Run("needs login", func(t *testing.T) {
-		_, err := evaluatePreflight(preflightInput{Status: &ipnstate.Status{BackendState: ipn.NeedsLogin.String()}, Socket: "/run/ts.sock"})
-		if err == nil || !strings.Contains(err.Error(), "tailscale up") || !strings.Contains(err.Error(), "NeedsLogin") {
+		t.Parallel()
+		_, err := evaluatePreflight(
+			preflightInput{Status: &ipnstate.Status{BackendState: ipn.NeedsLogin.String()}, Socket: "/run/ts.sock"},
+		)
+		if err == nil || !strings.Contains(err.Error(), "tailscale up") ||
+			!strings.Contains(err.Error(), "NeedsLogin") {
 			t.Fatal(err)
 		}
 	})
 	t.Run("unreachable", func(t *testing.T) {
+		t.Parallel()
 		_, err := evaluatePreflight(preflightInput{Socket: "/run/ts.sock"})
-		if err == nil || !strings.Contains(err.Error(), "not reachable") || !strings.Contains(err.Error(), "/run/ts.sock") {
+		if err == nil || !strings.Contains(err.Error(), "not reachable") ||
+			!strings.Contains(err.Error(), "/run/ts.sock") {
 			t.Fatal(err)
 		}
 	})
 	t.Run("userspace", func(t *testing.T) {
+		t.Parallel()
 		st := running()
 		st.TUN = false
 		_, err := evaluatePreflight(preflightInput{Status: st, GOOS: "linux"})
@@ -124,6 +138,7 @@ func TestPreflight(t *testing.T) {
 		}
 	})
 	t.Run("accept routes", func(t *testing.T) {
+		t.Parallel()
 		_, err := evaluatePreflight(preflightInput{
 			Status:  running(),
 			Prefs:   &ipn.Prefs{RouteAll: false},
@@ -135,6 +150,7 @@ func TestPreflight(t *testing.T) {
 		}
 	})
 	t.Run("routes accepted", func(t *testing.T) {
+		t.Parallel()
 		res, err := evaluatePreflight(preflightInput{
 			Status:  running(),
 			Prefs:   &ipn.Prefs{RouteAll: true},
@@ -144,16 +160,19 @@ func TestPreflight(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if res.Hostname != "monitor" || len(res.IPs) != 1 || !strings.Contains(strings.Join(res.Tags, ","), "tag:monitor") {
+		if res.Hostname != "monitor" || len(res.IPs) != 1 ||
+			!strings.Contains(strings.Join(res.Tags, ","), "tag:monitor") {
 			t.Fatalf("identity %+v", res)
 		}
 	})
 	t.Run("loopback does not need routes", func(t *testing.T) {
+		t.Parallel()
 		if _, err := evaluatePreflight(preflightInput{Status: running(), Targets: loop, GOOS: "linux"}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Run("exit node", func(t *testing.T) {
+		t.Parallel()
 		st := running()
 		st.ExitNodeStatus = &ipnstate.ExitNodeStatus{ID: "exit"}
 		res, err := evaluatePreflight(preflightInput{Status: st, GOOS: "linux"})
@@ -165,6 +184,7 @@ func TestPreflight(t *testing.T) {
 		}
 	})
 	t.Run("missing tag", func(t *testing.T) {
+		t.Parallel()
 		st := running()
 		st.Self.Tags = nil
 		res, err := evaluatePreflight(preflightInput{Status: st, GOOS: "linux", Targets: loop})
@@ -177,20 +197,22 @@ func TestPreflight(t *testing.T) {
 	})
 }
 
+//nolint:gocognit // End-to-end command scenarios share listener and config setup.
 func TestCommandIntegration(t *testing.T) {
+	t.Parallel()
 	bin := buildTsmon(t)
 	sock, closeAPI := fakeTailscaled(t, runningStatus(), &ipn.Prefs{RouteAll: true})
-	defer closeAPI()
+	t.Cleanup(closeAPI)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = ln.Close() }()
+	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		for {
-			c, err := ln.Accept()
-			if err != nil {
+			c, acceptErr := ln.Accept()
+			if acceptErr != nil {
 				return
 			}
 			_ = c.Close()
@@ -222,6 +244,7 @@ targets:
 `, closedPort))
 
 	t.Run("once pass", func(t *testing.T) {
+		t.Parallel()
 		out, errOut, code := runBin(t, bin, nil, "--once", "--config", passPath, "--socket", sock)
 		if code != 0 {
 			t.Fatalf("code %d\nstdout %s\nstderr %s", code, out, errOut)
@@ -231,6 +254,7 @@ targets:
 		}
 	})
 	t.Run("once fail", func(t *testing.T) {
+		t.Parallel()
 		out, errOut, code := runBin(t, bin, nil, "--once", "--config", failPath, "--socket", sock)
 		if code != 1 {
 			t.Fatalf("code %d\nstdout %s\nstderr %s", code, out, errOut)
@@ -240,7 +264,17 @@ targets:
 		}
 	})
 	t.Run("debug logs", func(t *testing.T) {
-		_, errOut, code := runBin(t, bin, []string{"TSMON_LOG_LEVEL=debug"}, "--once", "--config", passPath, "--socket", sock)
+		t.Parallel()
+		_, errOut, code := runBin(
+			t,
+			bin,
+			[]string{"TSMON_LOG_LEVEL=debug"},
+			"--once",
+			"--config",
+			passPath,
+			"--socket",
+			sock,
+		)
 		if code != 0 {
 			t.Fatalf("code %d stderr %s", code, errOut)
 		}
@@ -261,14 +295,12 @@ targets:
     timeout: 5s
     checks: ["tcp:%d"]
 `, httpPort, openPort))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "--config", httpPath, "--socket", sock)
+	cmd := exec.CommandContext(t.Context(), bin, "--config", httpPath, "--socket", sock)
 	cmd.Env = os.Environ()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+	if startErr := cmd.Start(); startErr != nil {
+		t.Fatal(startErr)
 	}
 	defer func() {
 		if cmd.Process != nil {
@@ -282,7 +314,9 @@ targets:
 		t.Fatalf("health %q", health)
 	}
 	metrics := httpGet(t, base+"/metrics")
-	if !strings.Contains(metrics, "tsmon_") || !strings.Contains(metrics, `target="loop"`) || !strings.Contains(metrics, `site="lab"`) || !strings.Contains(metrics, `class="tcp"`) {
+	if !strings.Contains(metrics, "tsmon_") || !strings.Contains(metrics, `target="loop"`) ||
+		!strings.Contains(metrics, `site="lab"`) ||
+		!strings.Contains(metrics, `class="tcp"`) {
 		t.Fatalf("metrics %s", metrics)
 	}
 	status := httpGet(t, base+"/")
@@ -290,15 +324,15 @@ targets:
 		t.Fatalf("status page missing target: %s", status[:min(200, len(status))])
 	}
 
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
+	if signalErr := cmd.Process.Signal(syscall.SIGTERM); signalErr != nil {
+		t.Fatal(signalErr)
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("SIGTERM exit %v stderr %s", err, stderr.String())
+	case waitErr := <-done:
+		if waitErr != nil {
+			t.Fatalf("SIGTERM exit %v stderr %s", waitErr, stderr.String())
 		}
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
@@ -307,9 +341,10 @@ targets:
 }
 
 func TestSIGTERM(t *testing.T) {
+	t.Parallel()
 	bin := buildTsmon(t)
 	sock, closeAPI := fakeTailscaled(t, runningStatus(), &ipn.Prefs{RouteAll: true})
-	defer closeAPI()
+	t.Cleanup(closeAPI)
 	port := freePort(t)
 	path := writeCfg(t, fmt.Sprintf(`
 collector:
@@ -325,12 +360,12 @@ targets:
 	cmd.Env = os.Environ()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+	if startErr := cmd.Start(); startErr != nil {
+		t.Fatal(startErr)
 	}
 	waitHTTP(t, fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
+	if signalErr := cmd.Process.Signal(syscall.SIGTERM); signalErr != nil {
+		t.Fatal(signalErr)
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -403,30 +438,13 @@ func writeCfg(t *testing.T, src string) string {
 	return path
 }
 
-var (
-	binOnce sync.Once
-	binPath string
-	binErr  error
-)
-
 func buildTsmon(t *testing.T) string {
 	t.Helper()
-	binOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "tsmon-bin")
-		if err != nil {
-			binErr = err
-			return
-		}
-		binPath = filepath.Join(dir, "tsmon")
-		cmd := exec.Command("go", "build", "-o", binPath, ".")
-		cmd.Dir = packageDir(t)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			binErr = fmt.Errorf("build: %w\n%s", err, out)
-		}
-	})
-	if binErr != nil {
-		t.Fatal(binErr)
+	binPath := filepath.Join(t.TempDir(), "tsmon")
+	cmd := exec.Command("go", "build", "-o", binPath, ".")
+	cmd.Dir = packageDir(t)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
 	}
 	return binPath
 }
@@ -452,8 +470,7 @@ func runBin(t *testing.T, bin string, extraEnv []string, args ...string) (string
 	err := cmd.Run()
 	code := 0
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			code = ee.ExitCode()
 		} else {
 			t.Fatalf("run: %v\nstderr %s", err, stderr.String())

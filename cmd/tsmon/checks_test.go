@@ -19,6 +19,7 @@ import (
 )
 
 func TestTCPOpenAndRefused(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -26,8 +27,8 @@ func TestTCPOpenAndRefused(t *testing.T) {
 	defer func() { _ = ln.Close() }()
 	go func() {
 		for {
-			c, err := ln.Accept()
-			if err != nil {
+			c, acceptErr := ln.Accept()
+			if acceptErr != nil {
 				return
 			}
 			_ = c.Close()
@@ -55,7 +56,9 @@ func TestTCPOpenAndRefused(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest,tparallel // Subtests share request counts to verify that redirects are not followed.
 func TestHTTPChecks(t *testing.T) {
+	t.Parallel()
 	hits := map[string]int{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits[r.URL.Path]++
@@ -101,12 +104,13 @@ func TestHTTPChecks(t *testing.T) {
 	t.Run("missing text", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+srv.URL+"/missing|DSM")
 		_, err := chk.Run(context.Background(), env, &Target{Addr: addr})
-		if err == nil || !strings.Contains(err.Error(), "DSM") || !strings.Contains(err.Error(), strings.Repeat("a", 300)) {
+		if err == nil || !strings.Contains(err.Error(), "DSM") ||
+			!strings.Contains(err.Error(), strings.Repeat("a", 300)) {
 			t.Fatal(err)
 		}
 	})
 
-	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "ok")
 	}))
 	defer tlsSrv.Close()
@@ -128,9 +132,11 @@ func TestHTTPChecks(t *testing.T) {
 }
 
 func TestICMPPermissionAndFamily(t *testing.T) {
+	t.Parallel()
 	env := &fakeEnv{listenErr: errors.New("listen ip4:icmp 0.0.0.0: socket: operation not permitted")}
 	_, err := icmpCheck{}.Run(context.Background(), env, &Target{Name: "lo", Addr: "127.0.0.1"})
-	if err == nil || !strings.Contains(err.Error(), "net.ipv4.ping_group_range") || !strings.Contains(err.Error(), "CAP_NET_RAW") {
+	if err == nil || !strings.Contains(err.Error(), "net.ipv4.ping_group_range") ||
+		!strings.Contains(err.Error(), "CAP_NET_RAW") {
 		t.Fatalf("err %v", err)
 	}
 	if env.lastListen != "ip4:icmp" {
@@ -144,6 +150,7 @@ func TestICMPPermissionAndFamily(t *testing.T) {
 }
 
 func TestICMPLoopback(t *testing.T) {
+	t.Parallel()
 	env := newKernelEnv("")
 	if !canICMP(env) {
 		t.Skip("host allows no ICMP socket")
@@ -177,7 +184,8 @@ func canICMP(env *kernelEnv) bool {
 }
 
 func TestRunCheckRecordsTimeout(t *testing.T) {
-	env := &fakeEnv{dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+	t.Parallel()
+	env := &fakeEnv{dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}}
@@ -195,6 +203,7 @@ func TestRunCheckRecordsTimeout(t *testing.T) {
 }
 
 func TestMatchPeer(t *testing.T) {
+	t.Parallel()
 	v4 := netip.MustParseAddr("100.64.0.2")
 	v6 := netip.MustParseAddr("fd7a:115c:a1e0::2")
 	other := netip.MustParseAddr("100.64.0.9")
@@ -242,6 +251,7 @@ func TestMatchPeer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ip, warn, ok := matchPeer(tt.addr, st)
 			if tt.missing {
 				if ok {
@@ -260,6 +270,7 @@ func TestMatchPeer(t *testing.T) {
 }
 
 func TestStatusCache(t *testing.T) {
+	t.Parallel()
 	clk := tstest.NewClock(tstest.ClockOpts{Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
 	var calls int
 	cache := &statusCache{
@@ -289,6 +300,7 @@ func TestStatusCache(t *testing.T) {
 }
 
 func TestInterpretPing(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		pr      *ipnstate.PingResult
@@ -333,6 +345,7 @@ func TestInterpretPing(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			res, err := interpretPing("10.20.0.50", tt.pr, tt.err)
 			if tt.wantErr != "" {
 				if err == nil || err.Error() != tt.wantErr {

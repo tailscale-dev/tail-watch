@@ -56,6 +56,7 @@ guidance and TCP, HTTP, and tsping checks still run.
 ## Build and run
 
 ```bash
+mise install
 mise run build
 ./bin/tsmon --config examples/tsmon.yaml
 ```
@@ -155,3 +156,36 @@ An explicit `parent` must name another target whose only check is `icmp`
 or `tsping`. Parent cycles are rejected. Learned tailnet parents arrive
 in a later change; keep a router's reachability target separate from any
 service check on that same node.
+
+## Development and releases
+
+`mise run check` builds, tests, and lints with the pinned tools. The lint
+configuration is based on
+[maratori/golangci-lint-config](https://github.com/maratori/golangci-lint-config),
+with this module's import prefix. CI also runs race tests and builds release
+archives for Linux, macOS, and Windows on amd64 and arm64.
+
+Use Conventional Commits in squash-merge titles (`fix: ...`, `feat: ...`,
+or `feat!: ...` for breaking changes). After checks pass on `main`,
+release-please opens or updates a release PR containing the version and
+changelog. Merge that PR to create a GitHub release; GoReleaser then attaches
+the archives and `checksums.txt`. Each archive includes `tsmon`, the license,
+this README, and `examples/tsmon.yaml`. The binary's `--version` reports the
+release version.
+
+Repository setup: in **Settings → Actions → General → Workflow permissions**,
+enable **Allow GitHub Actions to create and approve pull requests**.
+The workflow uses the built-in `GITHUB_TOKEN`. PRs created with that token
+do not automatically start CI; close and reopen the release PR to trigger
+its checks. Publishing runs in the release workflow itself because tags
+created with that token also do not trigger a separate workflow.
+
+To validate packaging locally without publishing:
+
+```bash
+mise run release-check
+```
+
+Snapshot archives appear in `dist/`. If publishing fails after the release
+has been created, rerun the failed job or manually run the **Release** workflow
+with its existing tag (for example, `v0.1.0`).

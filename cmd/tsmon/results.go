@@ -90,7 +90,17 @@ func (d debugConsumer) Observe(res Result) {
 		name = res.Target.Name
 	}
 	if res.Err != nil {
-		d.log.Debug("check result", "target", name, "check", res.Check, "err", res.Err.Error(), "latency", res.Latency.String())
+		d.log.Debug(
+			"check result",
+			"target",
+			name,
+			"check",
+			res.Check,
+			"err",
+			res.Err.Error(),
+			"latency",
+			res.Latency.String(),
+		)
 		return
 	}
 	d.log.Debug("check result", "target", name, "check", res.Check, "ok", true, "latency", res.Latency.String())

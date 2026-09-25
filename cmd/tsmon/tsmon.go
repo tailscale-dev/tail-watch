@@ -30,6 +30,11 @@ import (
 // to the build info version, then "dev".
 var version = ""
 
+const (
+	exitUsage         = 2
+	httpHeaderTimeout = 5 * time.Second
+)
+
 type app struct {
 	cfg      *Config
 	env      netEnv
@@ -62,7 +67,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		return 2
+		return exitUsage
 	}
 	if *versionFlag {
 		_, _ = fmt.Fprintln(stdout, versionString())
@@ -71,7 +76,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	log, err := newLogger(stderr, effectiveLogLevel(*logLevelFlag, os.Getenv("TSMON_LOG_LEVEL")))
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "log level: %v\n", err)
-		return 2
+		return exitUsage
 	}
 	slog.SetDefault(log)
 	path := resolveConfigPath(*configFlag, os.Getenv("TSMON_CONFIG"))
@@ -93,8 +98,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	a.pub.add(debugConsumer{log: log})
 	a.bindResolver()
-	if err := a.preflight(context.Background()); err != nil {
-		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+	if preflightErr := a.preflight(context.Background()); preflightErr != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", preflightErr)
 		return 1
 	}
 	if *onceFlag {
@@ -111,7 +116,7 @@ func runCheckConfig(args []string, stdout, stderr io.Writer) int {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		return 2
+		return exitUsage
 	}
 	path := resolveConfigPath(*configFlag, os.Getenv("TSMON_CONFIG"))
 	cfg, err := loadConfig(path)
@@ -149,7 +154,6 @@ func (a *app) schedule(p *prober.Prober) []*prober.Probe {
 		t := &a.cfg.Targets[i]
 		for _, chk := range t.Checks {
 			target := t
-			check := chk
 			pr := p.Run(t.Name+"/"+chk.String(), t.Interval, prober.Labels{
 				"target": t.Name,
 				"check":  chk.String(),
@@ -158,7 +162,7 @@ func (a *app) schedule(p *prober.Prober) []*prober.Probe {
 				Class:   chk.Kind(),
 				Timeout: t.Timeout,
 				Probe: func(ctx context.Context) error {
-					return a.execute(ctx, target, check).Err
+					return a.execute(ctx, target, chk).Err
 				},
 			})
 			out = append(out, pr)
@@ -201,6 +205,8 @@ func (a *app) runOnce() int {
 }
 
 func (a *app) runServer() int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	p := prober.New().WithSpread(true).WithMetricNamespace("tsmon")
 	probes := a.schedule(p)
 	mux := http.NewServeMux()
@@ -214,7 +220,7 @@ func (a *app) runServer() int {
 	srv := &http.Server{
 		Addr:              a.listen,
 		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: httpHeaderTimeout,
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -223,8 +229,6 @@ func (a *app) runServer() int {
 		}
 	}()
 	a.log.Info("listening", "addr", a.listen)
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	select {
 	case err := <-errCh:
 		a.log.Error("http server", "err", err)
@@ -270,10 +274,10 @@ func (a *app) preflight(ctx context.Context) error {
 		Socket:  a.socket,
 	})
 	if res.Hostname != "" || len(res.IPs) > 0 || len(res.Tags) > 0 {
-		a.log.Info("collector identity", "hostname", res.Hostname, "ips", res.IPs, "tags", res.Tags)
+		a.log.InfoContext(ctx, "collector identity", "hostname", res.Hostname, "ips", res.IPs, "tags", res.Tags)
 	}
 	for _, w := range res.Warnings {
-		a.log.Warn(w)
+		a.log.WarnContext(ctx, w)
 	}
 	return err
 }

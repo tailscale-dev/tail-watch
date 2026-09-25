@@ -12,6 +12,7 @@ import (
 )
 
 func TestTCPTimeoutNonAcceptingListener(t *testing.T) {
+	t.Parallel()
 	host, port, cleanup := listenFull(t)
 	defer cleanup()
 	env := &fakeEnv{}
@@ -33,15 +34,15 @@ func listenFull(t *testing.T) (string, int, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
 		_ = syscall.Close(fd)
 		t.Fatal(err)
 	}
-	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Port: 0, Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+	if err = syscall.Bind(fd, &syscall.SockaddrInet4{Port: 0, Addr: [4]byte{127, 0, 0, 1}}); err != nil {
 		_ = syscall.Close(fd)
 		t.Fatal(err)
 	}
-	if err := syscall.Listen(fd, 0); err != nil {
+	if err = syscall.Listen(fd, 0); err != nil {
 		_ = syscall.Close(fd)
 		t.Fatal(err)
 	}
@@ -52,9 +53,9 @@ func listenFull(t *testing.T) (string, int, func()) {
 	}
 	port := sa.(*syscall.SockaddrInet4).Port
 	var held []net.Conn
-	for i := 0; i < 8; i++ {
-		c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 20*time.Millisecond)
-		if err != nil {
+	for range 8 {
+		c, dialErr := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 20*time.Millisecond)
+		if dialErr != nil {
 			break
 		}
 		held = append(held, c)

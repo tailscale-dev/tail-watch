@@ -1,5 +1,7 @@
 [tools]
 go = "1.27.1"
+golangci-lint = "2.14.0"
+goreleaser = "2.18.2"
 bun = "1.4.2"
 "npm:@fission-ai/openspec" = "1.13.2"
 
@@ -21,3 +23,7 @@ run = "golangci-lint run ./..."
 [tasks.check]
 description = "Build, test, and lint"
 depends = ["build", "test", "lint"]
+
+[tasks.release-check]
+description = "Validate release configuration and build local snapshot archives"
+run = "goreleaser check && goreleaser release --snapshot --clean"

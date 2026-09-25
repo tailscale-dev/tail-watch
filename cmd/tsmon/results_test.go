@@ -30,6 +30,7 @@ func (o *orderConsumer) Observe(res Result) {
 }
 
 func TestPublishCompletionOrder(t *testing.T) {
+	t.Parallel()
 	earlyEntered := make(chan struct{})
 	releaseEarly := make(chan struct{})
 	cons := &orderConsumer{
