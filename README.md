@@ -9,7 +9,7 @@ what you've been working on.
 - [ ] A `README.md` file that describes the service and how to use it, including
       installation instructions.
 - [ ] A Dockerfile that builds the service.
-- [ ] Tailwind configuration in `tailwind.config.js`.
+- [ ] Tailwind configuration in `css/input.css`.
 - [ ] The base HTML skeleton in `tmp/base.html`.
 - [ ] A static asset folder `static/`.
 - [ ] A `main.go` file that serves the static assets and the HTML skeleton over
@@ -31,7 +31,7 @@ Some other things to consider:
 - Tailscale is your method of authentication. You should not need to implement
   any authentication logic.
 - Commit the generated CSS to the repository. This makes it easier to run the
-  service without having to install Node.js and Tailwind.
+  service without having to install Bun and Tailwind.
 - Make your service one word. This makes it easier to use in URLs and
   documentation, not to mention pronouncing it.
 - Try [Alpine.js](http://alpinejs.dev/) or [HTMX](https://htmx.org/) for
@@ -46,16 +46,12 @@ Some other things to consider:
 
 ## Development
 
-Install the following tools:
-
-- [ ] [Go](https://go.dev/dl)
-- [ ] [Node.js](https://nodejs.org/en/download/)
-- [ ] [Yarn](https://classic.yarnpkg.com/en/docs/install)
-
-Clone the repo and run:
+Install [mise](https://mise.jdx.dev), which provides the pinned versions of Go
+and Bun from `mise.toml`. Clone the repo and run:
 
 ```sh
-yarn
+mise install
+mise run css
 go run . --tsnet-verbose
 ```
 

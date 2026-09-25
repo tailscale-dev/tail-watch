@@ -1,0 +1,21 @@
+[tools]
+go = "1.27.1"
+bun = "1.4.2"
+"npm:@fission-ai/openspec" = "1.13.2"
+
+[tasks.install]
+description = "Install Tailwind dependencies"
+run = "bun install --frozen-lockfile"
+
+[tasks.css]
+description = "Build the committed Tailwind CSS"
+depends = ["install"]
+run = "bun run build:css"
+
+[tasks.build]
+description = "Build the service binary"
+run = "go build -o bin/what ."
+
+[tasks.dev]
+description = "Run the service on your tailnet as what-dev"
+run = "go run . --tsnet-verbose --hostname what-dev"

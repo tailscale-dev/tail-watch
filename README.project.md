@@ -8,7 +8,7 @@ what you'd like to work on before the fact.
 
 ## Usage
 
-1. Open http://what
+1. Open <http://what>
 2. Type words in the box
 3. Hit post
 
@@ -27,23 +27,26 @@ variables for what:
 
 ## Development
 
-Install the following tools:
+Tool versions (Go, Bun) are pinned in `mise.toml`. With
+[mise](https://mise.jdx.dev) installed, run:
 
-- Go 1.21 or later
-- Node.js 18 or later
-- Yarn 1.22 or later
-
-Run this command to set up your node_modules for tailwind:
-
-```
-yarn
+```sh
+mise install
+mise run css   # install Tailwind and rebuild static/css/base.css
+mise run dev   # go run . --tsnet-verbose --hostname what-dev
 ```
 
-Then run this command to start the server:
+Without mise, install Go 1.27.1 or later and [Bun](https://bun.sh) 1.4 or
+later, then run:
 
+```sh
+bun install
+bun run build:css
+go run . --tsnet-verbose --hostname what-dev
 ```
-go run . --tsnet-verbose --tsnet-hostname what-dev
-```
+
+Tailwind CSS v4 is configured in `css/input.css`; edit the `@theme` block there
+to change colors or fonts.
 
 Then authenticate with your Tailscale account and visit your service.
 
@@ -51,13 +54,13 @@ Then authenticate with your Tailscale account and visit your service.
 
 Build it with Docker or Podman:
 
-```
+```sh
 docker build .
 ```
 
 or
 
-```
+```sh
 podman build .
 ```
 
