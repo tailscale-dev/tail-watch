@@ -10,3 +10,5 @@
   through a kernel-mode `tailscaled`, and serves `/`, `/metrics`, and
   `/healthz`. `--once` runs every check once. `check-config` validates a
   file without contacting tailscaled.
+- `examples/compose.yaml` runs tsmon beside a kernel-mode `tailscaled`
+  container for hosts without a system `tailscaled`.

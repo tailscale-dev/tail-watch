@@ -23,3 +23,5 @@ go.work
 # build output
 bin/
 dist/
+PR_MESSAGE.md
+tasks.md

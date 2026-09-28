@@ -113,6 +113,23 @@ docker run --rm --network host \
   tsmon
 ```
 
+### Docker Compose without a dedicated host
+
+`examples/compose.yaml` runs a kernel-mode `tailscaled` container and puts
+tsmon in its network namespace, so checks follow that node's `tailscale0`
+routes, including accepted subnet routes. Mint an auth key tagged
+`tag:monitor`:
+
+```bash
+TS_AUTHKEY=tskey-auth-... docker compose -f examples/compose.yaml up -d
+```
+
+tsmon starts once the node reports healthy. It reads
+`examples/tsmon.yaml` unless `TSMON_CONFIG_FILE` names another file. The
+`tailscale` service sets `net.ipv4.ping_group_range`, so the non-root tsmon
+image can send ICMP without `CAP_NET_RAW`. `network: local` targets reach
+only what the container's Docker network can reach.
+
 `collector.state_dir` is accepted and unused until notification delivery
 lands. Do not put secrets in the config file.
 

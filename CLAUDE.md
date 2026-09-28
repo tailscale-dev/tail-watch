@@ -21,6 +21,32 @@
   Unit tests call check methods directly and do not construct a `Prober`.
 - Every network access goes through `netEnv`. Do not add a package-level
   dialer. `tsping` name resolution may fall back to the host resolver.
+- `TestLiveTailnetDocker` stays skipped unless `TSMON_LIVE_TAILNET=1`. It
+  reads `tailscale-phase-2/tailscale` from `pulumi env` (`TSMON_PULUMI_ENV`
+  overrides that) and drives `examples/compose.yaml` through
+  `docker compose`, so it tests the shipped non-root image. It builds
+  `tsmon`, starts `tailscale`, and runs `compose run tsmon --once`. The
+  collector key is tagged `TSMON_LIVE_TAG` (default `tag:monitor`; set it
+  empty for an untagged member node). The tailnet policy must own that tag
+  and grant it the peer and `10.10.0.0/16`: merge
+  `cmd/tsmon/testdata/snippet.hujson` into the lab policy (it lives in
+  `tailscale-utils-lab`, `lab/policy/lab.acl.hujson`). Until then, run with
+  `TSMON_LIVE_TAG=`. If no connected device has an
+  enabled subnet route, the test merges
+  `cmd/tsmon/testdata/compose.live-router.yaml`, which adds a router for
+  `10.10.50.0/24` that answers `10.10.50.1`. `TSMON_LIVE_PEER` and
+  `TSMON_LIVE_SUBNET` override the discovered targets. Cleanup runs
+  `compose down --volumes` and deletes only the `tsmon-live-<id>` devices
+  that run created. Its Tailscale API calls are test setup, not collector
+  traffic, so they do not go through `netEnv`.
+- Keep the compose `tailscale` service's `ping_group_range` sysctl. tsmon
+  runs as uid 65532 in that network namespace and opens ICMP as `udp4`.
+
+## Commits
+
+- Follow the Tailscale commit style in `AGENTS.md`: a `dir: verb ...`
+  subject, a plain-text body, and a `Fixes #n` or `Updates #n` trailer. It
+  does not use Conventional Commits, so do not run commitlint.
 
 ## Upgrading Go dependencies
 

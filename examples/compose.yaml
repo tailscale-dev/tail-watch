@@ -1,0 +1,55 @@
+# tsmon beside a kernel-mode tailscaled, without a dedicated host.
+#
+#   TS_AUTHKEY=tskey-auth-... docker compose -f examples/compose.yaml up -d
+#
+# Mint TS_AUTHKEY with tag:monitor so the ACL grants for the collector apply.
+# tsmon joins the tailscale service's network namespace, so its checks use
+# that node's tailscale0 routes, including accepted subnet routes.
+name: tsmon
+
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.102.5
+    hostname: ${TS_HOSTNAME:-tsmon}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set TS_AUTHKEY to an auth key tagged tag:monitor}
+      TS_HOSTNAME: ${TS_HOSTNAME:-tsmon}
+      TS_USERSPACE: "false"
+      TS_ACCEPT_DNS: "false"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+      TS_EXTRA_ARGS: --accept-routes
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:9002
+    cap_add: [NET_ADMIN, NET_RAW]
+    devices: [/dev/net/tun]
+    # tsmon runs as uid 65532 in this namespace; this lets it open ICMP
+    # sockets without CAP_NET_RAW.
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
+    volumes:
+      - tailscale-run:/var/run/tailscale
+      - tailscale-state:/var/lib/tailscale
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:9002/healthz]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  tsmon:
+    build:
+      context: ..
+    image: tsmon:local
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    volumes:
+      - tailscale-run:/var/run/tailscale:ro
+      - ${TSMON_CONFIG_FILE:-./tsmon.yaml}:/etc/tsmon/tsmon.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  tailscale-run:
+  tailscale-state:
