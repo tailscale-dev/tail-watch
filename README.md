@@ -189,6 +189,41 @@ A passing check has no layer. A failing check is labeled with one layer:
 `network: local` targets use only `service` and `lan`. They do not consult
 tailnet presence or disco.
 
+## Alert state
+
+Each target is `UNKNOWN`, `UP`, `DOWN`, or `SUPPRESSED`. It leaves `UNKNOWN`
+for `UP` after one success on every check, and that move is silent. Any check
+that fails `fail_threshold` times in a row moves the target to `DOWN`. It
+returns to `UP` after `recover_threshold` consecutive successes on every check
+that failed, while its other checks are still passing. The defaults are 3
+failures and 2 successes.
+
+More than `flap_limit` state changes inside `flap_window` (defaults 4 and 15m) mark the
+target flapping. tail-watch emits one flapping notice, then stays quiet until
+the state has been stable for another `flap_window`. While that mark is set,
+`tailwatch_target_state` is 4.
+
+A reachability parent (`icmp` or `tsping` only) that is `DOWN` or
+`SUPPRESSED` moves its `UNKNOWN` and `UP` descendants to `SUPPRESSED` and
+names them on its transition. A descendant that is already `DOWN` keeps its
+own incident. A `control` or `tunnel` failure waits for the parent's detection
+window (`interval × fail_threshold + timeout`) before it can page, so a dead
+router produces one alert instead of one per device. `unrouted`, `lan`, and
+`service` failures page immediately. When the parent recovers, or a topology
+change leaves no down ancestor, tail-watch rechecks each released target. The
+target then goes `UP` silently, or `DOWN` if the fresh checks keep failing.
+
+With more than one collector, quorum stays in Alertmanager until collectors
+share state:
+
+```yaml
+- alert: TargetDownQuorum
+  expr: count by (target) (tailwatch_target_state == 2) >= 2
+  for: 1m
+```
+
+That rule pages only when two collectors agree the target is down.
+
 For a remote LAN target, tail-watch learns the handling node with one disco
 ping at startup, every 10 minutes, and when primary routes change. A failed
 ping keeps the previous node unless the primary route changed, in which case
@@ -214,6 +249,7 @@ Prometheus series use the `tailwatch_` prefix:
 | `tailwatch_failure_layer_total{target,layer}` | counter, one increment per failure |
 | `tailwatch_path{target,kind}` | gauge, `direct`, `derp`, and `peer_relay` |
 | `tailwatch_target_parent{target,parent}` | gauge, 1 for the current parent |
+| `tailwatch_target_state{target}` | gauge, 0 unknown through 4 flapping |
 
 ## Development and releases
 

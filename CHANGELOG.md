@@ -4,6 +4,10 @@
 
 ### Added
 
+- Targets move between `UNKNOWN`, `UP`, `DOWN`, and `SUPPRESSED` after
+  consecutive failures, with flap damping and suppression of dependents
+  behind a down reachability parent. `tailwatch_target_state` exports that
+  state.
 - Failed checks are labeled `unrouted`, `control`, `tunnel`, `service`, or
   `lan`. Remote LAN targets learn a parent from disco and primary routes.
   `tailwatch_failure_layer_total`, `tailwatch_path`, and

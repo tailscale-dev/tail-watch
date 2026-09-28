@@ -13,14 +13,21 @@
 ## Layout
 
 - Collector code is `package main` in `cmd/tail-watch/`: `main.go`, `netenv.go`,
-  `config.go`, `checks.go`, `results.go`, `presence.go`, `classify.go`, and
-  `learn.go`. Tests sit next to that code.
+  `config.go`, `checks.go`, `results.go`, `presence.go`, `classify.go`,
+  `learn.go`, `alert.go` (plus `alert_emit.go`, `alert_flap.go`,
+  `alert_graph.go`, `alert_target.go`, `alert_log.go`), and `recheck.go`. Tests sit next to
+  that code.
   The binary is `tail-watch`. Prometheus series use the `tailwatch_` prefix
   because metric names cannot contain a hyphen.
 - `presence.go` is the IPN bus view. `tsping` name resolution uses it and
   falls back to the 30s `Status()` cache only while that view is unseeded.
-- Later phase-1 changes add `alert.go` and the notification files in the
-  same directory.
+- `alert.go` is one mutex-guarded state machine. Grace and flap timers hand work
+  to a goroutine from `AfterFunc`: `tstest.Clock.Advance` holds the clock
+  lock while callbacks fire, so they cannot call back into the clock.
+  `recheck.go` runs at most
+  eight immediate rechecks. `Result.Generation` is the per-target release
+  counter; `execute` stamps the value from when the check acquired its lock.
+- Later phase-1 changes add the notification files in the same directory.
 - Create only one `prober.Prober` per process. `prober.New()` registers
   metrics on the default Prometheus registry and panics if called again.
   Unit tests call check methods directly and do not construct a `Prober`.
@@ -52,6 +59,10 @@
   node disconnected in seconds, but peers' netmaps have taken 28s to more than
   3 min to get `Online=false`. Until then `tunnel` is the correct layer, so the
   control wait is 8 min.
+- `TestLiveTailnetAlerts` uses its own router on `10.10.52.0/24`. It stops
+  and restarts that router, checks target-state gauges, and verifies exactly
+  one router DOWN and recovery in the transition logs, with silent dependents.
+  It uses the same live-test gate and credentials.
 - Keep the compose `tailscale` service's `ping_group_range` sysctl. tail-watch
   runs as uid 65532 in that network namespace and opens ICMP as `udp4`.
 

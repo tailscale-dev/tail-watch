@@ -37,7 +37,7 @@ func TestPublishCompletionOrder(t *testing.T) {
 		block:   map[string]chan struct{}{"early": releaseEarly},
 		entered: map[string]chan struct{}{"early": earlyEntered},
 	}
-	pub := newPublisher(1)
+	pub := newPublisher()
 	pub.add(cons)
 	target := &Target{Name: "t"}
 

@@ -50,6 +50,11 @@ type app struct {
 	presence *presence
 	class    *classifier
 	learner  *learner
+	alerts   *alerter
+	metrics  prometheus.Registerer
+	watch    func(context.Context, ipn.NotifyWatchOpt) (ipnWatch, error)
+	probeMu  sync.Mutex
+	probes   map[string]*sync.Mutex
 }
 
 func main() {
@@ -96,7 +101,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		env:    newKernelEnv(socket),
 		log:    log,
 		clock:  tstime.StdClock{},
-		pub:    newPublisher(1),
+		pub:    newPublisher(),
 		stdout: stdout,
 		socket: socket,
 		listen: cfg.ListenAddr(*listenFlag),
@@ -161,7 +166,32 @@ func (a *app) bindChecks(t *Target) {
 }
 
 func (a *app) watchBus(ctx context.Context, mask ipn.NotifyWatchOpt) (ipnWatch, error) {
+	if a.watch != nil {
+		return a.watch(ctx, mask)
+	}
 	return a.env.LocalClient().WatchIPNBus(ctx, mask)
+}
+
+func (a *app) metricRegisterer() prometheus.Registerer {
+	if a != nil && a.metrics != nil {
+		return a.metrics
+	}
+	return prometheus.DefaultRegisterer
+}
+
+func (a *app) probeLock(target, check string) *sync.Mutex {
+	a.probeMu.Lock()
+	defer a.probeMu.Unlock()
+	if a.probes == nil {
+		a.probes = map[string]*sync.Mutex{}
+	}
+	key := target + "\x00" + check
+	lk := a.probes[key]
+	if lk == nil {
+		lk = &sync.Mutex{}
+		a.probes[key] = lk
+	}
+	return lk
 }
 
 func (a *app) schedule(ctx context.Context, p *prober.Prober) []func() error {
@@ -181,23 +211,36 @@ func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeReg
 	targets := make([]*Target, len(a.cfg.Targets))
 	for i := range a.cfg.Targets {
 		targets[i] = &a.cfg.Targets[i]
+		a.bindChecks(targets[i])
 	}
-	reg := &runtimeRegistry{
-		app:    a,
-		alert:  noopAlerter{},
-		probes: map[string][]func() error{},
+	reg := newRuntimeRegistry(ctx, a, proberStarter{p: p})
+	al, err := newAlerter(alertConfig{
+		Clock:      a.clock,
+		Targets:    targets,
+		Parents:    configuredParents(targets),
+		Recheck:    reg.enqueueRecheck,
+		Registerer: a.metricRegisterer(),
+		QueueCap:   0,
+	})
+	if err != nil && a.log != nil {
+		a.log.ErrorContext(ctx, "parent graph", "err", err)
 	}
-	reg.start = proberStarter{p: p}
-	a.class = newClassifier(a.presence, a.env, a.log, a.clock, prometheus.DefaultRegisterer, targets, reg)
+	a.alerts = al
+	context.AfterFunc(ctx, al.stopDrain)
+	al.addConsumer(transitionLog{log: a.log})
+	reg.alert = al
+	reg.seed(targets)
+	a.class = newClassifier(a.presence, a.env, a.log, a.clock, a.metricRegisterer(), targets, reg)
 	a.presence.setHandler(a.class.nodeForTarget)
 	a.class.addConsumer(classifiedDebug{log: a.log})
+	a.class.addConsumer(al)
 	a.pub.add(a.class)
 	a.learner = newLearner(a.class)
 	go a.presence.run(ctx)
 	go a.learner.run(ctx)
 	for _, t := range targets {
-		if err := reg.AddTarget(t); err != nil {
-			a.log.ErrorContext(ctx, "add target", "target", t.Name, "err", err)
+		if addErr := reg.AddTarget(t); addErr != nil && a.log != nil {
+			a.log.ErrorContext(ctx, "add target", "target", t.Name, "err", addErr)
 		}
 	}
 	return reg
@@ -439,20 +482,30 @@ type runtimeRegistry struct {
 	start  checkStarter
 	mu     sync.Mutex
 	probes map[string][]func() error
+	byName map[string]*Target
+	known  map[string]bool
+	pool   *recheckPool
 }
 
 func (r *runtimeRegistry) AddTarget(t *Target) error {
 	if t == nil {
 		return nil
 	}
-	if r.alert != nil {
+	seeded := r.takeSeed(t.Name)
+	if !seeded && r.app != nil {
+		r.app.bindChecks(t)
+	}
+	if r.alert != nil && !seeded {
 		if err := r.alert.AddTarget(t); err != nil {
 			return err
 		}
 	}
-	if r.app != nil {
-		r.app.bindChecks(t)
+	r.mu.Lock()
+	if r.byName == nil {
+		r.byName = map[string]*Target{}
 	}
+	r.byName[t.Name] = t
+	r.mu.Unlock()
 	if r.start == nil {
 		return nil
 	}
@@ -476,16 +529,23 @@ func (r *runtimeRegistry) AddTarget(t *Target) error {
 }
 
 func (r *runtimeRegistry) RemoveTarget(name string) error {
+	if r.alert != nil {
+		if err := r.alert.RemoveTarget(name); err != nil {
+			return err
+		}
+		if d, ok := r.alert.(interface{ DiscardPendingRestore(string) }); ok {
+			d.DiscardPendingRestore(name)
+		}
+	}
 	r.mu.Lock()
 	stops := r.probes[name]
 	delete(r.probes, name)
+	delete(r.byName, name)
+	delete(r.known, name)
 	r.mu.Unlock()
 	var err error
 	for _, stop := range stops {
 		err = errors.Join(err, stop())
-	}
-	if r.alert != nil {
-		err = errors.Join(err, r.alert.RemoveTarget(name))
 	}
 	return err
 }
@@ -523,16 +583,6 @@ func (s proberStarter) Start(t *Target, chk check, run func(context.Context) err
 	})
 	return pr.Close, nil
 }
-
-type noopAlerter struct{}
-
-func (noopAlerter) AddTarget(*Target) error { return nil }
-
-func (noopAlerter) RemoveTarget(string) error { return nil }
-
-func (noopAlerter) IsDown(string) bool { return false }
-
-func (noopAlerter) UpdateParents(map[string]string) error { return nil }
 
 type classifiedDebug struct {
 	log *slog.Logger

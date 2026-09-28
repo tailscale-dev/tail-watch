@@ -550,8 +550,9 @@ func (c *classifier) sweep(ctx context.Context, edges map[string]string, complet
 		if c.keepImplicit(ctx, st, desired, complete) {
 			continue
 		}
-		c.removeImplicit(st)
-		removed = append(removed, st.target.Name)
+		if c.removeImplicit(st) {
+			removed = append(removed, st.target.Name)
+		}
 	}
 	slices.Sort(removed)
 	return removed
@@ -610,13 +611,15 @@ func dependentCount(edges map[string]string, name string) int {
 	return n
 }
 
-func (c *classifier) removeImplicit(st *implicitState) {
+func (c *classifier) removeImplicit(st *implicitState) bool {
 	if st == nil || st.target == nil {
-		return
+		return false
 	}
 	name := st.target.Name
 	if c.registry != nil {
-		_ = c.registry.RemoveTarget(name)
+		if err := c.registry.RemoveTarget(name); err != nil {
+			return false
+		}
 	}
 	c.mu.Lock()
 	delete(c.implicit, st.target.NodeID)
@@ -627,6 +630,7 @@ func (c *classifier) removeImplicit(st *implicitState) {
 	}
 	delete(c.parentOf, name)
 	c.mu.Unlock()
+	return true
 }
 
 // RestoreImplicit keeps a previously open implicit target until an

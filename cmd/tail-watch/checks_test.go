@@ -189,7 +189,7 @@ func TestRunCheckRecordsTimeout(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}}
-	a := &app{env: env, clock: tstime.StdClock{}, pub: newPublisher(1)}
+	a := &app{env: env, clock: tstime.StdClock{}, pub: newPublisher()}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()

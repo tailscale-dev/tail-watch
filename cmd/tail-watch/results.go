@@ -29,20 +29,13 @@ type resultConsumer interface {
 }
 
 type publisher struct {
-	mu         sync.Mutex
-	locks      map[string]*sync.Mutex
-	consumers  []resultConsumer
-	generation uint64
+	mu        sync.Mutex
+	locks     map[string]*sync.Mutex
+	consumers []resultConsumer
 }
 
-func newPublisher(generation uint64) *publisher {
-	if generation == 0 {
-		generation = 1
-	}
-	return &publisher{
-		locks:      map[string]*sync.Mutex{},
-		generation: generation,
-	}
+func newPublisher() *publisher {
+	return &publisher{mu: sync.Mutex{}, locks: map[string]*sync.Mutex{}, consumers: nil}
 }
 
 func (p *publisher) add(c resultConsumer) {
@@ -66,7 +59,7 @@ func (p *publisher) publish(res Result) {
 	}
 	cons := append([]resultConsumer{}, p.consumers...)
 	if res.Generation == 0 {
-		res.Generation = p.generation
+		res.Generation = 1
 	}
 	p.mu.Unlock()
 
@@ -144,7 +137,41 @@ func (a *app) runCheck(ctx context.Context, t *Target, chk check) Result {
 }
 
 func (a *app) execute(ctx context.Context, t *Target, chk check) Result {
+	name, label := "", ""
+	if t != nil {
+		name = t.Name
+	}
+	if chk != nil {
+		label = chk.String()
+	}
+	lk := a.probeLock(name, label)
+	lk.Lock()
+	defer lk.Unlock()
+	if ctx.Err() != nil {
+		return Result{
+			Target:     t,
+			Check:      label,
+			Err:        ctx.Err(),
+			Kind:       "",
+			Start:      time.Time{},
+			Generation: 0,
+			Latency:    0,
+			Ping:       nil,
+		}
+	}
+	if t.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, t.Timeout)
+		defer cancel()
+	}
+	gen := uint64(0)
+	if a.alerts != nil && name != "" {
+		gen = a.alerts.generation(name)
+	}
 	res := a.runCheck(ctx, t, chk)
+	if gen != 0 {
+		res.Generation = gen
+	}
 	a.pub.publish(res)
 	return res
 }
