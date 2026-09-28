@@ -36,12 +36,39 @@ func TestPublishCompletionOrder(t *testing.T) {
 	cons := &orderConsumer{
 		block:   map[string]chan struct{}{"early": releaseEarly},
 		entered: map[string]chan struct{}{"early": earlyEntered},
+
+		mu:    sync.Mutex{},
+		order: nil,
 	}
 	pub := newPublisher()
 	pub.add(cons)
-	target := &Target{Name: "t"}
+	target := &Target{Name: "t",
+		Addr:             "",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	}
 
-	go pub.publish(Result{Target: target, Check: "early"})
+	go pub.publish(Result{Target: target, Check: "early",
+		Kind:       "",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Err:        nil,
+		Ping:       nil,
+	})
 	select {
 	case <-earlyEntered:
 	case <-time.After(2 * time.Second):
@@ -49,7 +76,14 @@ func TestPublishCompletionOrder(t *testing.T) {
 	}
 	lateDone := make(chan struct{})
 	go func() {
-		pub.publish(Result{Target: target, Check: "late"})
+		pub.publish(Result{Target: target, Check: "late",
+			Kind:       "",
+			Start:      time.Time{},
+			Generation: 0,
+			Latency:    0,
+			Err:        nil,
+			Ping:       nil,
+		})
 		close(lateDone)
 	}()
 	select {

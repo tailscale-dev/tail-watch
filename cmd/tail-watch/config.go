@@ -303,6 +303,11 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[str
 		FlapWindow:       base.FlapWindow,
 		Severity:         SeverityPage,
 		Network:          NetworkTailnet,
+
+		Checks:   nil,
+		Implicit: false,
+		StableID: "",
+		NodeID:   0,
 	}
 	loc := fmt.Sprintf("targets[%d]", i)
 	if rt.Name == "" {

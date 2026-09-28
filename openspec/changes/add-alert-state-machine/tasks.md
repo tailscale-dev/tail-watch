@@ -47,7 +47,7 @@
 ## 8. Validation
 
 - [x] 8.1 Run `go build ./...`, `go vet ./...`, `go test -race ./...`; all pass and no test constructs a `prober.Prober`
-- [ ] 8.2 Run `golangci-lint run ./...` and `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`; zero issues and no reachable vulnerabilities
+- [x] 8.2 Run `golangci-lint run ./...` and `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`; zero issues and no reachable vulnerabilities
 - [x] 8.3 Run markdownlint on changed Markdown and `openspec validate add-alert-state-machine --strict`; both pass
 - [x] 8.4 On a real tailnet, stop tailscaled on a monitored subnet router and confirm one router `DOWN` transition listing its dependents and no dependent transitions; restart it and confirm one recovery and silent dependent `UP`s
 
@@ -59,8 +59,8 @@
   one DOWN and one recovery, both listing the two dependents, with silent
   dependent recovery. The run used `TAIL_WATCH_LIVE_TAILNET=1` and
   `TAIL_WATCH_LIVE_TAG=` and cleaned up its containers and tailnet devices.
-- Task 8.2 remains open: the pinned linter reports 238 existing findings
-  (237 `exhaustruct_v5`, one `modernize`). An isolated checkout of baseline
-  `f5f03ab` reports 240 findings (239 `exhaustruct_v5`, one `modernize`).
-  The remaining repository-wide lint debt will be fixed in a separate
-  follow-up commit; the new alert and recheck files have no lint findings.
+- Task 8.2 passed after the lint follow-up: the pinned linter reports zero
+  issues. Owned structs explicitly initialize their fields, and five upstream
+  types with deprecated fields have narrow exhaustive-initialization exemptions
+  so the rule does not conflict with staticcheck. The metrics parser uses
+  `strings.CutLast`. Build, vet, race tests and the vulnerability scan pass.

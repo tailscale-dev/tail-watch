@@ -15,11 +15,28 @@ func TestTCPTimeoutNonAcceptingListener(t *testing.T) {
 	t.Parallel()
 	host, port, cleanup := listenFull(t)
 	defer cleanup()
-	env := &fakeEnv{}
+	env := new(fakeEnv)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err := tcpCheck{port: port}.Run(ctx, env, &Target{Name: "slow", Addr: host})
+	_, err := tcpCheck{port: port}.Run(ctx, env, &Target{Name: "slow", Addr: host,
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	})
 	if time.Since(start) > time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}

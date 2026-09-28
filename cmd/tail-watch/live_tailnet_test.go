@@ -131,11 +131,31 @@ func TestFirstPrivateIPv4Host(t *testing.T) {
 
 func TestChosenSubnetIPSkipsUnusableRoutes(t *testing.T) {
 	devices := []tsDevice{
-		{Hostname: "advertised-only", Connected: true, AdvertisedRoutes: []string{"10.1.0.0/24"}},
-		{Hostname: "offline", Connected: false, EnabledRoutes: []string{"10.2.0.0/24"}},
-		{Hostname: "tail-watch-live-1-router", Connected: true, EnabledRoutes: []string{"10.3.0.0/24"}},
-		{Hostname: "exit", Connected: true, EnabledRoutes: []string{"0.0.0.0/0"}},
-		{Hostname: "router", Connected: true, EnabledRoutes: []string{"10.4.0.0/24"}},
+		{Hostname: "advertised-only", Connected: true, AdvertisedRoutes: []string{"10.1.0.0/24"},
+			ID:            "",
+			Addresses:     nil,
+			EnabledRoutes: nil,
+		},
+		{Hostname: "offline", Connected: false, EnabledRoutes: []string{"10.2.0.0/24"},
+			ID:               "",
+			Addresses:        nil,
+			AdvertisedRoutes: nil,
+		},
+		{Hostname: "tail-watch-live-1-router", Connected: true, EnabledRoutes: []string{"10.3.0.0/24"},
+			ID:               "",
+			Addresses:        nil,
+			AdvertisedRoutes: nil,
+		},
+		{Hostname: "exit", Connected: true, EnabledRoutes: []string{"0.0.0.0/0"},
+			ID:               "",
+			Addresses:        nil,
+			AdvertisedRoutes: nil,
+		},
+		{Hostname: "router", Connected: true, EnabledRoutes: []string{"10.4.0.0/24"},
+			ID:               "",
+			Addresses:        nil,
+			AdvertisedRoutes: nil,
+		},
 	}
 	t.Setenv("TAIL_WATCH_LIVE_SUBNET", "")
 	if got := chosenSubnetIP(devices); got != "10.4.0.1" {

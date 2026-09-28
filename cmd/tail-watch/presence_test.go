@@ -50,10 +50,18 @@ func TestPresenceLookups(t *testing.T) {
 		want string
 		miss bool
 	}{
-		{name: "nyc-router.tailnet.ts.net", want: "nyc-router"},
-		{name: "nyc-router", want: "nyc-router"},
-		{name: "nyc-router-host", want: "nyc-router"},
-		{name: "missing", miss: true},
+		{name: "nyc-router.tailnet.ts.net", want: "nyc-router",
+			miss: false,
+		},
+		{name: "nyc-router", want: "nyc-router",
+			miss: false,
+		},
+		{name: "nyc-router-host", want: "nyc-router",
+			miss: false,
+		},
+		{name: "missing", miss: true,
+			want: "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,6 +98,16 @@ func TestPresenceApply(t *testing.T) {
 	p.apply(ipn.Notify{PeerChangedPatch: []*tailcfg.PeerChange{{
 		NodeID: nycID,
 		Online: &off,
+
+		DERPRegion:   0,
+		Cap:          0,
+		CapMap:       nil,
+		Endpoints:    nil,
+		Key:          nil,
+		KeySignature: nil,
+		DiscoKey:     nil,
+		LastSeen:     nil,
+		KeyExpiry:    nil,
 	}}})
 	peer, ok := p.peer(nycID)
 	if !ok || peer.DNSName != "nyc-router.tailnet.ts.net" {
@@ -155,7 +173,10 @@ func TestPeerChangeFields(t *testing.T) {
 func TestPresenceRunReconnect(t *testing.T) {
 	t.Parallel()
 	var logs lockedBuffer
-	log := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	log := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug,
+		AddSource:   false,
+		ReplaceAttr: nil,
+	}))
 	bus := &ctlBus{watches: make(chan ipnWatch)}
 	p := newPresence(log, tstime.StdClock{}, bus.Watch)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -168,9 +189,13 @@ func TestPresenceRunReconnect(t *testing.T) {
 
 	first := &ctlWatch{ch: make(chan watchResult)}
 	bus.watches <- first
-	first.ch <- watchResult{n: ipn.Notify{InitialStatus: presenceStatus()}}
+	first.ch <- watchResult{n: ipn.Notify{InitialStatus: presenceStatus()},
+		err: nil,
+	}
 	waitPresence(t, func() bool { return p.seededNow() })
-	first.ch <- watchResult{err: errors.New("disconnected")}
+	first.ch <- watchResult{err: errors.New("disconnected"),
+		n: ipn.Notify{},
+	}
 	waitPresence(t, func() bool { return !p.seededNow() })
 	if _, known := p.Online(tailcfg.NodeID(1)); known {
 		t.Fatal("peer stayed known while the bus was down")
@@ -181,13 +206,17 @@ func TestPresenceRunReconnect(t *testing.T) {
 
 	second := &ctlWatch{ch: make(chan watchResult, 1)}
 	bus.watches <- second
-	second.ch <- watchResult{n: ipn.Notify{InitialStatus: presenceStatus()}}
+	second.ch <- watchResult{n: ipn.Notify{InitialStatus: presenceStatus()},
+		err: nil,
+	}
 	waitPresence(t, func() bool { return p.seededNow() })
 	if strings.Count(logs.String(), "presence bus disconnected") != 1 {
 		t.Fatalf("logged more than the one disconnect: %s", logs.String())
 	}
 	cancel()
-	second.ch <- watchResult{err: context.Canceled}
+	second.ch <- watchResult{err: context.Canceled,
+		n: ipn.Notify{},
+	}
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):

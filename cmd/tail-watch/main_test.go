@@ -107,13 +107,45 @@ func TestPreflight(t *testing.T) {
 			},
 		}
 	}
-	subnet := []Target{{Name: "sw", Addr: "10.20.0.1", Network: NetworkTailnet, Checks: []check{icmpCheck{}}}}
-	loop := []Target{{Name: "lo", Addr: "127.0.0.1", Network: NetworkTailnet, Checks: []check{tcpCheck{port: 9}}}}
+	subnet := []Target{{Name: "sw", Addr: "10.20.0.1", Network: NetworkTailnet, Checks: []check{icmpCheck{}},
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	}}
+	loop := []Target{{Name: "lo", Addr: "127.0.0.1", Network: NetworkTailnet, Checks: []check{tcpCheck{port: 9}},
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	}}
 
 	t.Run("needs login", func(t *testing.T) {
 		t.Parallel()
 		_, err := evaluatePreflight(
-			preflightInput{Status: &ipnstate.Status{BackendState: ipn.NeedsLogin.String()}, Socket: "/run/ts.sock"},
+			preflightInput{Status: &ipnstate.Status{BackendState: ipn.NeedsLogin.String()}, Socket: "/run/ts.sock",
+				Prefs:   nil,
+				Targets: nil,
+				GOOS:    "",
+			},
 		)
 		if err == nil || !strings.Contains(err.Error(), "tailscale up") ||
 			!strings.Contains(err.Error(), "NeedsLogin") {
@@ -122,7 +154,12 @@ func TestPreflight(t *testing.T) {
 	})
 	t.Run("unreachable", func(t *testing.T) {
 		t.Parallel()
-		_, err := evaluatePreflight(preflightInput{Socket: "/run/ts.sock"})
+		_, err := evaluatePreflight(preflightInput{Socket: "/run/ts.sock",
+			Status:  nil,
+			Prefs:   nil,
+			Targets: nil,
+			GOOS:    "",
+		})
 		if err == nil || !strings.Contains(err.Error(), "not reachable") ||
 			!strings.Contains(err.Error(), "/run/ts.sock") {
 			t.Fatal(err)
@@ -132,7 +169,11 @@ func TestPreflight(t *testing.T) {
 		t.Parallel()
 		st := running()
 		st.TUN = false
-		_, err := evaluatePreflight(preflightInput{Status: st, GOOS: "linux"})
+		_, err := evaluatePreflight(preflightInput{Status: st, GOOS: "linux",
+			Prefs:   nil,
+			Targets: nil,
+			Socket:  "",
+		})
 		if err == nil || !strings.Contains(err.Error(), "userspace") {
 			t.Fatal(err)
 		}
@@ -140,10 +181,52 @@ func TestPreflight(t *testing.T) {
 	t.Run("accept routes", func(t *testing.T) {
 		t.Parallel()
 		_, err := evaluatePreflight(preflightInput{
-			Status:  running(),
-			Prefs:   &ipn.Prefs{RouteAll: false},
+			Status: running(),
+			Prefs: &ipn.Prefs{RouteAll: false,
+				ControlURL:             "",
+				ExitNodeID:             "",
+				ExitNodeIP:             netip.Addr{},
+				AutoExitNode:           "",
+				InternalExitNodePrior:  "",
+				ExitNodeAllowLANAccess: false,
+				CorpDNS:                false,
+				RunSSH:                 false,
+				RunWebClient:           false,
+				WantRunning:            false,
+				LoggedOut:              false,
+				ShieldsUp:              false,
+				AdvertiseTags:          nil,
+				Hostname:               "",
+				NotepadURLs:            false,
+				ForceDaemon:            false,
+				Egg:                    false,
+				AdvertiseRoutes:        nil,
+				AdvertiseServices:      nil,
+				Sync:                   "",
+				NoSNAT:                 false,
+				NoStatefulFiltering:    "",
+				NetfilterMode:          0,
+				OperatorUser:           "",
+				ProfileName:            "",
+				AutoUpdate: ipn.AutoUpdatePrefs{
+					Check: false,
+					Apply: "",
+				},
+				AppConnector: ipn.AppConnectorPrefs{
+					Advertise: false,
+				},
+				PostureChecking:            false,
+				NetfilterKind:              "",
+				RemoteConfig:               false,
+				DriveShares:                nil,
+				RelayServerPort:            nil,
+				RelayServerStaticEndpoints: nil,
+				Persist:                    nil,
+			},
 			Targets: subnet,
 			GOOS:    "linux",
+
+			Socket: "",
 		})
 		if err == nil || !strings.Contains(err.Error(), "tailscale set --accept-routes") {
 			t.Fatal(err)
@@ -152,10 +235,52 @@ func TestPreflight(t *testing.T) {
 	t.Run("routes accepted", func(t *testing.T) {
 		t.Parallel()
 		res, err := evaluatePreflight(preflightInput{
-			Status:  running(),
-			Prefs:   &ipn.Prefs{RouteAll: true},
+			Status: running(),
+			Prefs: &ipn.Prefs{RouteAll: true,
+				ControlURL:             "",
+				ExitNodeID:             "",
+				ExitNodeIP:             netip.Addr{},
+				AutoExitNode:           "",
+				InternalExitNodePrior:  "",
+				ExitNodeAllowLANAccess: false,
+				CorpDNS:                false,
+				RunSSH:                 false,
+				RunWebClient:           false,
+				WantRunning:            false,
+				LoggedOut:              false,
+				ShieldsUp:              false,
+				AdvertiseTags:          nil,
+				Hostname:               "",
+				NotepadURLs:            false,
+				ForceDaemon:            false,
+				Egg:                    false,
+				AdvertiseRoutes:        nil,
+				AdvertiseServices:      nil,
+				Sync:                   "",
+				NoSNAT:                 false,
+				NoStatefulFiltering:    "",
+				NetfilterMode:          0,
+				OperatorUser:           "",
+				ProfileName:            "",
+				AutoUpdate: ipn.AutoUpdatePrefs{
+					Check: false,
+					Apply: "",
+				},
+				AppConnector: ipn.AppConnectorPrefs{
+					Advertise: false,
+				},
+				PostureChecking:            false,
+				NetfilterKind:              "",
+				RemoteConfig:               false,
+				DriveShares:                nil,
+				RelayServerPort:            nil,
+				RelayServerStaticEndpoints: nil,
+				Persist:                    nil,
+			},
 			Targets: subnet,
 			GOOS:    "linux",
+
+			Socket: "",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -167,15 +292,25 @@ func TestPreflight(t *testing.T) {
 	})
 	t.Run("loopback does not need routes", func(t *testing.T) {
 		t.Parallel()
-		if _, err := evaluatePreflight(preflightInput{Status: running(), Targets: loop, GOOS: "linux"}); err != nil {
+		if _, err := evaluatePreflight(preflightInput{Status: running(), Targets: loop, GOOS: "linux",
+			Prefs:  nil,
+			Socket: "",
+		}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Run("exit node", func(t *testing.T) {
 		t.Parallel()
 		st := running()
-		st.ExitNodeStatus = &ipnstate.ExitNodeStatus{ID: "exit"}
-		res, err := evaluatePreflight(preflightInput{Status: st, GOOS: "linux"})
+		st.ExitNodeStatus = &ipnstate.ExitNodeStatus{ID: "exit",
+			Online:       false,
+			TailscaleIPs: nil,
+		}
+		res, err := evaluatePreflight(preflightInput{Status: st, GOOS: "linux",
+			Prefs:   nil,
+			Targets: nil,
+			Socket:  "",
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,7 +322,10 @@ func TestPreflight(t *testing.T) {
 		t.Parallel()
 		st := running()
 		st.Self.Tags = nil
-		res, err := evaluatePreflight(preflightInput{Status: st, GOOS: "linux", Targets: loop})
+		res, err := evaluatePreflight(preflightInput{Status: st, GOOS: "linux", Targets: loop,
+			Prefs:  nil,
+			Socket: "",
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +339,47 @@ func TestPreflight(t *testing.T) {
 func TestCommandIntegration(t *testing.T) {
 	t.Parallel()
 	bin := buildTailWatch(t)
-	sock, closeAPI := fakeTailscaled(t, runningStatus(), &ipn.Prefs{RouteAll: true})
+	sock, closeAPI := fakeTailscaled(t, runningStatus(), &ipn.Prefs{RouteAll: true,
+		ControlURL:             "",
+		ExitNodeID:             "",
+		ExitNodeIP:             netip.Addr{},
+		AutoExitNode:           "",
+		InternalExitNodePrior:  "",
+		ExitNodeAllowLANAccess: false,
+		CorpDNS:                false,
+		RunSSH:                 false,
+		RunWebClient:           false,
+		WantRunning:            false,
+		LoggedOut:              false,
+		ShieldsUp:              false,
+		AdvertiseTags:          nil,
+		Hostname:               "",
+		NotepadURLs:            false,
+		ForceDaemon:            false,
+		Egg:                    false,
+		AdvertiseRoutes:        nil,
+		AdvertiseServices:      nil,
+		Sync:                   "",
+		NoSNAT:                 false,
+		NoStatefulFiltering:    "",
+		NetfilterMode:          0,
+		OperatorUser:           "",
+		ProfileName:            "",
+		AutoUpdate: ipn.AutoUpdatePrefs{
+			Check: false,
+			Apply: "",
+		},
+		AppConnector: ipn.AppConnectorPrefs{
+			Advertise: false,
+		},
+		PostureChecking:            false,
+		NetfilterKind:              "",
+		RemoteConfig:               false,
+		DriveShares:                nil,
+		RelayServerPort:            nil,
+		RelayServerStaticEndpoints: nil,
+		Persist:                    nil,
+	})
 	t.Cleanup(closeAPI)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -343,7 +521,47 @@ targets:
 func TestSIGTERM(t *testing.T) {
 	t.Parallel()
 	bin := buildTailWatch(t)
-	sock, closeAPI := fakeTailscaled(t, runningStatus(), &ipn.Prefs{RouteAll: true})
+	sock, closeAPI := fakeTailscaled(t, runningStatus(), &ipn.Prefs{RouteAll: true,
+		ControlURL:             "",
+		ExitNodeID:             "",
+		ExitNodeIP:             netip.Addr{},
+		AutoExitNode:           "",
+		InternalExitNodePrior:  "",
+		ExitNodeAllowLANAccess: false,
+		CorpDNS:                false,
+		RunSSH:                 false,
+		RunWebClient:           false,
+		WantRunning:            false,
+		LoggedOut:              false,
+		ShieldsUp:              false,
+		AdvertiseTags:          nil,
+		Hostname:               "",
+		NotepadURLs:            false,
+		ForceDaemon:            false,
+		Egg:                    false,
+		AdvertiseRoutes:        nil,
+		AdvertiseServices:      nil,
+		Sync:                   "",
+		NoSNAT:                 false,
+		NoStatefulFiltering:    "",
+		NetfilterMode:          0,
+		OperatorUser:           "",
+		ProfileName:            "",
+		AutoUpdate: ipn.AutoUpdatePrefs{
+			Check: false,
+			Apply: "",
+		},
+		AppConnector: ipn.AppConnectorPrefs{
+			Advertise: false,
+		},
+		PostureChecking:            false,
+		NetfilterKind:              "",
+		RemoteConfig:               false,
+		DriveShares:                nil,
+		RelayServerPort:            nil,
+		RelayServerStaticEndpoints: nil,
+		Persist:                    nil,
+	})
 	t.Cleanup(closeAPI)
 	port := freePort(t)
 	path := writeCfg(t, fmt.Sprintf(`

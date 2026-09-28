@@ -250,6 +250,9 @@ linters:
       # Default: []
       ignore-patterns:
         # std libs
+        # These upstream structs include deprecated fields. Exhaustive
+        # initialization conflicts with staticcheck's deprecation checks.
+        - ^crypto/tls.Config$
         - ^net/http.Client$
         - ^net/http.Cookie$
         - ^net/http.Request$
@@ -260,6 +263,10 @@ linters:
         - ^os/exec.Cmd$
         - ^reflect.StructField$
         # public libs
+        - ^tailscale.com/ipn.Notify$
+        - ^tailscale.com/ipn/ipnstate.Status$
+        - ^tailscale.com/ipn/ipnstate.PeerStatus$
+        - ^tailscale.com/tailcfg.Node$
         - ^github.com/Shopify/sarama.Config$
         - ^github.com/Shopify/sarama.ProducerMessage$
         - ^github.com/mitchellh/mapstructure.DecoderConfig$

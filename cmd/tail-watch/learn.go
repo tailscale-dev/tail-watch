@@ -25,7 +25,12 @@ type learner struct {
 }
 
 func newLearner(c *classifier) *learner {
-	l := &learner{c: c, done: make(chan struct{})}
+	l := &learner{c: c, done: make(chan struct{}),
+		once:    sync.Once{},
+		onArmed: nil,
+		onRound: nil,
+		changed: nil,
+	}
 	if c == nil || !c.hasRemoteLAN() {
 		l.finish()
 		if c != nil {
@@ -256,7 +261,9 @@ func (c *classifier) noteGrant(ctx context.Context, t *Target, handled bool) {
 	defer c.mu.Unlock()
 	st := c.grants[t.Name]
 	if handled {
-		c.grants[t.Name] = grantState{}
+		c.grants[t.Name] = grantState{
+			unhandled: false,
+		}
 		return
 	}
 	if st.unhandled {
@@ -380,12 +387,20 @@ func (c *classifier) newImplicit(peer peerInfo, deps []*Target) *Target {
 		FlapLimit:        base.FlapLimit,
 		FlapWindow:       base.FlapWindow,
 		Network:          NetworkTailnet,
-		Checks:           []check{tspingCheck{}},
-		Implicit:         true,
-		StableID:         peer.StableID,
-		NodeID:           peer.NodeID,
+		Checks: []check{tspingCheck{
+			resolver: nil,
+		}},
+		Implicit: true,
+		StableID: peer.StableID,
+		NodeID:   peer.NodeID,
+
+		Parent:      "",
+		InsecureTLS: false,
 	}
-	st := &implicitState{target: t}
+	st := &implicitState{target: t,
+		restored:    false,
+		deferLogged: false,
+	}
 	c.mu.Lock()
 	c.implicit[peer.NodeID] = st
 	c.implicitByName[t.Name] = st
@@ -640,7 +655,9 @@ func (c *classifier) RestoreImplicit(t *Target) {
 		return
 	}
 	t.Implicit = true
-	st := &implicitState{target: t, restored: true}
+	st := &implicitState{target: t, restored: true,
+		deferLogged: false,
+	}
 	c.mu.Lock()
 	c.implicit[t.NodeID] = st
 	c.implicitByName[t.Name] = st

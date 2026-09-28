@@ -74,7 +74,13 @@ func (icmpCheck) String() string { return checkICMP }
 func (icmpCheck) Kind() string   { return checkICMP }
 
 func (c icmpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, error) {
-	res := Result{Target: t, Check: c.String(), Kind: c.Kind()}
+	res := Result{Target: t, Check: c.String(), Kind: c.Kind(),
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Err:        nil,
+		Ping:       nil,
+	}
 	ip, err := lookupAddr(ctx, t.Addr)
 	if err != nil {
 		res.Err = err
@@ -147,7 +153,13 @@ func (c tcpCheck) String() string { return fmt.Sprintf("tcp:%d", c.port) }
 func (c tcpCheck) Kind() string   { return "tcp" }
 
 func (c tcpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, error) {
-	res := Result{Target: t, Check: c.String(), Kind: c.Kind()}
+	res := Result{Target: t, Check: c.String(), Kind: c.Kind(),
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Err:        nil,
+		Ping:       nil,
+	}
 	start := time.Now()
 	conn, err := env.Dial(ctx, "tcp", net.JoinHostPort(t.Addr, strconv.Itoa(c.port)))
 	res.Latency = time.Since(start)
@@ -200,7 +212,13 @@ func (e *httpBodyError) Error() string {
 }
 
 func (c httpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, error) {
-	res := Result{Target: t, Check: c.String(), Kind: c.Kind()}
+	res := Result{Target: t, Check: c.String(), Kind: c.Kind(),
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Err:        nil,
+		Ping:       nil,
+	}
 	start := time.Now()
 	transport := &http.Transport{
 		Proxy:             nil, // Probe the target directly, ignoring environment proxies.
@@ -276,7 +294,12 @@ func (c tspingCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, er
 	}
 	ip, err := r.resolve(ctx, t.Addr)
 	if err != nil {
-		res := Result{Target: t, Check: c.String(), Kind: c.Kind(), Err: err}
+		res := Result{Target: t, Check: c.String(), Kind: c.Kind(), Err: err,
+			Start:      time.Time{},
+			Generation: 0,
+			Latency:    0,
+			Ping:       nil,
+		}
 		return res, err
 	}
 	pr, err := env.LocalClient().Ping(ctx, ip, tailcfg.PingDisco)
@@ -288,7 +311,15 @@ func (c tspingCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, er
 }
 
 func interpretPing(addr string, pr *ipnstate.PingResult, callErr error) (Result, error) {
-	res := Result{Ping: pr}
+	res := Result{Ping: pr,
+		Target:     nil,
+		Check:      "",
+		Kind:       "",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Err:        nil,
+	}
 	if noMatchingPeer(callErr, pr) {
 		err := fmt.Errorf("no peer handles %s; check grants to tag:monitor", addr)
 		res.Err = err
@@ -397,7 +428,13 @@ func newTSResolver(
 			clock: clock,
 			ttl:   statusCacheTTL,
 			fetch: fetch,
+
+			mu: sync.Mutex{},
+			at: time.Time{},
+			st: nil,
 		},
+
+		presence: nil,
 	}
 }
 
@@ -480,7 +517,9 @@ func matchPeerName(ps *ipnstate.PeerStatus, want, suffix string) (peerHit, bool)
 			short = short[:len(short)-len(suf)]
 		}
 	}
-	hit := peerHit{ip: ip, dns: dns, host: ps.HostName}
+	hit := peerHit{ip: ip, dns: dns, host: ps.HostName,
+		prio: 0,
+	}
 	switch {
 	case dns != "" && strings.EqualFold(dns, want):
 		hit.prio = 0

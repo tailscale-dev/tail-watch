@@ -27,7 +27,8 @@ type kernelEnv struct {
 }
 
 func newKernelEnv(socket string) *kernelEnv {
-	env := &kernelEnv{unprivICMP: detectUnprivilegedICMP()}
+	env := new(kernelEnv)
+	env.unprivICMP = detectUnprivilegedICMP()
 	env.client.Socket = socket
 	env.client.UseSocketOnly = true
 	return env

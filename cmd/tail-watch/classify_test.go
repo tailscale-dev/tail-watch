@@ -40,12 +40,23 @@ func TestDecideLayers(t *testing.T) {
 	}{
 		{
 			name: "offline router",
-			in:   classifyInput{errClass: errTimeout, handlerKnown: true, handlerOnline: offline},
+			in: classifyInput{errClass: errTimeout, handlerKnown: true, handlerOnline: offline,
+				local:        false,
+				tsping:       false,
+				nodeTarget:   false,
+				tunnelOK:     "",
+				deviceICMPOK: "",
+			},
 			want: layerControl,
 		},
 		{
 			name: "tunnel down",
-			in:   classifyInput{errClass: errTimeout, handlerKnown: true, handlerOnline: online, tunnelOK: down},
+			in: classifyInput{errClass: errTimeout, handlerKnown: true, handlerOnline: online, tunnelOK: down,
+				local:        false,
+				tsping:       false,
+				nodeTarget:   false,
+				deviceICMPOK: "",
+			},
 			want: layerTunnel,
 		},
 		{
@@ -56,12 +67,21 @@ func TestDecideLayers(t *testing.T) {
 				handlerOnline: online,
 				tunnelOK:      up,
 				deviceICMPOK:  down,
+
+				local:      false,
+				tsping:     false,
+				nodeTarget: false,
 			},
 			want: layerLAN,
 		},
 		{
 			name: "port refused",
-			in:   classifyInput{errClass: errRefused, handlerKnown: true, handlerOnline: online, tunnelOK: up},
+			in: classifyInput{errClass: errRefused, handlerKnown: true, handlerOnline: online, tunnelOK: up,
+				local:        false,
+				tsping:       false,
+				nodeTarget:   false,
+				deviceICMPOK: "",
+			},
 			want: layerService,
 		},
 		{
@@ -72,6 +92,10 @@ func TestDecideLayers(t *testing.T) {
 				handlerOnline: online,
 				tunnelOK:      up,
 				deviceICMPOK:  up,
+
+				local:      false,
+				tsping:     false,
+				nodeTarget: false,
 			},
 			want: layerService,
 		},
@@ -83,6 +107,10 @@ func TestDecideLayers(t *testing.T) {
 				handlerKnown:  true,
 				handlerOnline: online,
 				tunnelOK:      up,
+
+				local:        false,
+				tsping:       false,
+				deviceICMPOK: "",
 			},
 			want: layerService,
 		},
@@ -95,12 +123,20 @@ func TestDecideLayers(t *testing.T) {
 				handlerOnline: online,
 				tunnelOK:      up,
 				deviceICMPOK:  down,
+
+				local:  false,
+				tsping: false,
 			},
 			want: layerService,
 		},
 		{
 			name: "presence unknown tunnel",
-			in:   classifyInput{errClass: errTimeout, handlerKnown: true, handlerOnline: unset, tunnelOK: down},
+			in: classifyInput{errClass: errTimeout, handlerKnown: true, handlerOnline: unset, tunnelOK: down,
+				local:        false,
+				tsping:       false,
+				nodeTarget:   false,
+				deviceICMPOK: "",
+			},
 			want: layerTunnel,
 		},
 		{
@@ -111,35 +147,91 @@ func TestDecideLayers(t *testing.T) {
 				handlerOnline: unset,
 				tunnelOK:      up,
 				deviceICMPOK:  down,
+
+				local:      false,
+				tsping:     false,
+				nodeTarget: false,
 			},
 			want: layerLAN,
 		},
-		{name: "missing handler", in: classifyInput{errClass: errTimeout}, want: layerUnrouted},
-		{name: "missing node ip", in: classifyInput{errClass: errOther}, want: layerUnrouted},
+		{name: "missing handler", in: classifyInput{errClass: errTimeout,
+			local:         false,
+			tsping:        false,
+			nodeTarget:    false,
+			handlerKnown:  false,
+			handlerOnline: "",
+			tunnelOK:      "",
+			deviceICMPOK:  "",
+		}, want: layerUnrouted},
+		{name: "missing node ip", in: classifyInput{errClass: errOther,
+			local:         false,
+			tsping:        false,
+			nodeTarget:    false,
+			handlerKnown:  false,
+			handlerOnline: "",
+			tunnelOK:      "",
+			deviceICMPOK:  "",
+		}, want: layerUnrouted},
 		{
 			name: "tsping online",
-			in:   classifyInput{tsping: true, handlerKnown: true, handlerOnline: online, tunnelOK: down},
+			in: classifyInput{tsping: true, handlerKnown: true, handlerOnline: online, tunnelOK: down,
+				local:        false,
+				errClass:     "",
+				nodeTarget:   false,
+				deviceICMPOK: "",
+			},
 			want: layerTunnel,
 		},
 		{
 			name: "tsping offline",
-			in:   classifyInput{tsping: true, handlerKnown: true, handlerOnline: offline},
+			in: classifyInput{tsping: true, handlerKnown: true, handlerOnline: offline,
+				local:        false,
+				errClass:     "",
+				nodeTarget:   false,
+				tunnelOK:     "",
+				deviceICMPOK: "",
+			},
 			want: layerControl,
 		},
 		{
 			name: "tsping presence unknown",
-			in:   classifyInput{tsping: true, handlerKnown: true, handlerOnline: unset},
+			in: classifyInput{tsping: true, handlerKnown: true, handlerOnline: unset,
+				local:        false,
+				errClass:     "",
+				nodeTarget:   false,
+				tunnelOK:     "",
+				deviceICMPOK: "",
+			},
 			want: layerTunnel,
 		},
-		{name: "local refused", in: classifyInput{local: true, errClass: errRefused}, want: layerService},
+		{name: "local refused", in: classifyInput{local: true, errClass: errRefused,
+			tsping:        false,
+			nodeTarget:    false,
+			handlerKnown:  false,
+			handlerOnline: "",
+			tunnelOK:      "",
+			deviceICMPOK:  "",
+		}, want: layerService},
 		{
 			name: "local timeout",
-			in:   classifyInput{local: true, errClass: errTimeout, deviceICMPOK: down},
+			in: classifyInput{local: true, errClass: errTimeout, deviceICMPOK: down,
+				tsping:        false,
+				nodeTarget:    false,
+				handlerKnown:  false,
+				handlerOnline: "",
+				tunnelOK:      "",
+			},
 			want: layerLAN,
 		},
 		{
 			name: "local host up",
-			in:   classifyInput{local: true, errClass: errTimeout, deviceICMPOK: up},
+			in: classifyInput{local: true, errClass: errTimeout, deviceICMPOK: up,
+				tsping:        false,
+				nodeTarget:    false,
+				handlerKnown:  false,
+				handlerOnline: "",
+				tunnelOK:      "",
+			},
 			want: layerService,
 		},
 	}
@@ -182,7 +274,9 @@ func TestClassifyErr(t *testing.T) {
 		{name: "http body", err: &httpBodyError{text: "DSM", excerpt: "nope"}, want: errHTTP},
 		{
 			name: "x509",
-			err:  x509.CertificateInvalidError{Cert: &x509.Certificate{}, Reason: x509.Expired},
+			err: x509.CertificateInvalidError{Cert: new(x509.Certificate), Reason: x509.Expired,
+				Detail: "",
+			},
 			want: errTLS,
 		},
 		{name: "other", err: errors.New("no route"), want: errOther},
@@ -204,14 +298,60 @@ func TestPathFromPing(t *testing.T) {
 		pr   *ipnstate.PingResult
 		kind string
 	}{
-		{name: "direct", pr: &ipnstate.PingResult{Endpoint: "1.2.3.4:41641", LatencySeconds: 0.01}, kind: pathDirect},
-		{name: "derp", pr: &ipnstate.PingResult{DERPRegionCode: "nyc", LatencySeconds: 0.05}, kind: pathDERP},
+		{name: "direct", pr: &ipnstate.PingResult{Endpoint: "1.2.3.4:41641", LatencySeconds: 0.01,
+			IP:             "",
+			NodeIP:         "",
+			NodeName:       "",
+			Err:            "",
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, kind: pathDirect},
+		{name: "derp", pr: &ipnstate.PingResult{DERPRegionCode: "nyc", LatencySeconds: 0.05,
+			IP:           "",
+			NodeIP:       "",
+			NodeName:     "",
+			Err:          "",
+			Endpoint:     "",
+			PeerRelay:    "",
+			DERPRegionID: 0,
+			PeerAPIPort:  0,
+			PeerAPIURL:   "",
+			IsLocalIP:    false,
+		}, kind: pathDERP},
 		{
 			name: "peer relay",
-			pr:   &ipnstate.PingResult{PeerRelay: "5.6.7.8:443:vni:1", LatencySeconds: 0.02},
+			pr: &ipnstate.PingResult{PeerRelay: "5.6.7.8:443:vni:1", LatencySeconds: 0.02,
+				IP:             "",
+				NodeIP:         "",
+				NodeName:       "",
+				Err:            "",
+				Endpoint:       "",
+				DERPRegionID:   0,
+				DERPRegionCode: "",
+				PeerAPIPort:    0,
+				PeerAPIURL:     "",
+				IsLocalIP:      false,
+			},
 			kind: pathRelay,
 		},
-		{name: "err set", pr: &ipnstate.PingResult{Err: "timeout", Endpoint: "1.2.3.4:1"}},
+		{name: "err set", pr: &ipnstate.PingResult{Err: "timeout", Endpoint: "1.2.3.4:1",
+			IP:             "",
+			NodeIP:         "",
+			NodeName:       "",
+			LatencySeconds: 0,
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		},
+			kind: "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -229,12 +369,20 @@ func TestPathFromPing(t *testing.T) {
 
 func TestProbeCacheTTLAndSingleflight(t *testing.T) {
 	t.Parallel()
-	clk := tstest.NewClock(tstest.ClockOpts{Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+	clk := tstest.NewClock(tstest.ClockOpts{Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Step:             0,
+		TimerChannelSize: 0,
+		FollowRealTime:   false,
+	})
 	cache := newProbeCache[string](clk)
 	var calls atomic.Int32
 	fn := func() (bool, pathInfo) {
 		calls.Add(1)
-		return true, pathInfo{Kind: pathDirect}
+		return true, pathInfo{Kind: pathDirect,
+			Endpoint: "",
+			DERP:     "",
+			Latency:  0,
+		}
 	}
 	if ok, _ := cache.get("a", 30*time.Second, fn); !ok || calls.Load() != 1 {
 		t.Fatalf("calls %d", calls.Load())
@@ -252,7 +400,11 @@ func TestProbeCacheTTLAndSingleflight(t *testing.T) {
 	blocking := func() (bool, pathInfo) {
 		flight.Add(1)
 		<-hold
-		return true, pathInfo{Kind: pathDirect}
+		return true, pathInfo{Kind: pathDirect,
+			Endpoint: "",
+			DERP:     "",
+			Latency:  0,
+		}
 	}
 	var wg sync.WaitGroup
 	const callers = 40
@@ -271,21 +423,51 @@ func TestProbeCacheTTLAndSingleflight(t *testing.T) {
 
 func TestFreshICMPSkipsSupplementalProbe(t *testing.T) {
 	t.Parallel()
-	env := &countingEnv{}
+	env := new(countingEnv)
+
 	target := &Target{
 		Name:     "printer",
 		Addr:     "127.0.0.1",
 		Network:  NetworkLocal,
 		Interval: 30 * time.Second,
 		Timeout:  time.Second,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
 	c, _ := newTestClassifier(t, env, target)
-	c.Observe(Result{Target: target, Kind: checkICMP, Latency: time.Millisecond})
-	c.Observe(Result{Target: target, Kind: "tcp", Check: "tcp:9", Err: context.DeadlineExceeded})
+	c.Observe(Result{Target: target, Kind: checkICMP, Latency: time.Millisecond,
+		Check:      "",
+		Start:      time.Time{},
+		Generation: 0,
+		Err:        nil,
+		Ping:       nil,
+	})
+	c.Observe(Result{Target: target, Kind: "tcp", Check: "tcp:9", Err: context.DeadlineExceeded,
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Ping:       nil,
+	})
 	if env.packets.Load() != 0 {
 		t.Fatalf("supplemental ICMP packets %d", env.packets.Load())
 	}
-	got := c.observeOne(Result{Target: target, Kind: "tcp", Check: "tcp:9", Err: context.DeadlineExceeded})
+	got := c.observeOne(Result{Target: target, Kind: "tcp", Check: "tcp:9", Err: context.DeadlineExceeded,
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Ping:       nil,
+	})
 	if got.Layer != layerService {
 		t.Fatalf("layer %q", got.Layer)
 	}
@@ -300,6 +482,19 @@ func TestObserveLayers(t *testing.T) {
 		Network:  NetworkTailnet,
 		Interval: 30 * time.Second,
 		Timeout:  time.Second,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
 	local := &Target{
 		Name:     "printer",
@@ -307,14 +502,37 @@ func TestObserveLayers(t *testing.T) {
 		Network:  NetworkLocal,
 		Interval: 30 * time.Second,
 		Timeout:  time.Second,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	c, pres := newTestClassifier(t, &fakeEnv{}, router, nas, local)
+	c, pres := newTestClassifier(t, new(fakeEnv), router, nas, local)
 	seedRouter(pres)
 	var pings atomic.Int32
 	var icmps atomic.Int32
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
 		pings.Add(1)
-		return &ipnstate.PingResult{Endpoint: "1.2.3.4:1", LatencySeconds: 0.01, NodeIP: "100.64.0.7"}, nil
+		return &ipnstate.PingResult{Endpoint: "1.2.3.4:1", LatencySeconds: 0.01, NodeIP: "100.64.0.7",
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c.icmpFn = func(context.Context, netip.Addr, time.Duration) bool {
 		icmps.Add(1)
@@ -322,14 +540,26 @@ func TestObserveLayers(t *testing.T) {
 	}
 
 	c.learnRound(context.Background())
-	pass := c.observeOne(Result{Target: nas, Kind: "tcp", Check: "tcp:445"})
+	pass := c.observeOne(Result{Target: nas, Kind: "tcp", Check: "tcp:445",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Err:        nil,
+		Ping:       nil,
+	})
 	if pass.Layer != "" || pass.Parent != "nyc-subnet-router" {
 		t.Fatalf("pass %+v", pass)
 	}
 	c.resetProbes()
 
 	pres.apply(offlineRouter())
-	off := c.observeOne(Result{Target: nas, Kind: checkICMP, Err: context.DeadlineExceeded})
+	off := c.observeOne(Result{Target: nas, Kind: checkICMP, Err: context.DeadlineExceeded,
+		Check:      "",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Ping:       nil,
+	})
 	if off.Layer != layerControl {
 		t.Fatalf("control %q", off.Layer)
 	}
@@ -339,20 +569,49 @@ func TestObserveLayers(t *testing.T) {
 		pings.Add(1)
 		return nil, errors.New("no pong")
 	}
-	tun := c.observeOne(Result{Target: nas, Kind: checkICMP, Err: context.DeadlineExceeded})
+	tun := c.observeOne(Result{Target: nas, Kind: checkICMP, Err: context.DeadlineExceeded,
+		Check:      "",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Ping:       nil,
+	})
 	if tun.Layer != layerTunnel {
 		t.Fatalf("tunnel %q", tun.Layer)
 	}
 	c.resetProbes()
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{Endpoint: "1.2.3.4:1", NodeIP: "100.64.0.7"}, nil
+		return &ipnstate.PingResult{Endpoint: "1.2.3.4:1", NodeIP: "100.64.0.7",
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	beforeICMP := icmps.Load()
-	refused := c.observeOne(Result{Target: nas, Kind: "tcp", Err: dialRefused()})
+	refused := c.observeOne(Result{Target: nas, Kind: "tcp", Err: dialRefused(),
+		Check:      "",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Ping:       nil,
+	})
 	if refused.Layer != layerService || icmps.Load() != beforeICMP {
 		t.Fatalf("refused layer %q icmps %d", refused.Layer, icmps.Load())
 	}
-	lan := c.observeOne(Result{Target: nas, Kind: checkICMP, Err: context.DeadlineExceeded})
+	lan := c.observeOne(Result{Target: nas, Kind: checkICMP, Err: context.DeadlineExceeded,
+		Check:      "",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Ping:       nil,
+	})
 	if lan.Layer != layerLAN {
 		t.Fatalf("lan %q", lan.Layer)
 	}
@@ -362,14 +621,39 @@ func TestObserveLayers(t *testing.T) {
 		Network:  NetworkTailnet,
 		Interval: time.Minute,
 		Timeout:  time.Second,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
 	c.configured = append(c.configured, lonely)
 	c.byName[lonely.Name] = lonely
-	unrouted := c.observeOne(Result{Target: lonely, Kind: checkICMP, Err: context.DeadlineExceeded})
+	unrouted := c.observeOne(Result{Target: lonely, Kind: checkICMP, Err: context.DeadlineExceeded,
+		Check:      "",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Ping:       nil,
+	})
 	if unrouted.Layer != layerUnrouted {
 		t.Fatalf("unrouted %q", unrouted.Layer)
 	}
-	localFail := c.observeOne(Result{Target: local, Kind: checkICMP, Err: context.DeadlineExceeded})
+	localFail := c.observeOne(Result{Target: local, Kind: checkICMP, Err: context.DeadlineExceeded,
+		Check:      "",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Ping:       nil,
+	})
 	if localFail.Layer != layerLAN {
 		t.Fatalf("local %q", localFail.Layer)
 	}
@@ -391,6 +675,18 @@ func TestLearningFallbackHAAndLocal(t *testing.T) {
 		Network:  NetworkTailnet,
 		Interval: time.Minute,
 		Timeout:  time.Second,
+
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
 	local := &Target{
 		Name:     "printer",
@@ -398,8 +694,21 @@ func TestLearningFallbackHAAndLocal(t *testing.T) {
 		Network:  NetworkLocal,
 		Interval: time.Minute,
 		Timeout:  time.Second,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	c, pres := newTestClassifier(t, &fakeEnv{}, router, backup, nas, local)
+	c, pres := newTestClassifier(t, new(fakeEnv), router, backup, nas, local)
 	c.log = log
 	seedPair(pres)
 	var localPings atomic.Int32
@@ -417,7 +726,18 @@ func TestLearningFallbackHAAndLocal(t *testing.T) {
 		t.Fatal("learned a local target")
 	}
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{NodeIP: "100.64.0.11", Endpoint: "9.9.9.9:1"}, nil
+		return &ipnstate.PingResult{NodeIP: "100.64.0.11", Endpoint: "9.9.9.9:1",
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c.learnRound(context.Background())
 	if c.Parent("nyc-nas") != "nyc-subnet-router-b" {
@@ -427,7 +747,19 @@ func TestLearningFallbackHAAndLocal(t *testing.T) {
 		t.Fatalf("logs %s", logs.String())
 	}
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{Err: "timeout"}, nil
+		return &ipnstate.PingResult{Err: "timeout",
+			IP:             "",
+			NodeIP:         "",
+			NodeName:       "",
+			LatencySeconds: 0,
+			Endpoint:       "",
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c.learnRound(context.Background())
 	if c.Parent("nyc-nas") != "nyc-subnet-router-b" {
@@ -441,11 +773,36 @@ func TestMissingNodeIPUsesRoute(t *testing.T) {
 	nas := &Target{
 		Name: "nyc-nas", Addr: "10.20.0.50", Network: NetworkTailnet,
 		Timeout: time.Second, Interval: time.Minute,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	c, pres := newTestClassifier(t, &fakeEnv{}, router, nas)
+	c, pres := newTestClassifier(t, new(fakeEnv), router, nas)
 	seedRouter(pres)
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{Endpoint: "1.2.3.4:1"}, nil
+		return &ipnstate.PingResult{Endpoint: "1.2.3.4:1",
+			IP:             "",
+			NodeIP:         "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c.learnRound(context.Background())
 	if c.Parent("nyc-nas") != "nyc-subnet-router" {
@@ -460,9 +817,22 @@ func TestLearningConcurrencyCap(t *testing.T) {
 		targets[i] = &Target{
 			Name: fmt.Sprintf("lan-%02d", i), Addr: fmt.Sprintf("10.30.0.%d", i+1),
 			Network: NetworkTailnet, Timeout: time.Second, Interval: time.Minute,
+
+			Site:             "",
+			Severity:         "",
+			Parent:           "",
+			InsecureTLS:      false,
+			FailThreshold:    0,
+			RecoverThreshold: 0,
+			FlapLimit:        0,
+			FlapWindow:       0,
+			Checks:           nil,
+			Implicit:         false,
+			StableID:         "",
+			NodeID:           0,
 		}
 	}
-	c, _ := newTestClassifier(t, &fakeEnv{}, targets...)
+	c, _ := newTestClassifier(t, new(fakeEnv), targets...)
 	var inflight atomic.Int32
 	var peak atomic.Int32
 	hold := make(chan struct{})
@@ -501,7 +871,23 @@ func TestImplicitTargetsAndGrantLog(t *testing.T) {
 	log := slog.New(slog.NewJSONHandler(&logs, nil))
 	mixed := &Target{
 		Name: "nyc-router", Addr: "nyc-router", Network: NetworkTailnet,
-		Checks: []check{tspingCheck{}, tcpCheck{port: 443}},
+		Checks: []check{tspingCheck{
+			resolver: nil,
+		}, tcpCheck{port: 443}},
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
 	nas := &Target{
 		Name:     "nyc-nas",
@@ -510,6 +896,18 @@ func TestImplicitTargetsAndGrantLog(t *testing.T) {
 		Network:  NetworkTailnet,
 		Timeout:  time.Second,
 		Interval: time.Minute,
+
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
 	other := &Target{
 		Name:     "other-nas",
@@ -518,12 +916,36 @@ func TestImplicitTargetsAndGrantLog(t *testing.T) {
 		Network:  NetworkTailnet,
 		Timeout:  time.Second,
 		Interval: time.Minute,
+
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	c, pres := newTestClassifier(t, &fakeEnv{}, mixed, nas, other)
+	c, pres := newTestClassifier(t, new(fakeEnv), mixed, nas, other)
 	c.log = log
 	seedRouter(pres)
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{NodeIP: "100.64.0.7"}, nil
+		return &ipnstate.PingResult{NodeIP: "100.64.0.7",
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			Endpoint:       "",
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c.learnRound(context.Background())
 	parent := c.Parent("nyc-nas")
@@ -576,8 +998,21 @@ func TestGrantWarningRounds(t *testing.T) {
 		Network:  NetworkTailnet,
 		Timeout:  time.Second,
 		Interval: time.Minute,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	c, pres := newTestClassifier(t, &fakeEnv{}, pdu)
+	c, pres := newTestClassifier(t, new(fakeEnv), pdu)
 	c.log = log
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
 		return nil, errors.New("timeout")
@@ -589,7 +1024,19 @@ func TestGrantWarningRounds(t *testing.T) {
 	}
 	seedRouter(pres)
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{NodeIP: "100.64.0.7"}, nil
+		return &ipnstate.PingResult{NodeIP: "100.64.0.7",
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			Endpoint:       "",
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c.learnRound(context.Background())
 	if strings.Count(logs.String(), "no peer handles 10.99.0.5") != 1 {
@@ -611,15 +1058,32 @@ func TestGrantWarningRounds(t *testing.T) {
 func TestLearnerSchedule(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	clk := tstest.NewClock(tstest.ClockOpts{Start: start})
+	clk := tstest.NewClock(tstest.ClockOpts{Start: start,
+		Step:             0,
+		TimerChannelSize: 0,
+		FollowRealTime:   false,
+	})
 	nas := &Target{
 		Name:     "nyc-nas",
 		Addr:     "10.20.0.50",
 		Network:  NetworkTailnet,
 		Timeout:  time.Second,
 		Interval: time.Minute,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	c, _ := newTestClassifier(t, &fakeEnv{}, nas)
+	c, _ := newTestClassifier(t, new(fakeEnv), nas)
 	c.clock = clk
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
 		return nil, errors.New("timeout")
@@ -663,11 +1127,37 @@ func TestReconciliationRetainsThenRemoves(t *testing.T) {
 		Network:  NetworkTailnet,
 		Timeout:  time.Second,
 		Interval: time.Minute,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	c, pres := newTestClassifier(t, &fakeEnv{}, nas)
+	c, pres := newTestClassifier(t, new(fakeEnv), nas)
 	restored := &Target{
 		Name: "old-router", Addr: "100.64.0.9", Network: NetworkTailnet, Implicit: true,
-		NodeID: 9, StableID: "nOLD", Checks: []check{tspingCheck{}},
+		NodeID: 9, StableID: "nOLD", Checks: []check{tspingCheck{
+			resolver: nil,
+		}},
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
 	}
 	c.RestoreImplicit(restored)
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
@@ -689,7 +1179,19 @@ func TestReconciliationRetainsThenRemoves(t *testing.T) {
 	}
 	seedRouter(pres)
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{NodeIP: "100.64.0.7"}, nil
+		return &ipnstate.PingResult{NodeIP: "100.64.0.7",
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			Endpoint:       "",
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c.learnRound(context.Background())
 	if !c.LastReconciliation().Complete {
@@ -702,15 +1204,45 @@ func TestReconciliationRetainsThenRemoves(t *testing.T) {
 
 func TestNoRemoteLANCompletesImmediately(t *testing.T) {
 	t.Parallel()
-	node := &Target{Name: "build-1", Addr: "100.64.0.4", Network: NetworkTailnet, Checks: []check{tspingCheck{}}}
-	c, _ := newTestClassifier(t, &fakeEnv{}, node)
+	node := &Target{Name: "build-1", Addr: "100.64.0.4", Network: NetworkTailnet, Checks: []check{tspingCheck{
+		resolver: nil,
+	}},
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	}
+	c, _ := newTestClassifier(t, new(fakeEnv), node)
 	restored := &Target{
 		Name:     "ghost",
 		Addr:     "100.64.0.9",
 		Implicit: true,
 		NodeID:   9,
 		StableID: "nGHOST",
-		Checks:   []check{tspingCheck{}},
+		Checks: []check{tspingCheck{
+			resolver: nil,
+		}},
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
 	}
 	c.RestoreImplicit(restored)
 	l := newLearner(c)
@@ -734,13 +1266,54 @@ func TestGraphCycleAndHARelease(t *testing.T) {
 		Addr:    "nyc-router",
 		Parent:  "switch",
 		Network: NetworkTailnet,
-		Checks:  []check{tspingCheck{}},
+		Checks: []check{tspingCheck{
+			resolver: nil,
+		}},
+
+		Site:             "",
+		Severity:         "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	sw := &Target{Name: "switch", Addr: "10.20.0.1", Network: NetworkTailnet, Checks: []check{icmpCheck{}}}
-	c, pres := newTestClassifier(t, &fakeEnv{}, router, sw)
+	sw := &Target{Name: "switch", Addr: "10.20.0.1", Network: NetworkTailnet, Checks: []check{icmpCheck{}},
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	}
+	c, pres := newTestClassifier(t, new(fakeEnv), router, sw)
 	seedRouter(pres)
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{NodeIP: "100.64.0.7"}, nil
+		return &ipnstate.PingResult{NodeIP: "100.64.0.7",
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			Endpoint:       "",
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c.learnRound(context.Background())
 	if c.Parent("switch") == "r" {
@@ -763,12 +1336,37 @@ func TestGraphCycleAndHARelease(t *testing.T) {
 		Network:  NetworkTailnet,
 		Timeout:  time.Second,
 		Interval: time.Minute,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	c2, pres2 := newTestClassifier(t, &fakeEnv{}, a, b, child)
+	c2, pres2 := newTestClassifier(t, new(fakeEnv), a, b, child)
 	seedPair(pres2)
 	which := "100.64.0.7" // router A
 	c2.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{NodeIP: which}, nil
+		return &ipnstate.PingResult{NodeIP: which,
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			Endpoint:       "",
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c2.learnRound(context.Background())
 	which = "100.64.0.11"
@@ -783,19 +1381,58 @@ func TestGraphCycleAndHARelease(t *testing.T) {
 
 func TestSwitchParentDoesNotReplaceHandler(t *testing.T) {
 	t.Parallel()
-	sw := &Target{Name: "nyc-core-switch", Addr: "10.20.0.1", Network: NetworkTailnet, Checks: []check{icmpCheck{}}}
+	sw := &Target{Name: "nyc-core-switch", Addr: "10.20.0.1", Network: NetworkTailnet, Checks: []check{icmpCheck{}},
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	}
 	cam := &Target{
 		Name:    "nyc-cam-3",
 		Addr:    "10.20.0.50",
 		Parent:  "nyc-core-switch",
 		Network: NetworkTailnet,
 		Timeout: time.Second,
+
+		Site:             "",
+		Severity:         "",
+		InsecureTLS:      false,
+		Interval:         0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
 	router := peerTarget("nyc-subnet-router", "nyc-router")
-	c, pres := newTestClassifier(t, &fakeEnv{}, router, sw, cam)
+	c, pres := newTestClassifier(t, new(fakeEnv), router, sw, cam)
 	seedRouter(pres)
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{NodeIP: "100.64.0.7"}, nil
+		return &ipnstate.PingResult{NodeIP: "100.64.0.7",
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			Endpoint:       "",
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	c.learnRound(context.Background())
 	if c.Parent("nyc-cam-3") != "nyc-core-switch" {
@@ -815,21 +1452,68 @@ func TestLayerAndParentMetrics(t *testing.T) {
 		Network:  NetworkTailnet,
 		Interval: 30 * time.Second,
 		Timeout:  time.Second,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
-	c, pres := newTestClassifier(t, &fakeEnv{}, nas)
+	c, pres := newTestClassifier(t, new(fakeEnv), nas)
 	seedRouter(pres)
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
-		return &ipnstate.PingResult{Endpoint: "1.2.3.4:1", NodeIP: "100.64.0.7"}, nil
+		return &ipnstate.PingResult{Endpoint: "1.2.3.4:1", NodeIP: "100.64.0.7",
+			IP:             "",
+			NodeName:       "",
+			Err:            "",
+			LatencySeconds: 0,
+			PeerRelay:      "",
+			DERPRegionID:   0,
+			DERPRegionCode: "",
+			PeerAPIPort:    0,
+			PeerAPIURL:     "",
+			IsLocalIP:      false,
+		}, nil
 	}
 	for range 3 {
-		c.Observe(Result{Target: nas, Kind: "tcp", Err: &httpStatusError{code: 500}})
+		c.Observe(Result{Target: nas, Kind: "tcp", Err: &httpStatusError{code: 500},
+			Check:      "",
+			Start:      time.Time{},
+			Generation: 0,
+			Latency:    0,
+			Ping:       nil,
+		})
 	}
 	if got := testutil.ToFloat64(c.layers.WithLabelValues("nyc-nas", "service")); got != 3 {
 		t.Fatalf("layer counter %v", got)
 	}
 	c.Observe(Result{
 		Target: nas, Kind: checkTSPing,
-		Ping: &ipnstate.PingResult{DERPRegionCode: "nyc", LatencySeconds: 0.05},
+		Ping: &ipnstate.PingResult{DERPRegionCode: "nyc", LatencySeconds: 0.05,
+			IP:           "",
+			NodeIP:       "",
+			NodeName:     "",
+			Err:          "",
+			Endpoint:     "",
+			PeerRelay:    "",
+			DERPRegionID: 0,
+			PeerAPIPort:  0,
+			PeerAPIURL:   "",
+			IsLocalIP:    false,
+		},
+
+		Check:      "",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Err:        nil,
 	})
 	for _, kind := range []string{pathDirect, pathDERP, pathRelay} {
 		want := 0.0
@@ -858,11 +1542,40 @@ func TestLayerAndParentMetrics(t *testing.T) {
 func TestRegisterBeforeSchedule(t *testing.T) {
 	t.Parallel()
 	var order []string
-	alert := &memRegistry{order: &order, mark: "alert"}
+	alert := &memRegistry{order: &order, mark: "alert",
+		mu:      sync.Mutex{},
+		targets: nil,
+		down:    nil,
+		graphs:  nil,
+	}
 	start := &orderStarter{order: &order}
-	reg := &runtimeRegistry{alert: alert, start: start, probes: map[string][]func() error{}}
+	reg := &runtimeRegistry{alert: alert, start: start, probes: map[string][]func() error{},
+		app:    nil,
+		mu:     sync.Mutex{},
+		byName: nil,
+		known:  nil,
+		pool:   nil,
+	}
 	t.Helper()
-	if err := reg.AddTarget(&Target{Name: "nyc-router", Checks: []check{tspingCheck{}}}); err != nil {
+	if err := reg.AddTarget(&Target{Name: "nyc-router", Checks: []check{tspingCheck{
+		resolver: nil,
+	}},
+		Addr:             "",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(order, ",") != "alert nyc-router,schedule nyc-router" {
@@ -952,7 +1665,8 @@ func newTestClassifier(t *testing.T, env netEnv, targets ...*Target) (*classifie
 	t.Helper()
 	pres := newPresence(nil, tstime.StdClock{}, nil)
 	reg := prometheus.NewRegistry()
-	mem := &memRegistry{}
+	mem := new(memRegistry)
+
 	c := newClassifier(pres, env, nil, tstime.StdClock{}, reg, targets, mem)
 	pres.setHandler(c.nodeForTarget)
 	return c, pres
@@ -973,12 +1687,26 @@ func (c captureConsumer) ObserveClassified(cl Classified) { c.fn(cl) }
 
 func peerTarget(name, addr string) *Target {
 	return &Target{
-		Name:     name,
-		Addr:     addr,
-		Network:  NetworkTailnet,
-		Checks:   []check{tspingCheck{}},
+		Name:    name,
+		Addr:    addr,
+		Network: NetworkTailnet,
+		Checks: []check{tspingCheck{
+			resolver: nil,
+		}},
 		Interval: time.Minute,
 		Timeout:  time.Second,
+
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
 	}
 }
 
@@ -988,7 +1716,17 @@ func seedRouter(p *presence) {
 
 func offlineRouter() ipn.Notify {
 	off := false
-	return ipn.Notify{PeerChangedPatch: []*tailcfg.PeerChange{{NodeID: 1, Online: &off}}}
+	return ipn.Notify{PeerChangedPatch: []*tailcfg.PeerChange{{NodeID: 1, Online: &off,
+		DERPRegion:   0,
+		Cap:          0,
+		CapMap:       nil,
+		Endpoints:    nil,
+		Key:          nil,
+		KeySignature: nil,
+		DiscoKey:     nil,
+		LastSeen:     nil,
+		KeyExpiry:    nil,
+	}}}
 }
 
 func seedPair(p *presence) {
@@ -1001,7 +1739,11 @@ func seedPair(p *presence) {
 }
 
 func dialRefused() error {
-	return &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
+	return &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED,
+		Net:    "",
+		Source: nil,
+		Addr:   nil,
+	}
 }
 
 func (c *classifier) resetProbes() {
@@ -1070,13 +1812,19 @@ func (c *classifiedSink) ObserveClassified(cl Classified) {
 func TestPresenceChangeAloneProducesNoFailure(t *testing.T) {
 	t.Parallel()
 	router := peerTarget("nyc-subnet-router", "nyc-router")
-	c, pres := newTestClassifier(t, &fakeEnv{}, router)
+	c, pres := newTestClassifier(t, new(fakeEnv), router)
 	seedRouter(pres)
 	var cons classifiedSink
 	c.addConsumer(&cons)
 
 	pres.apply(offlineRouter())
-	c.Observe(Result{Target: router, Kind: checkTSPing, Check: "tsping"})
+	c.Observe(Result{Target: router, Kind: checkTSPing, Check: "tsping",
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Err:        nil,
+		Ping:       nil,
+	})
 
 	if len(cons.got) != 1 || cons.got[0].Layer != "" {
 		t.Fatalf("classified %+v", cons.got)
@@ -1093,6 +1841,11 @@ func TestNodeTargetSkipsICMPProbe(t *testing.T) {
 		nodeTarget:   true,
 		tunnelOK:     opt.NewBool(true),
 		errClass:     errTimeout,
+
+		local:         false,
+		tsping:        false,
+		handlerOnline: "",
+		deviceICMPOK:  "",
 	}
 	if needsICMP(in) {
 		t.Fatal("node target should not send an ICMP probe")

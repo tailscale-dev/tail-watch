@@ -143,7 +143,10 @@ func newProbeCache[K comparable](clock tstime.Clock) *probeCache[K] {
 	if clock == nil {
 		clock = tstime.StdClock{}
 	}
-	return &probeCache[K]{clock: clock, items: map[K]probeHit{}}
+	return &probeCache[K]{clock: clock, items: map[K]probeHit{},
+		mu:    sync.Mutex{},
+		group: singleflight.Group[K, probeHit]{},
+	}
 }
 
 func probeTTL(interval time.Duration) time.Duration {
@@ -248,6 +251,15 @@ func newClassifier(
 		implicit:       map[tailcfg.NodeID]*implicitState{},
 		implicitByName: map[string]*implicitState{},
 		grants:         map[string]grantState{},
+
+		pingFn:    nil,
+		icmpFn:    nil,
+		mu:        sync.Mutex{},
+		consumers: nil,
+		lastReconcile: reconcileResult{
+			Complete: false,
+			Removed:  nil,
+		},
 	}
 	for _, t := range targets {
 		if t != nil && t.Name != "" {
@@ -320,7 +332,10 @@ func (c *classifier) consumerSnapshot() []classifiedConsumer {
 }
 
 func (c *classifier) classify(ctx context.Context, res Result) Classified {
-	out := Classified{Result: res, Path: pathFromResult(res)}
+	out := Classified{Result: res, Path: pathFromResult(res),
+		Layer:  "",
+		Parent: "",
+	}
 	if res.Target == nil {
 		return out
 	}
@@ -392,6 +407,11 @@ func (c *classifier) baseInput(res Result) classifyInput {
 		tsping:     res.Kind == checkTSPing,
 		errClass:   classifyErr(res.Err),
 		nodeTarget: c.isNodeTarget(res.Target),
+
+		handlerKnown:  false,
+		handlerOnline: "",
+		tunnelOK:      "",
+		deviceICMPOK:  "",
 	}
 	if res.Kind == checkICMP {
 		in.deviceICMPOK = opt.False
@@ -577,7 +597,11 @@ func (c *classifier) seedPassing(res Result) {
 	switch res.Kind {
 	case checkICMP:
 		if ip, ok := c.targetIP(res.Target); ok {
-			c.icmp.store(ip, true, pathInfo{Latency: res.Latency})
+			c.icmp.store(ip, true, pathInfo{Latency: res.Latency,
+				Kind:     "",
+				Endpoint: "",
+				DERP:     "",
+			})
 		}
 	case checkTSPing:
 		peer, ok := c.handlerPeer(res.Target)
@@ -608,7 +632,25 @@ func (c *classifier) ping(
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	res, err := (tspingCheck{}).Run(ctx, c.env, &Target{Addr: ip.String(), Timeout: timeout})
+	res, err := (tspingCheck{
+		resolver: nil,
+	}).Run(ctx, c.env, &Target{Addr: ip.String(), Timeout: timeout,
+		Name:             "",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	})
 	if err != nil {
 		return res.Ping, err
 	}
@@ -627,7 +669,23 @@ func (c *classifier) probeICMP(ctx context.Context, ip netip.Addr, timeout time.
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	_, err := (icmpCheck{}).Run(ctx, c.env, &Target{Addr: ip.String(), Timeout: timeout})
+	_, err := (icmpCheck{}).Run(ctx, c.env, &Target{Addr: ip.String(), Timeout: timeout,
+		Name:             "",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	})
 	return err == nil
 }
 
@@ -767,7 +825,11 @@ func pathFromPing(pr *ipnstate.PingResult) pathInfo {
 	if pr == nil || pr.Err != "" {
 		return pathInfo{}
 	}
-	out := pathInfo{Latency: time.Duration(pr.LatencySeconds * float64(time.Second))}
+	out := pathInfo{Latency: time.Duration(pr.LatencySeconds * float64(time.Second)),
+		Kind:     "",
+		Endpoint: "",
+		DERP:     "",
+	}
 	switch {
 	case pr.Endpoint != "":
 		out.Kind = pathDirect

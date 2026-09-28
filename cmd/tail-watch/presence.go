@@ -89,6 +89,13 @@ func newPresence(
 		clock: clock,
 		watch: watch,
 		peers: map[tailcfg.NodeID]peerInfo{},
+
+		mu:      sync.RWMutex{},
+		seeded:  false,
+		gen:     0,
+		handler: nil,
+		subs:    nil,
+		waiters: nil,
 	}
 }
 

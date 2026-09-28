@@ -105,6 +105,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		stdout: stdout,
 		socket: socket,
 		listen: cfg.ListenAddr(*listenFlag),
+
+		resolver: nil,
+		presence: nil,
+		class:    nil,
+		learner:  nil,
+		alerts:   nil,
+		metrics:  nil,
+		watch:    nil,
+		probeMu:  sync.Mutex{},
+		probes:   nil,
 	}
 	a.pub.add(debugConsumer{log: log})
 	a.bindResolver()
@@ -247,7 +257,8 @@ func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeReg
 }
 
 func (a *app) runOnce() int {
-	col := &collectConsumer{}
+	col := new(collectConsumer)
+
 	a.pub.add(col)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -287,7 +298,16 @@ func (a *app) runServer() int {
 	mux := http.NewServeMux()
 	mux.Handle("/", tsweb.StdHandler(
 		p.StatusHandler(prober.WithTitle("tail-watch")),
-		tsweb.HandlerOptions{Logf: a.logf},
+		tsweb.HandlerOptions{Logf: a.logf,
+			QuietLoggingIfSuccessful: false,
+			Now:                      nil,
+			StatusCodeCounters:       nil,
+			StatusCodeCountersFull:   nil,
+			BucketedStats:            nil,
+			OnStart:                  nil,
+			OnError:                  nil,
+			OnCompletion:             nil,
+		},
 	))
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -466,7 +486,10 @@ func newLogger(w io.Writer, level string) (*slog.Logger, error) {
 	default:
 		return nil, fmt.Errorf("unknown log level %q", level)
 	}
-	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl})), nil
+	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl,
+		AddSource:   false,
+		ReplaceAttr: nil,
+	})), nil
 }
 
 // checkStarter schedules one check and returns a function that stops it.
@@ -580,6 +603,10 @@ func (s proberStarter) Start(t *Target, chk check, run func(context.Context) err
 		Class:   chk.Kind(),
 		Timeout: t.Timeout,
 		Probe:   run,
+
+		Labels:      nil,
+		Concurrency: 0,
+		Metrics:     nil,
 	})
 	return pr.Close, nil
 }

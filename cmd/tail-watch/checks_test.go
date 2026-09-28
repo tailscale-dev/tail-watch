@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,9 +35,26 @@ func TestTCPOpenAndRefused(t *testing.T) {
 			_ = c.Close()
 		}
 	}()
-	env := &fakeEnv{}
+	env := new(fakeEnv)
+
 	port := ln.Addr().(*net.TCPAddr).Port
-	res, err := tcpCheck{port: port}.Run(context.Background(), env, &Target{Name: "up", Addr: "127.0.0.1"})
+	res, err := tcpCheck{port: port}.Run(context.Background(), env, &Target{Name: "up", Addr: "127.0.0.1",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +68,23 @@ func TestTCPOpenAndRefused(t *testing.T) {
 	}
 	closedPort := closed.Addr().(*net.TCPAddr).Port
 	_ = closed.Close()
-	_, err = tcpCheck{port: closedPort}.Run(context.Background(), env, &Target{Name: "down", Addr: "127.0.0.1"})
+	_, err = tcpCheck{port: closedPort}.Run(context.Background(), env, &Target{Name: "down", Addr: "127.0.0.1",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	})
 	if err == nil || !strings.Contains(err.Error(), "connection refused") {
 		t.Fatalf("err %v", err)
 	}
@@ -74,20 +108,55 @@ func TestHTTPChecks(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	env := &fakeEnv{}
+	env := new(fakeEnv)
+
 	host := strings.TrimPrefix(srv.URL, "http://")
 	addr, _, _ := strings.Cut(host, ":")
 
 	t.Run("200", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+srv.URL+"/ok|DSM")
-		if _, err := chk.Run(context.Background(), env, &Target{Addr: addr}); err != nil {
+		if _, err := chk.Run(context.Background(), env, &Target{Addr: addr,
+			Name:             "",
+			Site:             "",
+			Severity:         "",
+			Parent:           "",
+			InsecureTLS:      false,
+			Interval:         0,
+			Timeout:          0,
+			FailThreshold:    0,
+			RecoverThreshold: 0,
+			FlapLimit:        0,
+			FlapWindow:       0,
+			Network:          "",
+			Checks:           nil,
+			Implicit:         false,
+			StableID:         "",
+			NodeID:           0,
+		}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Run("302", func(t *testing.T) {
 		before := hits["/ok"]
 		chk := mustCheck(t, "http:"+srv.URL+"/bounce")
-		if _, err := chk.Run(context.Background(), env, &Target{Addr: addr}); err != nil {
+		if _, err := chk.Run(context.Background(), env, &Target{Addr: addr,
+			Name:             "",
+			Site:             "",
+			Severity:         "",
+			Parent:           "",
+			InsecureTLS:      false,
+			Interval:         0,
+			Timeout:          0,
+			FailThreshold:    0,
+			RecoverThreshold: 0,
+			FlapLimit:        0,
+			FlapWindow:       0,
+			Network:          "",
+			Checks:           nil,
+			Implicit:         false,
+			StableID:         "",
+			NodeID:           0,
+		}); err != nil {
 			t.Fatal(err)
 		}
 		if hits["/ok"] != before {
@@ -96,14 +165,48 @@ func TestHTTPChecks(t *testing.T) {
 	})
 	t.Run("500", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+srv.URL+"/fail")
-		_, err := chk.Run(context.Background(), env, &Target{Addr: addr})
+		_, err := chk.Run(context.Background(), env, &Target{Addr: addr,
+			Name:             "",
+			Site:             "",
+			Severity:         "",
+			Parent:           "",
+			InsecureTLS:      false,
+			Interval:         0,
+			Timeout:          0,
+			FailThreshold:    0,
+			RecoverThreshold: 0,
+			FlapLimit:        0,
+			FlapWindow:       0,
+			Network:          "",
+			Checks:           nil,
+			Implicit:         false,
+			StableID:         "",
+			NodeID:           0,
+		})
 		if err == nil || !strings.Contains(err.Error(), "500") {
 			t.Fatal(err)
 		}
 	})
 	t.Run("missing text", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+srv.URL+"/missing|DSM")
-		_, err := chk.Run(context.Background(), env, &Target{Addr: addr})
+		_, err := chk.Run(context.Background(), env, &Target{Addr: addr,
+			Name:             "",
+			Site:             "",
+			Severity:         "",
+			Parent:           "",
+			InsecureTLS:      false,
+			Interval:         0,
+			Timeout:          0,
+			FailThreshold:    0,
+			RecoverThreshold: 0,
+			FlapLimit:        0,
+			FlapWindow:       0,
+			Network:          "",
+			Checks:           nil,
+			Implicit:         false,
+			StableID:         "",
+			NodeID:           0,
+		})
 		if err == nil || !strings.Contains(err.Error(), "DSM") ||
 			!strings.Contains(err.Error(), strings.Repeat("a", 300)) {
 			t.Fatal(err)
@@ -118,14 +221,47 @@ func TestHTTPChecks(t *testing.T) {
 	ip, _, _ := strings.Cut(tlsHost, ":")
 	t.Run("tls rejected", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+tlsSrv.URL+"/")
-		_, err := chk.Run(context.Background(), env, &Target{Addr: ip})
+		_, err := chk.Run(context.Background(), env, &Target{Addr: ip,
+			Name:             "",
+			Site:             "",
+			Severity:         "",
+			Parent:           "",
+			InsecureTLS:      false,
+			Interval:         0,
+			Timeout:          0,
+			FailThreshold:    0,
+			RecoverThreshold: 0,
+			FlapLimit:        0,
+			FlapWindow:       0,
+			Network:          "",
+			Checks:           nil,
+			Implicit:         false,
+			StableID:         "",
+			NodeID:           0,
+		})
 		if err == nil {
 			t.Fatal("expected tls error")
 		}
 	})
 	t.Run("insecure tls", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+tlsSrv.URL+"/")
-		if _, err := chk.Run(context.Background(), env, &Target{Addr: ip, InsecureTLS: true}); err != nil {
+		if _, err := chk.Run(context.Background(), env, &Target{Addr: ip, InsecureTLS: true,
+			Name:             "",
+			Site:             "",
+			Severity:         "",
+			Parent:           "",
+			Interval:         0,
+			Timeout:          0,
+			FailThreshold:    0,
+			RecoverThreshold: 0,
+			FlapLimit:        0,
+			FlapWindow:       0,
+			Network:          "",
+			Checks:           nil,
+			Implicit:         false,
+			StableID:         "",
+			NodeID:           0,
+		}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -133,8 +269,25 @@ func TestHTTPChecks(t *testing.T) {
 
 func TestICMPPermissionAndFamily(t *testing.T) {
 	t.Parallel()
-	env := &fakeEnv{listenErr: errors.New("listen ip4:icmp 0.0.0.0: socket: operation not permitted")}
-	_, err := icmpCheck{}.Run(context.Background(), env, &Target{Name: "lo", Addr: "127.0.0.1"})
+	env := new(fakeEnv)
+	env.listenErr = errors.New("listen ip4:icmp 0.0.0.0: socket: operation not permitted")
+	_, err := icmpCheck{}.Run(context.Background(), env, &Target{Name: "lo", Addr: "127.0.0.1",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	})
 	if err == nil || !strings.Contains(err.Error(), "net.ipv4.ping_group_range") ||
 		!strings.Contains(err.Error(), "CAP_NET_RAW") {
 		t.Fatalf("err %v", err)
@@ -142,8 +295,25 @@ func TestICMPPermissionAndFamily(t *testing.T) {
 	if env.lastListen != "ip4:icmp" {
 		t.Fatalf("listen network %s", env.lastListen)
 	}
-	env6 := &fakeEnv{listenErr: errors.New("listen ip6:icmp: socket: operation not permitted")}
-	_, _ = icmpCheck{}.Run(context.Background(), env6, &Target{Name: "lo", Addr: "::1"})
+	env6 := new(fakeEnv)
+	env6.listenErr = errors.New("listen ip6:icmp: socket: operation not permitted")
+	_, _ = icmpCheck{}.Run(context.Background(), env6, &Target{Name: "lo", Addr: "::1",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	})
 	if env6.lastListen != "ip6:icmp" {
 		t.Fatalf("listen network %s", env6.lastListen)
 	}
@@ -157,7 +327,23 @@ func TestICMPLoopback(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	res, err := icmpCheck{}.Run(ctx, env, &Target{Name: "lo", Addr: "127.0.0.1"})
+	res, err := icmpCheck{}.Run(ctx, env, &Target{Name: "lo", Addr: "127.0.0.1",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	})
 	if err != nil {
 		if strings.Contains(err.Error(), "net.ipv4.ping_group_range") {
 			t.Skipf("host allows no ICMP socket: %v", err)
@@ -185,15 +371,47 @@ func canICMP(env *kernelEnv) bool {
 
 func TestRunCheckRecordsTimeout(t *testing.T) {
 	t.Parallel()
-	env := &fakeEnv{dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	env := new(fakeEnv)
+	env.dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
-	}}
-	a := &app{env: env, clock: tstime.StdClock{}, pub: newPublisher()}
+	}
+	a := &app{env: env, clock: tstime.StdClock{}, pub: newPublisher(),
+		cfg:      nil,
+		log:      nil,
+		stdout:   nil,
+		socket:   "",
+		listen:   "",
+		resolver: nil,
+		presence: nil,
+		class:    nil,
+		learner:  nil,
+		alerts:   nil,
+		metrics:  nil,
+		watch:    nil,
+		probeMu:  sync.Mutex{},
+		probes:   nil,
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	res := a.runCheck(ctx, &Target{Name: "t", Addr: "127.0.0.1"}, tcpCheck{port: 9})
+	res := a.runCheck(ctx, &Target{Name: "t", Addr: "127.0.0.1",
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+	}, tcpCheck{port: 9})
 	if time.Since(start) > time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -208,7 +426,10 @@ func TestMatchPeer(t *testing.T) {
 	v6 := netip.MustParseAddr("fd7a:115c:a1e0::2")
 	other := netip.MustParseAddr("100.64.0.9")
 	st := &ipnstate.Status{
-		CurrentTailnet: &ipnstate.TailnetStatus{MagicDNSSuffix: "tailnet.ts.net"},
+		CurrentTailnet: &ipnstate.TailnetStatus{MagicDNSSuffix: "tailnet.ts.net",
+			Name:            "",
+			MagicDNSEnabled: false,
+		},
 		Self: &ipnstate.PeerStatus{
 			HostName:     "self",
 			DNSName:      "self.tailnet.ts.net.",
@@ -242,12 +463,29 @@ func TestMatchPeer(t *testing.T) {
 		warn    bool
 		missing bool
 	}{
-		{name: "dns with dot stripped", addr: "nyc-router.tailnet.ts.net", want: v4},
-		{name: "short name", addr: "nyc-router", want: v4},
-		{name: "hostname", addr: "self", want: netip.MustParseAddr("100.64.0.1")},
-		{name: "exact dns beats other hostname", addr: "dup-a.tailnet.ts.net", want: other},
-		{name: "ambiguous hostname", addr: "dup", want: other, warn: true},
-		{name: "no match", addr: "missing", missing: true},
+		{name: "dns with dot stripped", addr: "nyc-router.tailnet.ts.net", want: v4,
+			warn:    false,
+			missing: false,
+		},
+		{name: "short name", addr: "nyc-router", want: v4,
+			warn:    false,
+			missing: false,
+		},
+		{name: "hostname", addr: "self", want: netip.MustParseAddr("100.64.0.1"),
+			warn:    false,
+			missing: false,
+		},
+		{name: "exact dns beats other hostname", addr: "dup-a.tailnet.ts.net", want: other,
+			warn:    false,
+			missing: false,
+		},
+		{name: "ambiguous hostname", addr: "dup", want: other, warn: true,
+			missing: false,
+		},
+		{name: "no match", addr: "missing", missing: true,
+			want: netip.Addr{},
+			warn: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -271,7 +509,11 @@ func TestMatchPeer(t *testing.T) {
 
 func TestStatusCache(t *testing.T) {
 	t.Parallel()
-	clk := tstest.NewClock(tstest.ClockOpts{Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+	clk := tstest.NewClock(tstest.ClockOpts{Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Step:             0,
+		TimerChannelSize: 0,
+		FollowRealTime:   false,
+	})
 	var calls int
 	cache := &statusCache{
 		clock: clk,
@@ -280,6 +522,10 @@ func TestStatusCache(t *testing.T) {
 			calls++
 			return &ipnstate.Status{BackendState: "Running"}, nil
 		},
+
+		mu: sync.Mutex{},
+		at: time.Time{},
+		st: nil,
 	}
 	if _, err := cache.get(context.Background()); err != nil {
 		t.Fatal(err)
@@ -310,37 +556,114 @@ func TestInterpretPing(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:   "direct",
-			pr:     &ipnstate.PingResult{Endpoint: "1.2.3.4:41641", LatencySeconds: 0.01},
+			name: "direct",
+			pr: &ipnstate.PingResult{Endpoint: "1.2.3.4:41641", LatencySeconds: 0.01,
+				IP:             "",
+				NodeIP:         "",
+				NodeName:       "",
+				Err:            "",
+				PeerRelay:      "",
+				DERPRegionID:   0,
+				DERPRegionCode: "",
+				PeerAPIPort:    0,
+				PeerAPIURL:     "",
+				IsLocalIP:      false,
+			},
 			kind:   "direct",
 			detail: "1.2.3.4:41641",
+
+			err:     nil,
+			wantErr: "",
 		},
 		{
-			name:   "derp",
-			pr:     &ipnstate.PingResult{DERPRegionCode: "nyc", LatencySeconds: 0.05},
+			name: "derp",
+			pr: &ipnstate.PingResult{DERPRegionCode: "nyc", LatencySeconds: 0.05,
+				IP:           "",
+				NodeIP:       "",
+				NodeName:     "",
+				Err:          "",
+				Endpoint:     "",
+				PeerRelay:    "",
+				DERPRegionID: 0,
+				PeerAPIPort:  0,
+				PeerAPIURL:   "",
+				IsLocalIP:    false,
+			},
 			kind:   "derp",
 			detail: "nyc",
+
+			err:     nil,
+			wantErr: "",
 		},
 		{
-			name:   "peer relay",
-			pr:     &ipnstate.PingResult{PeerRelay: "5.6.7.8:443:vni:1", LatencySeconds: 0.02},
+			name: "peer relay",
+			pr: &ipnstate.PingResult{PeerRelay: "5.6.7.8:443:vni:1", LatencySeconds: 0.02,
+				IP:             "",
+				NodeIP:         "",
+				NodeName:       "",
+				Err:            "",
+				Endpoint:       "",
+				DERPRegionID:   0,
+				DERPRegionCode: "",
+				PeerAPIPort:    0,
+				PeerAPIURL:     "",
+				IsLocalIP:      false,
+			},
 			kind:   "peer_relay",
 			detail: "5.6.7.8:443:vni:1",
+
+			err:     nil,
+			wantErr: "",
 		},
 		{
-			name:    "err set",
-			pr:      &ipnstate.PingResult{Err: "timeout", Endpoint: "1.2.3.4:1"},
+			name: "err set",
+			pr: &ipnstate.PingResult{Err: "timeout", Endpoint: "1.2.3.4:1",
+				IP:             "",
+				NodeIP:         "",
+				NodeName:       "",
+				LatencySeconds: 0,
+				PeerRelay:      "",
+				DERPRegionID:   0,
+				DERPRegionCode: "",
+				PeerAPIPort:    0,
+				PeerAPIURL:     "",
+				IsLocalIP:      false,
+			},
 			wantErr: "timeout",
+
+			err:    nil,
+			kind:   "",
+			detail: "",
 		},
 		{
-			name:    "no matching peer",
-			pr:      &ipnstate.PingResult{Err: "no matching peer"},
+			name: "no matching peer",
+			pr: &ipnstate.PingResult{Err: "no matching peer",
+				IP:             "",
+				NodeIP:         "",
+				NodeName:       "",
+				LatencySeconds: 0,
+				Endpoint:       "",
+				PeerRelay:      "",
+				DERPRegionID:   0,
+				DERPRegionCode: "",
+				PeerAPIPort:    0,
+				PeerAPIURL:     "",
+				IsLocalIP:      false,
+			},
 			wantErr: "no peer handles 10.20.0.50; check grants to tag:monitor",
+
+			err:    nil,
+			kind:   "",
+			detail: "",
 		},
 		{
 			name:    "error no matching peer",
 			err:     errors.New("ping: no matching peer"),
 			wantErr: "no peer handles 10.20.0.50; check grants to tag:monitor",
+
+			pr:     nil,
+			kind:   "",
+			detail: "",
 		},
 	}
 	for _, tt := range tests {

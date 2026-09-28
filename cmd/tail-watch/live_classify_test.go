@@ -199,13 +199,13 @@ func (m liveMetrics) value(name string, kv ...string) float64 {
 		if !ok {
 			continue
 		}
-		end := strings.LastIndex(labels, "}")
-		if end < 0 {
+		before, after, ok := strings.CutLast(labels, "}")
+		if !ok {
 			continue
 		}
 		matched := true
 		for i := 0; i+1 < len(kv); i += 2 {
-			if !strings.Contains(labels[:end], kv[i]+`="`+kv[i+1]+`"`) {
+			if !strings.Contains(before, kv[i]+`="`+kv[i+1]+`"`) {
 				matched = false
 				break
 			}
@@ -213,7 +213,7 @@ func (m liveMetrics) value(name string, kv ...string) float64 {
 		if !matched {
 			continue
 		}
-		fields := strings.Fields(labels[end+1:])
+		fields := strings.Fields(after)
 		if len(fields) == 0 {
 			continue
 		}
