@@ -16,7 +16,7 @@ non-blocking enqueue: it SHALL NOT perform network I/O, disk I/O, or wait on
 any sink. Mapping, incident updates, routing and persistence SHALL happen off
 that call path. If the intake buffer is full, the transition SHALL be dropped,
 its target marked dirty for snapshot reconciliation, logged, and counted in
-`tsmon_notify_dropped_total{sink="intake",reason="queue_full"}`. Each sink SHALL have its own worker and its own queue. Network I/O of one sink
+`tailwatch_notify_dropped_total{sink="intake",reason="queue_full"}`. Each sink SHALL have its own worker and its own queue. Network I/O of one sink
 SHALL NOT block another sink or any check. Snapshot commits are serialized and
 can delay all durable enqueues and workers awaiting attempt-state commit; this
 limitation SHALL be
@@ -75,7 +75,7 @@ full, the oldest queued event SHALL be dropped and counted with reason
 
 - **WHEN** a sink's queue holds 1000 events and another arrives
 - **THEN** the oldest event is dropped and
-  `tsmon_notify_dropped_total{reason="queue_full"}` increases by 1
+  `tailwatch_notify_dropped_total{reason="queue_full"}` increases by 1
 
 ### Requirement: Late delivery flag
 
@@ -128,7 +128,7 @@ not silently discard open incidents.
 
 #### Scenario: Crash between incident change and queue distribution
 
-- **WHEN** a recovery is committed and tsmon crashes before any worker sees it
+- **WHEN** a recovery is committed and tail-watch crashes before any worker sees it
 - **THEN** replay finds the closing incident and its recovery intents with the
   original down ID and sends them without requiring a new outage
 
@@ -139,14 +139,14 @@ not silently discard open incidents.
 
 #### Scenario: Crash before commit
 
-- **WHEN** tsmon crashes after writing a new snapshot's temporary file but before
+- **WHEN** tail-watch crashes after writing a new snapshot's temporary file but before
   rename
 - **THEN** startup uses the old snapshot, retains any old open incident, and
   removes the temporary file
 
 #### Scenario: Crash after delivery
 
-- **WHEN** a worker gets `2xx` but tsmon crashes before its acknowledgment commits
+- **WHEN** a worker gets `2xx` but tail-watch crashes before its acknowledgment commits
 - **THEN** replay may resend the event with the same ID
 
 #### Scenario: Stale event at startup
@@ -161,7 +161,7 @@ If committing the atomic snapshot fails, its event and incident mutations
 SHALL stay together in authoritative memory and pending events may be delivered
 from memory instead. The coordinator SHALL retry persistence of the full current
 state. The failure SHALL be logged once until a write succeeds again, and
-`tsmon_notify_persist_errors_total{sink="state"}` SHALL increase. The sink
+`tailwatch_notify_persist_errors_total{sink="state"}` SHALL increase. The sink
 name `state` SHALL be reserved. Durability SHALL be explicitly degraded until
 a subsequent successful snapshot commit.
 
@@ -173,9 +173,9 @@ a subsequent successful snapshot commit.
 
 ### Requirement: State directory safety
 
-tsmon SHALL create `state_dir` and its subdirectories with mode 0700 and write
+tail-watch SHALL create `state_dir` and its subdirectories with mode 0700 and write
 files with mode 0600. Files SHALL hold event payloads and incident records
-only, never URLs, secrets or headers. tsmon SHALL log a warning when
+only, never URLs, secrets or headers. tail-watch SHALL log a warning when
 `state_dir` is readable by group or others.
 
 #### Scenario: Secrets never persisted
@@ -198,7 +198,7 @@ SHALL NOT be restored as DOWN or prevent a later outage from opening a new
 incident with a new ID. Delivery records SHALL remain keyed by incident ID until
 all intents are terminal; only one incident per target may be open.
 
-Before scheduling checks, tsmon SHALL restore open configured incidents as DOWN
+Before scheduling checks, tail-watch SHALL restore open configured incidents as DOWN
 without a second page and recreate recorded implicit reachability targets by
 stable node identity before restoring them. Recovery SHALL use the original
 `down_event_id`, severity and `since`. A restore refusal SHALL log an error and
@@ -213,7 +213,7 @@ be retried; crash durability is not guaranteed while writes fail.
 
 #### Scenario: Restart during an outage
 
-- **WHEN** tsmon restarts while `nyc-nas` has an open incident and later recovers
+- **WHEN** tail-watch restarts while `nyc-nas` has an open incident and later recovers
 - **THEN** no second down is created and its recovery has the original down ID
 
 #### Scenario: Implicit router cannot be rediscovered
@@ -275,7 +275,7 @@ SHALL NOT rely solely on a list of selected sink names.
 
 Sink URLs, HMAC secrets, `headers_env` values and the heartbeat URL SHALL come
 only from `*_env` or `*_file` keys; `*_file` values SHALL have surrounding
-whitespace trimmed. tsmon SHALL fail at startup when a referenced variable is
+whitespace trimmed. tail-watch SHALL fail at startup when a referenced variable is
 unset or empty or a referenced file is unreadable, and SHALL re-read the value
 at send time so rotation needs no restart. Logs and errors SHALL show URLs only
 as scheme and host, with everything after the host replaced by `/…`.
@@ -283,7 +283,7 @@ as scheme and host, with everything after the host replaced by `/…`.
 #### Scenario: Unset variable
 
 - **WHEN** a sink sets `url_env: SLACK_WEBHOOK_URL` and the variable is unset
-- **THEN** tsmon exits non-zero naming the sink and the variable
+- **THEN** tail-watch exits non-zero naming the sink and the variable
 
 #### Scenario: Redacted log
 
@@ -292,24 +292,24 @@ as scheme and host, with everything after the host replaced by `/…`.
 
 ### Requirement: Notification metrics
 
-tsmon SHALL export, in the `tsmon` namespace:
+tail-watch SHALL export, in the `tailwatch` namespace:
 
-- `tsmon_notify_sent_total{sink,type}`
-- `tsmon_notify_failed_total{sink,reason}` with reason `timeout`, `http_5xx`,
+- `tailwatch_notify_sent_total{sink,type}`
+- `tailwatch_notify_failed_total{sink,reason}` with reason `timeout`, `http_5xx`,
   `http_429`, `http_4xx_permanent` or `network`
-- `tsmon_notify_dropped_total{sink,reason}` with reason `queue_full`,
+- `tailwatch_notify_dropped_total{sink,reason}` with reason `queue_full`,
   `expired`, `permanent` or `restart`
-- `tsmon_notify_persist_errors_total{sink}`
-- `tsmon_notify_batch_size{sink}` histogram, for batched webhook sinks only
-- `tsmon_notify_queue_len{sink}` gauge
-- `tsmon_notify_latency_seconds{sink}` histogram of time from event creation
+- `tailwatch_notify_persist_errors_total{sink}`
+- `tailwatch_notify_batch_size{sink}` histogram, for batched webhook sinks only
+- `tailwatch_notify_queue_len{sink}` gauge
+- `tailwatch_notify_latency_seconds{sink}` histogram of time from event creation
   to confirmed delivery
-- `tsmon_open_incidents` gauge, when `state_dir` is set
+- `tailwatch_open_incidents` gauge, when `state_dir` is set
 
 #### Scenario: Failed attempt counted
 
 - **WHEN** a webhook attempt gets `503`
-- **THEN** `tsmon_notify_failed_total{reason="http_5xx"}` increases by 1 for
+- **THEN** `tailwatch_notify_failed_total{reason="http_5xx"}` increases by 1 for
   that sink
 
 ### Requirement: Durable attempt identity

@@ -1,7 +1,7 @@
 schema: spec-driven
 
 context: |
-  Product: tail-watch, a tailnet reachability monitor. The binary is `tsmon`.
+  Product: tail-watch, a tailnet reachability monitor. The binary is `tail-watch`.
   Source design: tailnet-reachability-monitor-design.md at the repo root. It is
   the reference for behavior; OpenSpec specs are the contract once archived.
 
@@ -16,8 +16,8 @@ context: |
     Ping, WatchIPNBus and Status. tsnet is phase 2.
   - Tooling: mise (go, bun, openspec), golangci-lint, govulncheck.
 
-  Code layout: all collector code is `package main` in cmd/tsmon/, one file
-  per concern (tsmon.go, netenv.go, config.go, checks.go, presence.go,
+  Code layout: all collector code is `package main` in cmd/tail-watch/, one file
+  per concern (main.go, netenv.go, config.go, checks.go, presence.go,
   classify.go, alert.go, notify.go, queue.go, incidents.go, webhook.go,
   slack.go, notifytest.go). Tests sit next to the code as *_test.go.
 
@@ -28,7 +28,7 @@ context: |
     time.Now directly. prober scheduling stays separate from alert timing.
   - Structured logging with log/slog. Secrets (URLs, HMAC keys, headers)
     come from *_env / *_file config keys and are never logged or persisted.
-  - Metrics use the "tsmon" Prometheus namespace.
+  - Metrics use the "tailwatch" Prometheus namespace.
   - Tests: table-driven unit tests, httptest.Server for sinks, golden files
     for public payloads. No mocks of types we do not own.
 

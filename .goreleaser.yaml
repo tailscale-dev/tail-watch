@@ -1,10 +1,10 @@
 version: 2
-project_name: tsmon
+project_name: tail-watch
 
 builds:
-  - id: tsmon
-    main: ./cmd/tsmon
-    binary: tsmon
+  - id: tail-watch
+    main: ./cmd/tail-watch
+    binary: tail-watch
     env:
       - CGO_ENABLED=0
     goos:
@@ -28,7 +28,7 @@ archives:
     files:
       - LICENSE
       - README.md
-      - examples/tsmon.yaml
+      - examples/tail-watch.yaml
 
 checksum:
   name_template: checksums.txt

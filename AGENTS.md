@@ -11,7 +11,7 @@ It is the Go and Linux kernel style. Do not use Conventional Commits
 (`feat:`, `fix(scope):`).
 
 ```text
-cmd/tsmon: retry tsping once before failing
+cmd/tail-watch: retry tsping once before failing
 
 The first disco ping after a peer's endpoint changes often times out,
 which reported a healthy router as down for one interval.
@@ -25,16 +25,16 @@ The subject is the first line:
 
 - Prefix it with the directory the change mainly affects, then a colon and a
   space. This repo uses:
-  - `cmd/tsmon:` for the collector
+  - `cmd/tail-watch:` for the collector
   - `examples:` for the example config and compose file
   - `openspec:` for changes and specs
   - `build:` for `mise.toml`, the Dockerfile, CI, and release config
   - `docs:` for README and other prose
-- Separate several directories with commas (`cmd/tsmon,examples:`), or use
+- Separate several directories with commas (`cmd/tail-watch,examples:`), or use
   braces for sibling directories (`ipn/{desktop,ipnlocal}:`). Use `all:`
   when the change touches most of the tree.
 - After the colon, write a lowercase imperative verb that completes "this
-  change modifies tsmon to ___". Write `fix leak`, not `fixed`, `fixes`,
+  change modifies tail-watch to ___". Write `fix leak`, not `fixed`, `fixes`,
   `fixing`, or a noun phrase such as `new UI`.
 - No trailing period. Keep it under about 76 characters.
 - Keep `Fixes` and issue numbers out of the subject.

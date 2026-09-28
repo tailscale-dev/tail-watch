@@ -180,7 +180,7 @@ rather than changing an already-attempted body; each dropped event is counted.
 
 On a snapshot write failure, retain event and incident mutations together in
 memory and permit memory delivery, log durability degradation and increment
-`tsmon_notify_persist_errors_total{sink="state"}`. Retry the entire current
+`tailwatch_notify_persist_errors_total{sink="state"}`. Retry the entire current
 snapshot later. No crash guarantee applies until persistence succeeds. Reserve
 sink name `state`. A corrupt committed snapshot is a startup error requiring
 operator repair, never an excuse to silently forget incidents.

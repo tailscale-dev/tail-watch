@@ -277,7 +277,7 @@ Slack channel for everything.
 | `target.flapping` | Target crossed `flap_limit` | `warn` |
 | `target.degraded` | Path fell back to DERP or peer relay, or latency spiked (phase 2) | `warn` |
 | `collector.started` | Collector finished its first full round of checks | `info` |
-| `test` | Sent by `tsmon notify-test` | `info` |
+| `test` | Sent by `tail-watch notify-test` | `info` |
 
 Two rules keep the noise down:
 
@@ -329,11 +329,12 @@ names. `id` stays the same across retries, so receivers can dedupe on it.
 ### Generic webhook
 
 - `POST` to the configured URL with `Content-Type: application/json` and
-  `User-Agent: tsmon/<version>`. By default, one event per request. Dependency
+  `User-Agent: tail-watch/<version>`. By default, one event per request. Dependency
   suppression already collapses most alert storms, and many simple receivers (n8n,
   Zapier, Lambda URLs) expect a single flat object. Rate-limited receivers can use
   batched mode, described below.
-- Headers: `Tsmon-Event-Id: <id>` and `Tsmon-Signature: t=<unix>,v1=<hex>`, where `v1`
+- Headers: `Tail-Watch-Event-Id: <id>` and
+  `Tail-Watch-Signature: t=<unix>,v1=<hex>`, where `v1`
   is HMAC-SHA256 over `"<t>.<body>"` keyed by the sink's secret. This follows the format
   of Tailscale's own `Tailscale-Webhook-Signature`, so anyone who already verifies
   Tailscale webhooks can reuse that code. Receivers should reject a `t` more than 5
@@ -363,7 +364,7 @@ request.
 
 - Each element of `events` is exactly the single-event payload, so receivers can share
   parsing code between the two modes.
-- `Tsmon-Signature` covers the whole body. `Tsmon-Batch-Id` replaces `Tsmon-Event-Id`.
+- `Tail-Watch-Signature` covers the whole body. `Tail-Watch-Batch-Id` replaces `Tail-Watch-Event-Id`.
 - A retry resends the same body bytes with the same `batch_id`. Only the signature's
   `t` is recomputed. Events that arrive during retries go into the next batch, so order
   holds across batches.
@@ -455,7 +456,7 @@ On startup, replay in per-sink order and apply limits together with delivery-sta
 updates. Discard abandoned temporary files. Corrupt committed state is an actionable
 startup error; never silently forget incidents. A failed write retains all event and
 incident mutations together in memory, logs durability degradation and increments
-`tsmon_notify_persist_errors_total{sink="state"}`. Retry the full current snapshot;
+`tailwatch_notify_persist_errors_total{sink="state"}`. Retry the full current snapshot;
 crash durability is unavailable until a commit succeeds.
 
 Disk retries preserve batch IDs and body bytes across restarts. If any member of an
@@ -496,7 +497,7 @@ away.
 
 ### Trying it out
 
-`tsmon notify-test [--sink NAME]` sends a `test` event through the real sink code, with
+`tail-watch notify-test [--sink NAME]` sends a `test` event through the real sink code, with
 signing and retries. It prints the HTTP status for each sink. Run it after every config
 change.
 
@@ -505,7 +506,7 @@ change.
 ```yaml
 collector:
   listen: 127.0.0.1:9109  # /metrics and prober status page
-  state_dir: /var/lib/tsmon  # optional; atomic incident and disk-delivery snapshot
+  state_dir: /var/lib/tail-watch  # optional; atomic incident and disk-delivery snapshot
 
 defaults:
   interval: 30s
@@ -519,7 +520,7 @@ sinks:
   - name: ops-webhook
     type: webhook
     url_env: OPS_WEBHOOK_URL
-    secret_env: OPS_WEBHOOK_SECRET      # HMAC key for Tsmon-Signature
+    secret_env: OPS_WEBHOOK_SECRET      # HMAC key for Tail-Watch-Signature
     headers_env:
       Authorization: OPS_WEBHOOK_AUTH   # optional, value read from this env var
     min_severity: page
@@ -596,29 +597,30 @@ grant. The collector should log that plainly at startup ("target X: no peer hand
 
 ## Metrics
 
-Everything goes through `prober.Prober` with `WithMetricNamespace("tsmon")`. We get the
+Everything goes through `prober.Prober` with `WithMetricNamespace("tailwatch")`. We get the
 standard series for free (result, latency, attempts, and so on), labeled `name` and
 `class`, with our own labels added:
 
 - `target`, `check` (`icmp`, `tcp:445`, ...), `parent` (router hostname or empty),
   `site`.
-- Custom gauge `tsmon_target_state{target}`: 0=unknown, 1=up, 2=down, 3=suppressed,
+- Custom gauge `tailwatch_target_state{target}`: 0=unknown, 1=up, 2=down, 3=suppressed,
   4=flapping.
-- Custom gauge `tsmon_path{target,kind}`: kind is `direct`, `derp`, or `peer_relay`,
+- Custom gauge `tailwatch_path{target,kind}`: kind is `direct`, `derp`, or `peer_relay`,
   from `tsping` results.
-- `tsmon_failure_layer_total{target,layer}` counter.
-- `tsmon_notify_sent_total{sink,type}` and `tsmon_notify_failed_total{sink,reason}`,
+- `tailwatch_failure_layer_total{target,layer}` counter.
+- `tailwatch_notify_sent_total{sink,type}` and `tailwatch_notify_failed_total{sink,reason}`,
   where reason is `timeout`, `http_5xx`, `http_429`, or `http_4xx_permanent`.
-- `tsmon_notify_dropped_total{sink,reason}`: `queue_full`, `expired`, `permanent`,
+- `tailwatch_notify_dropped_total{sink,reason}`: `queue_full`, `expired`, `permanent`,
   or `restart` for lost memory-sink pending payloads.
-- `tsmon_notify_persist_errors_total{sink}`: disk writes that failed and fell back to
+- `tailwatch_notify_persist_errors_total{sink}`: disk writes that failed and fell back to
   memory.
-- `tsmon_notify_batch_size{sink}` histogram, batched webhook sinks only.
-- `tsmon_open_incidents` gauge, from the atomic snapshot when `state_dir` is set.
-- `tsmon_notify_queue_len{sink}` gauge and `tsmon_notify_latency_seconds{sink}`, time from
+- `tailwatch_notify_batch_size{sink}` histogram, batched webhook sinks only.
+- `tailwatch_open_incidents` gauge, from the atomic snapshot when `state_dir` is set.
+- `tailwatch_notify_queue_len{sink}` gauge and
+  `tailwatch_notify_latency_seconds{sink}`, time from
   event to confirmed delivery.
 
-Alert on `tsmon_notify_dropped_total` rising, or `tsmon_notify_queue_len` staying above
+Alert on `tailwatch_notify_dropped_total` rising, or `tailwatch_notify_queue_len` staying above
 zero, from Prometheus. That is how you find out alerts aren't getting through.
 
 The prober status page (`Prober.StatusHandler`, as in `cmd/derpprobe`) gives a basic
@@ -629,8 +631,8 @@ dashboard with no extra work.
 Layout, if built in this repo:
 
 ```text
-cmd/tsmon/
-  tsmon.go          flags, config load, wiring
+cmd/tail-watch/
+  main.go          flags, config load, wiring
   netenv.go         netEnv interface + kernelEnv (phase 2 adds tsnetEnv.go)
   config.go         YAML schema and validation
   checks.go         check -> prober.FuncProbe over netEnv (icmp via net/ping, tsping via LocalClient)
@@ -642,7 +644,7 @@ cmd/tsmon/
   incidents.go      incident lifecycle and atomic notification snapshot coordinator
   webhook.go        generic webhook sink, HMAC signing, retry policy, batched mode
   slack.go          Slack incoming-webhook sink, Block Kit rendering, grouping
-  notifytest.go     `tsmon notify-test` subcommand
+  notifytest.go     `tail-watch notify-test` subcommand
 ```
 
 Reused as-is:
@@ -660,7 +662,7 @@ Wiring each check into `prober` looks like this. The probe func runs the check, 
 `classify` on failure, and hands the result to the target's state machine:
 
 ```go
-p := prober.New().WithSpread(true).WithMetricNamespace("tsmon")
+p := prober.New().WithSpread(true).WithMetricNamespace("tailwatch")
 for _, t := range cfg.Targets {
 	for _, c := range t.Checks {
 		p.Run(t.Name+"/"+c.String(), t.Interval, prober.Labels{"target": t.Name, "check": c.String()},
@@ -748,7 +750,7 @@ settles the license and ownership questions.
 
 ## Open questions
 
-- Standalone repo first, or propose `cmd/tsmon` upstream from the start?
+- Standalone repo first, or propose `cmd/tail-watch` upstream from the start?
 - Is YAML acceptable, or should targets also come from node attributes or tags in the
   policy file so admins manage them in one place?
 - Should quorum stay in Alertmanager permanently? That keeps collectors stateless.

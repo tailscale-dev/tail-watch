@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines how tsmon delivers events to a generic HTTP receiver: request format,
+Defines how tail-watch delivers events to a generic HTTP receiver: request format,
 HMAC signing compatible with Tailscale's own webhooks, retry and expiry policy,
 and the optional batched mode for rate-limited receivers.
 
@@ -25,22 +25,22 @@ SHALL be unique, match `[A-Za-z0-9._-]+`, and not be `incidents`, `intake` or `s
 #### Scenario: No signing secret
 
 - **WHEN** a webhook sink has no `secret_env` or `secret_file`
-- **THEN** tsmon starts, logs a warning that the sink is unsigned, and sends
-  requests without a `Tsmon-Signature` header
+- **THEN** tail-watch starts, logs a warning that the sink is unsigned, and sends
+  requests without a `Tail-Watch-Signature` header
 
 ### Requirement: Webhook request format
 
 Each delivery SHALL be an HTTP `POST` to the sink URL with
-`Content-Type: application/json`, `User-Agent: tsmon/<version>`, the headers
+`Content-Type: application/json`, `User-Agent: tail-watch/<version>`, the headers
 from `headers_env`, and a body holding exactly one event payload. It SHALL set
-`Tsmon-Event-Id: <id>`. It SHALL NOT follow redirects. Each request SHALL time
+`Tail-Watch-Event-Id: <id>`. It SHALL NOT follow redirects. Each request SHALL time
 out after 10s.
 
 #### Scenario: Single event
 
 - **WHEN** a `target.down` is delivered to a non-batched webhook sink
 - **THEN** the receiver gets one POST whose body is that event's JSON payload
-  and whose `Tsmon-Event-Id` equals the payload `id`
+  and whose `Tail-Watch-Event-Id` equals the payload `id`
 
 #### Scenario: Extra auth header
 
@@ -51,7 +51,7 @@ out after 10s.
 ### Requirement: Request signing
 
 When the sink has a secret, each request SHALL carry
-`Tsmon-Signature: t=<unix seconds>,v1=<hex>`, where `v1` is the lowercase hex
+`Tail-Watch-Signature: t=<unix seconds>,v1=<hex>`, where `v1` is the lowercase hex
 HMAC-SHA256, keyed by the secret, of the string `<t>.<body>`. `t` SHALL be the
 time of that attempt, so a retry carries a fresh `t` over identical body bytes.
 
@@ -86,7 +86,7 @@ expired instead of sent.
 #### Scenario: Server error then success
 
 - **WHEN** the receiver answers `500` then `200`
-- **THEN** tsmon sends the event twice and marks it delivered
+- **THEN** tail-watch sends the event twice and marks it delivered
 
 #### Scenario: Rate limited
 
@@ -96,8 +96,8 @@ expired instead of sent.
 #### Scenario: Bad request
 
 - **WHEN** the receiver answers `400`
-- **THEN** tsmon does not retry, logs the failure once, and increments
-  `tsmon_notify_dropped_total{reason="permanent"}`
+- **THEN** tail-watch does not retry, logs the failure once, and increments
+  `tailwatch_notify_dropped_total{reason="permanent"}`
 
 #### Scenario: Expired while retrying
 
@@ -111,7 +111,7 @@ and send when `group_wait` elapses or `max_batch` events are waiting,
 whichever comes first. The body SHALL be
 `{"version": 1, "batch_id": "bat_<id>", "events": [ ... ]}` where each element
 is exactly a single-event payload, in queue order. The request SHALL carry
-`Tsmon-Batch-Id` instead of `Tsmon-Event-Id`, and `Tsmon-Signature` SHALL cover
+`Tail-Watch-Batch-Id` instead of `Tail-Watch-Event-Id`, and `Tail-Watch-Signature` SHALL cover
 the whole body. A retry SHALL resend identical body bytes and `batch_id` with a
 fresh signature. Events arriving during retries SHALL go into the next batch. A
 `target.down` and its `target.recovered` in the same window SHALL both be sent,
@@ -128,8 +128,8 @@ in it.
 #### Scenario: Batch retry
 
 - **WHEN** a batch POST receives `503` and is retried
-- **THEN** the retry has the same body bytes and `Tsmon-Batch-Id`, and a
-  `Tsmon-Signature` with a newer `t`
+- **THEN** the retry has the same body bytes and `Tail-Watch-Batch-Id`, and a
+  `Tail-Watch-Signature` with a newer `t`
 
 #### Scenario: Blip inside a window
 

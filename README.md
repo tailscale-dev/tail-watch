@@ -1,6 +1,6 @@
-# tsmon
+# tail-watch
 
-tsmon is a reachability collector for a tailnet. It runs beside a
+tail-watch is a reachability collector for a tailnet. It runs beside a
 kernel-mode `tailscaled`, probes the targets in a YAML file, and serves
 a status page, Prometheus metrics, and a health check.
 
@@ -12,7 +12,7 @@ node or to a subnet behind it actually gets through.
 
 - A host running `tailscaled` in kernel mode. Userspace networking cannot
   carry ICMP to LAN addresses, so this build refuses it at startup.
-- Tag the host `tag:monitor`. tsmon logs a warning when that tag is
+- Tag the host `tag:monitor`. tail-watch logs a warning when that tag is
   missing, because ACL grants are usually written for the tag.
 - The process must be able to open the LocalAPI socket. On Linux that is
   `/var/run/tailscale/tailscaled.sock` unless you pass `--socket`.
@@ -49,7 +49,7 @@ guidance and TCP, HTTP, and tsping checks still run.
   local` device in its own target; do not point an HTTP check at a
   different host than the target's `addr`.
 
-`examples/tsmon.yaml` has both kinds of target. `nyc-core-switch` and
+`examples/tail-watch.yaml` has both kinds of target. `nyc-core-switch` and
 `nyc-nas` are remote subnet devices behind `nyc-subnet-router`.
 `lab-printer` is on the collector's own LAN.
 
@@ -58,65 +58,66 @@ guidance and TCP, HTTP, and tsping checks still run.
 ```bash
 mise install
 mise run build
-./bin/tsmon --config examples/tsmon.yaml
+./bin/tail-watch --config examples/tail-watch.yaml
 ```
 
-Config path order is `--config`, then `TSMON_CONFIG`, then
-`/etc/tsmon/tsmon.yaml`.
+Config path order is `--config`, then `TAIL_WATCH_CONFIG`, then
+`/etc/tail-watch/tail-watch.yaml`.
 
 Validate a file without contacting tailscaled:
 
 ```bash
-./bin/tsmon check-config --config examples/tsmon.yaml
+./bin/tail-watch check-config --config examples/tail-watch.yaml
 ```
 
 Run every check once, print a line each, and exit non-zero on failure:
 
 ```bash
-./bin/tsmon --once --config examples/tsmon.yaml
+./bin/tail-watch --once --config examples/tail-watch.yaml
 ```
 
-`--version` prints the build version. `--log-level` (or `TSMON_LOG_LEVEL`)
+`--version` prints the build version. `--log-level` (or `TAIL_WATCH_LOG_LEVEL`)
 is `debug`, `info`, `warn`, or `error`. Logs are JSON on stderr. Debug
 logs include every check result.
 
 | Flag | Env | Default |
 | --- | --- | --- |
-| `--config` | `TSMON_CONFIG` | `/etc/tsmon/tsmon.yaml` |
+| `--config` | `TAIL_WATCH_CONFIG` | `/etc/tail-watch/tail-watch.yaml` |
 | `--listen` | | `127.0.0.1:9109` or `collector.listen` |
 | `--socket` | | platform LocalAPI socket |
-| `--log-level` | `TSMON_LOG_LEVEL` | `info` |
+| `--log-level` | `TAIL_WATCH_LOG_LEVEL` | `info` |
 | `--once` | | run one pass and exit |
 | `--version` | | print the version and exit |
 
 HTTP endpoints on the listen address:
 
 - `/` prober status page
-- `/metrics` Prometheus text, `tsmon_` series labeled `target`, `check`,
-  `site`, and `class`
+- `/metrics` Prometheus text, `tailwatch_` series labeled `target`, `check`,
+  `site`, and `class`. The prefix has no hyphen because Prometheus metric
+  names cannot contain one.
 - `/healthz` returns `200` and `ok`
 
 SIGINT and SIGTERM stop new work, cancel running checks, and exit 0.
 
 ## Docker
 
-The image listens as user `tsmon` (uid 65532) and does not embed a
+The image listens as user `tail-watch` (uid 65532) and does not embed a
 Tailscale node. Use host networking so checks share the host routes, and
 mount the LocalAPI socket. That socket has to be readable by uid 65532,
 or pass a `--user` / `--group-add` that can read it.
 
 ```bash
-docker build -t tsmon .
+docker build -t tail-watch .
 docker run --rm --network host \
   -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock \
-  -v /etc/tsmon/tsmon.yaml:/etc/tsmon/tsmon.yaml:ro \
-  tsmon
+  -v /etc/tail-watch/tail-watch.yaml:/etc/tail-watch/tail-watch.yaml:ro \
+  tail-watch
 ```
 
 ### Docker Compose without a dedicated host
 
 `examples/compose.yaml` runs a kernel-mode `tailscaled` container and puts
-tsmon in its network namespace, so checks follow that node's `tailscale0`
+tail-watch in its network namespace, so checks follow that node's `tailscale0`
 routes, including accepted subnet routes. Mint an auth key tagged
 `tag:monitor`:
 
@@ -124,9 +125,9 @@ routes, including accepted subnet routes. Mint an auth key tagged
 TS_AUTHKEY=tskey-auth-... docker compose -f examples/compose.yaml up -d
 ```
 
-tsmon starts once the node reports healthy. It reads
-`examples/tsmon.yaml` unless `TSMON_CONFIG_FILE` names another file. The
-`tailscale` service sets `net.ipv4.ping_group_range`, so the non-root tsmon
+tail-watch starts once the node reports healthy. It reads
+`examples/tail-watch.yaml` unless `TAIL_WATCH_CONFIG_FILE` names another file. The
+`tailscale` service sets `net.ipv4.ping_group_range`, so the non-root tail-watch
 image can send ICMP without `CAP_NET_RAW`. `network: local` targets reach
 only what the container's Docker network can reach.
 
@@ -170,9 +171,49 @@ certificate verification for devices that present a private certificate.
 `tls` checks are rejected until phase 2.
 
 An explicit `parent` must name another target whose only check is `icmp`
-or `tsping`. Parent cycles are rejected. Learned tailnet parents arrive
-in a later change; keep a router's reachability target separate from any
-service check on that same node.
+or `tsping`. Parent cycles are rejected. That parent is for suppression
+only. It does not change which tailnet node handles the address.
+
+## Failure layers
+
+A passing check has no layer. A failing check is labeled with one layer:
+
+| Layer | Meaning |
+| --- | --- |
+| `unrouted` | no peer owns or routes the address |
+| `control` | the handling node is known offline |
+| `tunnel` | the handling node is up, but disco fails |
+| `service` | the device answered, or the target is a Tailscale node |
+| `lan` | disco works and the device does not answer |
+
+`network: local` targets use only `service` and `lan`. They do not consult
+tailnet presence or disco.
+
+For a remote LAN target, tail-watch learns the handling node with one disco
+ping at startup, every 10 minutes, and when primary routes change. A failed
+ping keeps the previous node unless the primary route changed, in which case
+the route is used. An explicit `parent` still wins for suppression.
+
+The learned parent is a configured target only when that target's address is
+the handling node and its only check is `tsping`. A service check on the same
+node does not suppress the LAN devices behind it. Otherwise tail-watch adds
+an implicit `tsping` target named for the node's short MagicDNS name, adding
+the stable node ID and then a number if that name is taken. An idle implicit
+target that is still down stays until it recovers. While a target has no
+handling node, tail-watch logs this once, and again only if the grant returns
+and is then lost:
+
+```text
+target lab-pdu: no peer handles 10.99.0.5; check grants to tag:monitor
+```
+
+Prometheus series use the `tailwatch_` prefix:
+
+| Metric | Kind |
+| --- | --- |
+| `tailwatch_failure_layer_total{target,layer}` | counter, one increment per failure |
+| `tailwatch_path{target,kind}` | gauge, `direct`, `derp`, and `peer_relay` |
+| `tailwatch_target_parent{target,parent}` | gauge, 1 for the current parent |
 
 ## Development and releases
 
@@ -186,8 +227,8 @@ Use Conventional Commits in squash-merge titles (`fix: ...`, `feat: ...`,
 or `feat!: ...` for breaking changes). After checks pass on `main`,
 release-please opens or updates a release PR containing the version and
 changelog. Merge that PR to create a GitHub release; GoReleaser then attaches
-the archives and `checksums.txt`. Each archive includes `tsmon`, the license,
-this README, and `examples/tsmon.yaml`. The binary's `--version` reports the
+the archives and `checksums.txt`. Each archive includes `tail-watch`, the license,
+this README, and `examples/tail-watch.yaml`. The binary's `--version` reports the
 release version.
 
 Repository setup: in **Settings → Actions → General → Workflow permissions**,

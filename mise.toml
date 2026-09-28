@@ -9,8 +9,8 @@ bun = "1.4.2"
 npm.package_manager = "bun"
 
 [tasks.build]
-description = "Build the tsmon binary"
-run = "go build -o bin/tsmon ./cmd/tsmon"
+description = "Build the tail-watch binary"
+run = "go build -o bin/tail-watch ./cmd/tail-watch"
 
 [tasks.test]
 description = "Run tests"

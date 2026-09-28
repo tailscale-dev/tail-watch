@@ -19,8 +19,8 @@ in memory only.
 
 #### Scenario: Fresh start
 
-- **WHEN** tsmon starts with three targets and no restored incidents
-- **THEN** all three targets are `UNKNOWN` and `tsmon_target_state` is 0 for
+- **WHEN** tail-watch starts with three targets and no restored incidents
+- **THEN** all three targets are `UNKNOWN` and `tailwatch_target_state` is 0 for
   each
 
 ### Requirement: Leaving UNKNOWN
@@ -102,7 +102,7 @@ for that target, and nothing otherwise.
 - **WHEN** `flap_limit` is 4, `flap_window` is 15m, and a target changes state
   for the fifth time within 15 minutes
 - **THEN** exactly one transition with `Flapping` set is emitted, and
-  `tsmon_target_state` for that target is 4
+  `tailwatch_target_state` for that target is 4
 
 #### Scenario: Settling down after an unresolved down
 
@@ -223,7 +223,7 @@ recovers.
 #### Scenario: Remove an up target
 
 - **WHEN** removal is requested for an `UP` target
-- **THEN** it is removed, emits no transition, and `tsmon_target_state` no
+- **THEN** it is removed, emits no transition, and `tailwatch_target_state` no
   longer has a series for it
 
 ### Requirement: Down query
@@ -275,14 +275,14 @@ sequence; a concurrent newer update SHALL remain dirty.
 
 ### Requirement: Target state metric
 
-The collector SHALL export the gauge `tsmon_target_state{target}` with values
+The collector SHALL export the gauge `tailwatch_target_state{target}` with values
 0=unknown, 1=up, 2=down, 3=suppressed and 4=flapping. The flapping value SHALL
 take precedence over the underlying state while the mark is set.
 
 #### Scenario: Suppressed target
 
 - **WHEN** target `nyc-core-switch` is `SUPPRESSED`
-- **THEN** `tsmon_target_state{target="nyc-core-switch"}` is 3
+- **THEN** `tailwatch_target_state{target="nyc-core-switch"}` is 3
 
 #### Scenario: Concurrent emission
 

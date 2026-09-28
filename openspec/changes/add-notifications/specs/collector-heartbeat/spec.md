@@ -16,16 +16,16 @@ heartbeat URL SHALL follow the same secret-handling rules as sink URLs.
 #### Scenario: No heartbeat
 
 - **WHEN** the config has no `heartbeat` section
-- **THEN** tsmon sends no heartbeat requests
+- **THEN** tail-watch sends no heartbeat requests
 
 ### Requirement: Heartbeat pings
 
-When configured, tsmon SHALL send an HTTP `GET` to the heartbeat URL every
+When configured, tail-watch SHALL send an HTTP `GET` to the heartbeat URL every
 `interval`, starting once every configured target/check has produced at least
 one result, with a 10s request
 timeout. A failed ping SHALL be logged and counted in
-`tsmon_heartbeat_failures_total` and SHALL NOT be retried before the next
-interval. Heartbeats SHALL stop when tsmon shuts down.
+`tailwatch_heartbeat_failures_total` and SHALL NOT be retried before the next
+interval. Heartbeats SHALL stop when tail-watch shuts down.
 
 #### Scenario: Regular pings
 
@@ -35,6 +35,6 @@ interval. Heartbeats SHALL stop when tsmon shuts down.
 
 #### Scenario: Collector stops
 
-- **WHEN** the tsmon process exits
+- **WHEN** the tail-watch process exits
 - **THEN** no further heartbeat requests are sent, so the external service
   alerts

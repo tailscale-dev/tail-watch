@@ -10,7 +10,7 @@ change.
 
 ### Requirement: Notify-test command
 
-`tsmon notify-test [--sink NAME] [--config PATH] [--timeout DUR]` SHALL load
+`tail-watch notify-test [--sink NAME] [--config PATH] [--timeout DUR]` SHALL load
 the config, build a `test` event (severity `info`), and send it through each
 selected sink's real delivery code, including signing, Slack rendering and the
 retry policy, bypassing routing filters and queues. Without `--sink` it SHALL

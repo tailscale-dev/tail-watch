@@ -2,7 +2,7 @@
 
 ## Why
 
-After `add-alert-state-machine`, tsmon knows when a target goes down, recovers
+After `add-alert-state-machine`, tail-watch knows when a target goes down, recovers
 or flaps, but nobody hears about it. Operators need those state changes
 delivered to the places they already watch (ticketing webhooks, n8n or Zapier
 flows, Slack) without false pages, lost resolves, or silent failures when the
@@ -18,7 +18,7 @@ This is the fourth and last change of phase 1 (MVP). It depends on
 - Turn every alert state transition into a versioned JSON event
   (`target.down`, `target.recovered`, `target.flapping`, `collector.started`,
   `test`; `target.degraded` is reserved for phase 2).
-- Add a generic webhook sink: HMAC-SHA256 `Tsmon-Signature`, `headers_env`,
+- Add a generic webhook sink: HMAC-SHA256 `Tail-Watch-Signature`, `headers_env`,
   retry policy by status class, `max_age`, 10s request timeout, and an optional
   batched mode.
 - Add a Slack incoming-webhook sink: Block Kit with a plain-text fallback,
@@ -33,10 +33,10 @@ This is the fourth and last change of phase 1 (MVP). It depends on
 - Reconcile overflowed target state and retain unresolved implicit incidents
   until authoritative topology discovery confirms removal.
 - Add an optional `heartbeat` that pings a dead-man's-switch URL.
-- Add the `tsmon notify-test [--sink NAME]` subcommand.
+- Add the `tail-watch notify-test [--sink NAME]` subcommand.
 - Accept the `sinks` and `heartbeat` config keys; secrets only via `*_env` or
   `*_file` keys.
-- Export the `tsmon_notify_*` metrics and `tsmon_open_incidents`.
+- Export the `tailwatch_notify_*` metrics and `tailwatch_open_incidents`.
 
 Implements design-doc section "Notifications" in full (Events, Payload,
 Generic webhook, Batched mode, Slack, Delivery, Queue modes, Open incidents,
@@ -64,7 +64,7 @@ Non-goals (later phases):
   disk queue modes, open-incident tracking, the `late` flag, secret handling,
   and the notification metrics.
 - `collector-heartbeat`: the optional dead-man's-switch ping.
-- `notify-test`: the `tsmon notify-test` subcommand.
+- `notify-test`: the `tail-watch notify-test` subcommand.
 
 ### Modified Capabilities
 
@@ -74,17 +74,17 @@ specified in this change's own capabilities.
 
 ## Impact
 
-- Code: new `cmd/tsmon/notify.go`, `queue.go`, `incidents.go`, `webhook.go`,
+- Code: new `cmd/tail-watch/notify.go`, `queue.go`, `incidents.go`, `webhook.go`,
   `slack.go`, `notifytest.go`, `heartbeat.go` and tests; `config.go` gains the
-  `sinks` and `heartbeat` schema; `tsmon.go` wires the dispatcher, heartbeat
+  `sinks` and `heartbeat` schema; `main.go` wires the dispatcher, heartbeat
   and the new subcommand.
 - Config: new top-level keys `sinks` and `heartbeat`; `collector.state_dir`
   becomes meaningful.
-- Disk: when `state_dir` is set, tsmon writes one atomic notification snapshot
+- Disk: when `state_dir` is set, tail-watch writes one atomic notification snapshot
   there (directory mode 0700, file mode 0600). It contains internal hostnames and
   addresses, never secrets.
 - Network: outbound HTTPS to Slack and webhook receivers following the host
   routing table.
 - Dependencies: none new. Event IDs use a small in-repo ULID-style generator.
 - Public contract: the webhook JSON payload (`version: 1`) and the
-  `Tsmon-Signature` scheme become a compatibility promise.
+  `Tail-Watch-Signature` scheme become a compatibility promise.

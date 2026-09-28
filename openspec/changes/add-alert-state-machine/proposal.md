@@ -42,19 +42,19 @@ This is change 3 of 4 in phase 1 (MVP). It consumes classified results from
   target is down.
 - Add a first-round signal, which fires once every check has reported. It
   drives `collector.started`.
-- Add the `tsmon_target_state{target}` gauge: 0=unknown, 1=up, 2=down,
+- Add the `tailwatch_target_state{target}` gauge: 0=unknown, 1=up, 2=down,
   3=suppressed, 4=flapping.
 - Add a recheck hook to the runtime, so a target's checks can run immediately
   outside the prober schedule.
 
 This change implements the design-doc sections "Alert state machine" and
-"Metrics" (`tsmon_target_state`), plus the restart rule. It is part of phase 1
+"Metrics" (`tailwatch_target_state`), plus the restart rule. It is part of phase 1
 (MVP).
 
 Non-goals:
 
 - Multi-collector quorum with shared state is phase 3. Until then, quorum runs
-  in Alertmanager over each collector's `tsmon_target_state`; see design.md.
+  in Alertmanager over each collector's `tailwatch_target_state`; see design.md.
 - Turning transitions into events, sinks, payloads and incident persistence
   all belong to `add-notifications`.
 - `degraded` path warnings are phase 2. They do not change target state.
@@ -65,7 +65,7 @@ Non-goals:
 
 - `alert-state-machine`: Per-target states and the rules for moving between
   them. Covers thresholds, flap damping, restart and restore behavior, the
-  first-round signal, the transition record, and the `tsmon_target_state`
+  first-round signal, the transition record, and the `tailwatch_target_state`
   metric.
 - `dependency-suppression`: How a parent's state suppresses and releases its
   dependents. Covers the grace hold for parent-caused failures, dependent
@@ -80,8 +80,8 @@ capabilities.
 ## Impact
 
 - **Code:**
-  - New `cmd/tsmon/alert.go` and `cmd/tsmon/alert_test.go`.
-  - `cmd/tsmon/tsmon.go` gains the wiring, the recheck hook and the metric
+  - New `cmd/tail-watch/alert.go` and `cmd/tail-watch/alert_test.go`.
+  - `cmd/tail-watch/main.go` gains the wiring, the recheck hook and the metric
     registration.
 - **Interfaces:**
   - Consumes `classifiedConsumer`, `Classified` and `classifier.Parent` from

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines how tsmon posts events to a Slack channel through an incoming webhook:
+Defines how tail-watch posts events to a Slack channel through an incoming webhook:
 message content, mentions for pages, grouping to stay within Slack's rate
 limit, and links to the collector's status page.
 

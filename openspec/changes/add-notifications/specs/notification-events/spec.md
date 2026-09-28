@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the events tsmon emits when alert state changes, their severities, the
+Defines the events tail-watch emits when alert state changes, their severities, the
 versioned JSON payload that receivers depend on, and how each sink chooses
 which events it receives.
 
@@ -10,7 +10,7 @@ which events it receives.
 
 ### Requirement: Event types
 
-tsmon SHALL emit exactly these event types in phase 1:
+tail-watch SHALL emit exactly these event types in phase 1:
 
 - `target.down` on `UP -> DOWN`, on `UNKNOWN -> DOWN` (a target already
   failing at startup with no open incident), or on `SUPPRESSED -> DOWN` when a
@@ -20,7 +20,7 @@ tsmon SHALL emit exactly these event types in phase 1:
 - `target.flapping` when a target crosses `flap_limit`.
 - `collector.started` once, when every configured target/check has produced
   at least one result.
-- `test`, sent only by `tsmon notify-test`.
+- `test`, sent only by `tail-watch notify-test`.
 
 The type `target.degraded` SHALL be reserved in the payload contract and SHALL
 NOT be emitted in phase 1. Transitions into `SUPPRESSED` and `UNKNOWN -> UP`
@@ -29,7 +29,7 @@ SHALL NOT emit events.
 #### Scenario: Down then recovered
 
 - **WHEN** target `nyc-nas` goes `UP -> DOWN` and later `DOWN -> UP`
-- **THEN** tsmon emits one `target.down` and then one `target.recovered` for
+- **THEN** tail-watch emits one `target.down` and then one `target.recovered` for
   `nyc-nas`
 
 #### Scenario: Suppressed dependent
@@ -49,7 +49,7 @@ SHALL NOT emit events.
 
 - **WHEN** the collector starts, `nyc-nas` has no open incident, and its checks
   fail `fail_threshold` times
-- **THEN** tsmon emits one `target.down` for `nyc-nas`
+- **THEN** tail-watch emits one `target.down` for `nyc-nas`
 
 #### Scenario: Silent startup
 

@@ -7,39 +7,52 @@
 - Bun is only the package manager for mise's npm backend (the OpenSpec CLI).
   `mise.toml` sets `npm.package_manager` to `bun`. There is no Node app and
   no `package.json`.
-- `mise run build` writes `bin/tsmon`. `mise run check` builds, tests, and
+- `mise run build` writes `bin/tail-watch`. `mise run check` builds, tests, and
   lints.
 
 ## Layout
 
-- Collector code is `package main` in `cmd/tsmon/`: `tsmon.go`, `netenv.go`,
-  `config.go`, `checks.go`, and `results.go`. Tests sit next to that code.
-- Later phase-1 changes add `presence.go`, `classify.go`, `alert.go`, and the
-  notification files in the same directory.
+- Collector code is `package main` in `cmd/tail-watch/`: `main.go`, `netenv.go`,
+  `config.go`, `checks.go`, `results.go`, `presence.go`, `classify.go`, and
+  `learn.go`. Tests sit next to that code.
+  The binary is `tail-watch`. Prometheus series use the `tailwatch_` prefix
+  because metric names cannot contain a hyphen.
+- `presence.go` is the IPN bus view. `tsping` name resolution uses it and
+  falls back to the 30s `Status()` cache only while that view is unseeded.
+- Later phase-1 changes add `alert.go` and the notification files in the
+  same directory.
 - Create only one `prober.Prober` per process. `prober.New()` registers
   metrics on the default Prometheus registry and panics if called again.
   Unit tests call check methods directly and do not construct a `Prober`.
 - Every network access goes through `netEnv`. Do not add a package-level
   dialer. `tsping` name resolution may fall back to the host resolver.
-- `TestLiveTailnetDocker` stays skipped unless `TSMON_LIVE_TAILNET=1`. It
-  reads `tailscale-phase-2/tailscale` from `pulumi env` (`TSMON_PULUMI_ENV`
+- `TestLiveTailnetDocker` stays skipped unless `TAIL_WATCH_LIVE_TAILNET=1`. It
+  reads `tailscale-phase-2/tailscale` from `pulumi env` (`TAIL_WATCH_PULUMI_ENV`
   overrides that) and drives `examples/compose.yaml` through
   `docker compose`, so it tests the shipped non-root image. It builds
-  `tsmon`, starts `tailscale`, and runs `compose run tsmon --once`. The
-  collector key is tagged `TSMON_LIVE_TAG` (default `tag:monitor`; set it
+  `tail-watch`, starts `tailscale`, and runs `compose run tail-watch --once`. The
+  collector key is tagged `TAIL_WATCH_LIVE_TAG` (default `tag:monitor`; set it
   empty for an untagged member node). The tailnet policy must own that tag
   and grant it the peer and `10.10.0.0/16`: merge
-  `cmd/tsmon/testdata/snippet.hujson` into the lab policy (it lives in
+  `cmd/tail-watch/testdata/snippet.hujson` into the lab policy (it lives in
   `tailscale-utils-lab`, `lab/policy/lab.acl.hujson`). Until then, run with
-  `TSMON_LIVE_TAG=`. If no connected device has an
+  `TAIL_WATCH_LIVE_TAG=`. If no connected device has an
   enabled subnet route, the test merges
-  `cmd/tsmon/testdata/compose.live-router.yaml`, which adds a router for
-  `10.10.50.0/24` that answers `10.10.50.1`. `TSMON_LIVE_PEER` and
-  `TSMON_LIVE_SUBNET` override the discovered targets. Cleanup runs
-  `compose down --volumes` and deletes only the `tsmon-live-<id>` devices
+  `cmd/tail-watch/testdata/compose.live-router.yaml`, which adds a router for
+  `10.10.50.0/24` that answers `10.10.50.1`. `TAIL_WATCH_LIVE_PEER` and
+  `TAIL_WATCH_LIVE_SUBNET` override the discovered targets. Cleanup runs
+  `compose down --volumes` and deletes only the `tail-watch-live-<id>` devices
   that run created. Its Tailscale API calls are test setup, not collector
   traffic, so they do not go through `netEnv`.
-- Keep the compose `tailscale` service's `ping_group_range` sysctl. tsmon
+- `TestLiveTailnetClassification` (same gate and credentials) always adds its
+  own router on `10.10.51.0/24`, a separate prefix so the two live tests never
+  form an HA pair. It runs the collector as a daemon, scrapes `/metrics`
+  from the `tailscale` service, removes the router's LAN address (expects
+  `lan`), then stops the router (expects `control`). Control marks a stopped
+  node disconnected in seconds, but peers' netmaps have taken 28s to more than
+  3 min to get `Online=false`. Until then `tunnel` is the correct layer, so the
+  control wait is 8 min.
+- Keep the compose `tailscale` service's `ping_group_range` sysctl. tail-watch
   runs as uid 65532 in that network namespace and opens ICMP as `udp4`.
 
 ## Commits

@@ -25,3 +25,4 @@ bin/
 dist/
 PR_MESSAGE.md
 tasks.md
+tail-watch

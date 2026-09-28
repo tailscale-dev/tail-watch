@@ -205,11 +205,11 @@ processed normally.
 ### D9. Quorum stays in Alertmanager
 
 Collectors keep no shared state in phase 1. Each collector exports
-`tsmon_target_state`, and quorum is expressed as a Prometheus rule:
+`tailwatch_target_state`, and quorum is expressed as a Prometheus rule:
 
 ```yaml
 - alert: TargetDownQuorum
-  expr: count by (target) (tsmon_target_state == 2) >= 2
+  expr: count by (target) (tailwatch_target_state == 2) >= 2
   for: 1m
 ```
 
@@ -301,7 +301,7 @@ reconciliation. Explicit removal of a configured target needs no discovery.
   unless `Restore` covers it.
 - **Flapping is a mark on top of the state, not a fifth state.** The
   underlying state is still needed to decide what to emit when the target
-  settles. `tsmon_target_state` still reports 4 while the mark is set.
+  settles. `tailwatch_target_state` still reports 4 while the mark is set.
 
 ## Risks / Trade-offs
 
