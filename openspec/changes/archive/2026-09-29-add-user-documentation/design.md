@@ -34,15 +34,22 @@ sets in `main.go`), the archived specs under `openspec/specs/`, and
 docs/
   README.md            index, one line per page
   tutorial/first-monitor.md
-  how-to/              deploy.md  acls.md  remote-subnets.md
-                       slack-sink.md  webhook-sink.md  troubleshoot.md
+  how-to/              deploy.md  acls.md  remote-subnets.md  monitor-ui.md
+                       slack-sink.md  webhook-sink.md  heartbeat.md
+                       troubleshoot.md
   reference/           config.md  checks.md  cli.md  metrics.md  payload.md
   explanation/         failure-layers.md  alert-state.md  incidents-and-queues.md
+                       monitor-ui-risks.md
   contributing/        live-notification-test.md  releases.md
 ```
 
 Alternative: a single long `docs/guide.md`. Rejected because it recreates the README
 problem and gives readers no stable links.
+
+The monitor UI, heartbeat and egress path sections of the README have no page in the
+first outline. They get `how-to/monitor-ui.md`, `explanation/monitor-ui-risks.md` and
+`how-to/heartbeat.md`; the egress-path grant goes into the sink how-tos, and
+`notify-test` goes into `reference/cli.md` with links from each sink page.
 
 ### README becomes a landing page
 

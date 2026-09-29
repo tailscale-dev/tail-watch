@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Bring up (or tear down) only the tailnet side of the live notification test:
 # the collector's tailscale node plus one fixture node per check. It does not
-# start the tail-watch process or run any scenario. See README "Live notification
-# test". Credentials come from the pulumi env in TAIL_WATCH_PULUMI_ENV
-# (default tailscale-phase-2/tailscale).
+# start the tail-watch process or run any scenario. See
+# docs/contributing/live-notification-test.md. Credentials come from the pulumi
+# env in TAIL_WATCH_PULUMI_ENV (default tailscale-phase-2/tailscale).
 #
 #   scripts/live-stack.sh up      create ephemeral nodes and print their addresses
 #   scripts/live-stack.sh down    remove the containers and this stack's devices
