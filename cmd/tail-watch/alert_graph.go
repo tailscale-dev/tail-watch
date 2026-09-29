@@ -78,6 +78,9 @@ func (a *alerter) forceSuppress(ts *targetState) {
 	}
 	a.disarmHold(ts)
 	ts.releasing = false
+	if ts.flapping && ts.state != StateSuppressed {
+		a.armFlap(ts)
+	}
 	ts.state = StateSuppressed
 	a.paintSnapshot(ts)
 	a.writeGauge(ts)

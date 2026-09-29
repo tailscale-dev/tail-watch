@@ -180,3 +180,43 @@ func TestFailedLearningRetainsPendingRestores(t *testing.T) {
 		t.Fatalf("targeted removal lost another restore: %v", got)
 	}
 }
+
+func TestSilentPromotionPreservesFailureRun(t *testing.T) {
+	t.Parallel()
+	for _, afterRelease := range []bool{false, true} {
+		name := "startup"
+		if afterRelease {
+			name = "release"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			parent := alertTarget("router", "tsping")
+			child := alertTarget("nas", "icmp", "tcp:445")
+			al, clk, tr := testAlerter(t, []*Target{parent, child}, map[string]string{"nas": "router"})
+			wantTransitions := 1
+			if afterRelease {
+				pass(al, child)
+				failN(al, parent, "tsping", layerTunnel, 3)
+				recoverTarget(al, parent)
+				wantTransitions += 2
+			}
+			passCheck(al, child, "tcp:445")
+			since := clk.Now()
+			failAt(al, child, "tcp:445", layerService, since, since.Add(time.Second))
+			passCheck(al, child, "icmp")
+			if gotState(al, child.Name) != StateUp {
+				t.Fatal("target did not become UP after each check succeeded")
+			}
+			failAt(al, child, "tcp:445", layerService, since.Add(2*time.Second))
+			if gotState(al, child.Name) != StateDown {
+				t.Fatal("silent promotion lost the consecutive TCP failures")
+			}
+			got := tr.wait(t, wantTransitions)
+			down := got[len(got)-1]
+			if down.From != StateUp || down.To != StateDown || down.Check != "tcp:445" ||
+				down.Failures != 3 || !down.Since.Equal(since) {
+				t.Fatalf("failure run changed during silent promotion: %+v", down)
+			}
+		})
+	}
+}

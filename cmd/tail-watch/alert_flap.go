@@ -61,7 +61,9 @@ func (a *alerter) finishFlapLocked(name string, gen uint64) {
 		return
 	}
 	ts.flapping = false
-	if ts.state == ts.emitted {
+	// Suppression is silent even when a flap settles. Keep the last emitted
+	// state so an outstanding DOWN can recover after the target is released.
+	if ts.state == StateSuppressed || ts.state == ts.emitted {
 		a.writeGauge(ts)
 		a.paintSnapshot(ts)
 		return

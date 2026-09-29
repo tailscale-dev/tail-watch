@@ -50,7 +50,8 @@ A target in `UP` SHALL move to `DOWN` when any one of its checks reaches
 the tripping check, its failure layer and last error, the consecutive failure
 count, the time of the first failure in that run (`Since`), and the latest
 path details. Failures below the threshold SHALL emit nothing. A success
-SHALL reset that check's failure counter.
+SHALL reset that check's failure counter. Silent promotion to `UP` at startup
+or after release SHALL preserve other checks' consecutive-failure runs.
 
 #### Scenario: Threshold reached
 
@@ -64,6 +65,14 @@ SHALL reset that check's failure counter.
 - **WHEN** `tcp:445` fails twice, succeeds once, then fails twice
 - **THEN** no transition is emitted and the target stays `UP`
 
+#### Scenario: Failure run spans silent promotion
+
+- **WHEN** `tcp:445` succeeds once and then fails twice, `icmp` reports its
+  first success and silently promotes the target to `UP`, and `tcp:445` fails
+  a third time with `fail_threshold: 3`
+- **THEN** the target emits `UP -> DOWN` with failures 3 and `Since` equal to
+  the first TCP failure, both at startup and following a suppression release
+
 ### Requirement: Recovering
 
 A target in `DOWN` SHALL move to `UP` only when every check that failed since
@@ -71,6 +80,10 @@ the target went `DOWN` has `recover_threshold` consecutive successes, and no
 other check has a failure as its latest result. The emitted transition SHALL
 carry the tripping check and layer of the `DOWN` it resolves and the time the
 target went down (`DownSince`), so that the outage length can be computed.
+Releasing a suppressed target resets its counters and starts a fresh run, so a
+recovery owed for an incident emitted before suppression SHALL be emitted after
+one success on each of the target's checks instead of `recover_threshold`
+successes (see the `dependency-suppression` capability).
 
 #### Scenario: Recovery after two successes
 
@@ -95,7 +108,10 @@ flapping, the collector SHALL keep tracking its state but SHALL emit no
 transitions for it. The flapping mark SHALL clear once the target's state has
 not changed for `flap_window`. When it clears, the collector SHALL emit a
 normal transition if the current state differs from the last state it emitted
-for that target, and nothing otherwise.
+for that target, and nothing otherwise. Settling in `SUPPRESSED` SHALL remain
+silent and SHALL preserve any outstanding emitted `DOWN`, its trip details and
+`DownSince` until recovery. Notification-visible snapshots SHALL preserve that
+open incident even after the flapping mark clears.
 
 #### Scenario: Becoming flapping
 
@@ -115,6 +131,14 @@ for that target, and nothing otherwise.
 - **WHEN** the last emitted state was `UP` and the target settles `UP` for
   `flap_window`
 - **THEN** the flapping mark clears and no transition is emitted
+
+#### Scenario: Settling while suppressed with an unresolved down
+
+- **WHEN** a flapping target is internally `UP` with its last emitted state
+  `DOWN`, its parent goes down, and it remains `SUPPRESSED` for `flap_window`
+- **THEN** the flapping mark clears without emitting a suppression transition,
+  its snapshot still reports the original open `DOWN`, and removal remains
+  refused until the incident receives its recovery
 
 ### Requirement: Restore of open incidents
 

@@ -76,6 +76,9 @@ type alerter struct {
 - **Counters:** `targetState` keeps `map[string]*checkState` holding
   `consecFail`, `consecOK`, `runStart` (the time of the first failure in the
   current run) and `failedSinceDown bool`.
+- **Silent promotion:** reaching `UP` at startup or after release preserves
+  other checks' failure counters. Only that check's success, or the counter
+  reset when suppression is released, ends its current failure run.
 - **Going down:** the first check to reach `fail_threshold` becomes the
   target's `trip`. The `trip` records the check, layer, error, `Since`,
   failure count and path.
@@ -94,6 +97,11 @@ to consumers).
 - **Flap damping:** it compares these two fields when a target settles
   (spec "Flap damping"), which guarantees every `DOWN` reported to
   `add-notifications` eventually gets its recovery.
+- **Suppression during flap damping:** suppression and silent promotion never
+  overwrite an outstanding emitted `DOWN`. Settling while suppressed clears
+  the flap mark silently; snapshots retain the open incident. A later release
+  either delivers the original recovery or keeps it pending until a full
+  stable `UP` window passes. Fresh failures retain the original incident.
 - **Flap counting:** only real `UP`↔`DOWN` changes count. Moves into and out
   of `SUPPRESSED`, and `UNKNOWN -> UP`, do not.
 - **Sliding window:** the change times are stored in a ring buffer holding at
@@ -147,6 +155,9 @@ from its first failure.
   to `SUPPRESSED`.
 - **What the transition lists:** `Transition.Dependents` holds all of those
   names, sorted, direct and transitive together.
+- **Flap timers:** `forceSuppress` re-arms the flap timer of a flapping
+  target, so its mark clears after `flap_window` even while it stays
+  `SUPPRESSED`. Settling there is silent and keeps any emitted `DOWN` open.
 - **Cycles:** validate the full configured-plus-learned graph before every
   update. Mixed edges can form cycles even when either set alone is acyclic.
   Reject cyclic updates; keep a visited set as defense in depth.
@@ -165,10 +176,16 @@ from its first failure.
   checks start within one second when earlier checks are slow.
 - **What a released target can do:** it goes `UP` silently after one success
   per check. It goes `DOWN`, with a transition from `SUPPRESSED`, after
-  `fail_threshold` failures counted from the release.
-- **Why one success is enough:** the target was never reported `DOWN`, so
-  nothing needs a recovery, and waiting for `recover_threshold` would only
-  delay its `UP` state and metric.
+  `fail_threshold` failures counted from the release. An outstanding incident
+  instead follows the recovery exception below.
+- **Why one success is enough:** suppression did not open an incident. The
+  target either was never reported `DOWN` or had already recovered internally
+  before suppression, so waiting for `recover_threshold` would only delay its
+  `UP` state and metric.
+- **Outstanding recovery exception:** a child already internally `UP` can
+  still have an emitted `DOWN` because of flap damping (D3). Suppression does
+  not cancel that incident. Its eventual `UP` emits the owed recovery, and
+  renewed failures after release do not open a duplicate incident.
 
 ### D7. The recheck hook runs checks outside prober
 

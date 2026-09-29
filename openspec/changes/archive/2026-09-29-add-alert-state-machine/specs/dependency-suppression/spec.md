@@ -44,8 +44,10 @@ down, every target that has it as a direct or transitive parent and is in
 `UNKNOWN` or `UP` SHALL move to `SUPPRESSED` at the same time. A dependent that
 is already `DOWN` SHALL stay `DOWN`. While a target has a down parent, any
 move that would take it to `DOWN` SHALL instead take it to `SUPPRESSED`.
-Moves into `SUPPRESSED` and releases to `UP` SHALL emit no transition.
-A released target still failing SHALL emit `SUPPRESSED -> DOWN` as below.
+Moves into `SUPPRESSED` SHALL emit no transition. Releases to `UP` SHALL be
+silent unless a recovery is owed for a previously emitted `DOWN`, as below.
+A released target still failing SHALL emit `SUPPRESSED -> DOWN` unless its
+original incident remains open.
 Checks on suppressed targets SHALL keep running.
 
 #### Scenario: Router dies
@@ -104,13 +106,21 @@ of each newly released target within one second, without waiting for the schedul
 Execution SHALL use a FIFO queue with at most eight in-flight rechecks, each
 bounded by its target timeout; starting every check within one second is not
 required. The collector SHALL release only targets with no remaining down
-ancestor,
-and SHALL reset their counters first. A released dependent SHALL move to `UP`
-without a transition once every one of its checks has one success. It SHALL
-move to `DOWN`, emitting a `SUPPRESSED -> DOWN` transition, when any check
-reaches `fail_threshold` consecutive failures counted from the release. The
+ancestor, and SHALL reset their counters first. A released dependent SHALL move to `UP`
+without a transition once every one of its checks has one success, except for
+an outstanding recovery described below. It SHALL move to `DOWN` when any check
+reaches `fail_threshold` consecutive failures counted from the release, emitting
+`SUPPRESSED -> DOWN` unless the original incident remains open. The
 parent's recovery transition SHALL list the dependents that were `SUPPRESSED`
 when it recovered.
+
+If flap damping left an emitted `DOWN` unresolved before suppression, release
+SHALL retain that incident's trip details and `DownSince`. Returning to `UP`
+SHALL emit its `DOWN -> UP` recovery once flap damping permits emission; if
+the mark is still set, the target SHALL first remain `UP` for `flap_window`.
+Continued failures SHALL retain the original incident without another `DOWN`
+transition. A recovery lost to FIFO overflow SHALL remain available through
+the dirty snapshot until acknowledged.
 
 #### Scenario: Router comes back
 
@@ -138,3 +148,18 @@ when it recovered.
 - **WHEN** a router's separate HTTP service target goes DOWN but its `[tsping]`
   reachability target stays UP
 - **THEN** its LAN devices remain independently alertable
+
+#### Scenario: Release preserves a damped recovery
+
+- **WHEN** a child with an unresolved emitted `DOWN` is suppressed, its parent
+  recovers, and each child check succeeds after release
+- **THEN** exactly one `DOWN -> UP` recovery retains the original trip and
+  `DownSince`, after a full stable window if still flapping or immediately if
+  the flap mark already cleared while suppressed
+
+#### Scenario: Continued failure preserves the original incident
+
+- **WHEN** a child with an unresolved emitted `DOWN` is released and reaches
+  `fail_threshold` with fresh failures before returning to `UP`
+- **THEN** no additional `DOWN` is emitted, and its eventual recovery resolves
+  the original incident with the original trip and `DownSince`

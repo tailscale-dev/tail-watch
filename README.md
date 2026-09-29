@@ -212,6 +212,10 @@ router produces one alert instead of one per device. `unrouted`, `lan`, and
 `service` failures page immediately. When the parent recovers, or a topology
 change leaves no down ancestor, tail-watch rechecks each released target. The
 target then goes `UP` silently, or `DOWN` if the fresh checks keep failing.
+If flap damping left an earlier `DOWN` unresolved, suppression preserves that
+incident. The child sends its recovery after release when flap damping permits,
+keeping the original outage start time; continued failures do not open a second
+incident.
 
 With more than one collector, quorum stays in Alertmanager until collectors
 share state:

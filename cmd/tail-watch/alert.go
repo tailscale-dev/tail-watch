@@ -586,6 +586,13 @@ func (a *alerter) emitFreshDown(ts *targetState, from State) []string {
 		a.writeGauge(ts)
 		return rel
 	}
+	if ts.incidentOpen() {
+		// Suppression may have interrupted a damped recovery. Continued
+		// failures belong to that open incident, without another DOWN.
+		a.paintSnapshot(ts)
+		a.writeGauge(ts)
+		return rel
+	}
 	ts.emitted = StateDown
 	ts.emittedDownSince = ts.downSince
 	a.writeGauge(ts)
@@ -595,7 +602,7 @@ func (a *alerter) emitFreshDown(ts *targetState, from State) []string {
 
 func (a *alerter) applyTrip(ts *targetState, cs *checkState) {
 	trip := tripFrom(cs, checkName(ts, cs))
-	if ts.flapping && ts.emitted == StateDown && !ts.downSince.IsZero() {
+	if ts.incidentOpen() {
 		return
 	}
 	ts.trip = trip
@@ -626,21 +633,36 @@ func tripFrom(cs *checkState, check string) tripInfo {
 func (a *alerter) becomeUp(ts *targetState, silent bool) []string {
 	for _, cs := range ts.checks {
 		cs.failedSinceDown = false
-		if silent {
-			cs.consecFail = 0
-		}
 	}
 	ts.releasing = false
 	if silent {
-		ts.state = StateUp
-		ts.emitted = StateUp
-		a.paintSnapshot(ts)
-		a.writeGauge(ts)
-		_, rel := a.syncTopology()
-		a.finishFalls()
-		return rel
+		return a.promoteUp(ts)
 	}
 	return a.applyCounted(ts, StateUp)
+}
+
+// promoteUp handles startup and release without counting a flap. An incident
+// opened before suppression still needs its recovery, subject to flap damping.
+func (a *alerter) promoteUp(ts *targetState) []string {
+	ts.state = StateUp
+	_, rel := a.syncTopology()
+	a.finishFalls()
+	switch {
+	case ts.flapping:
+		a.armFlap(ts)
+		a.paintSnapshot(ts)
+	case ts.incidentOpen():
+		ts.emitted = StateUp
+		a.emit(ts, StateDown, StateUp, false, rel)
+		ts.downSince = time.Time{}
+		ts.trip = emptyTrip()
+		ts.emittedDownSince = time.Time{}
+	default:
+		ts.emitted = StateUp
+		a.paintSnapshot(ts)
+	}
+	a.writeGauge(ts)
+	return rel
 }
 
 func (a *alerter) applyCounted(ts *targetState, to State) []string {

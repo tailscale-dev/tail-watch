@@ -52,7 +52,9 @@ func (a *alerter) putSnapshot(ts *targetState, tr Transition, dirty bool) {
 
 func (a *alerter) viewOf(ts *targetState, seq uint64, dirty, removed bool) *alertSnapshot {
 	view := ts.state
-	if ts.flapping {
+	// A settled but suppressed target may still owe a recovery for a DOWN
+	// emitted before flap damping. Reconciliation must keep that incident open.
+	if ts.flapping || ts.incidentOpen() {
 		view = ts.emitted
 	}
 	down := ts.downSince

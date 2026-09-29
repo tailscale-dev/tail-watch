@@ -51,6 +51,20 @@
 - [x] 8.3 Run markdownlint on changed Markdown and `openspec validate add-alert-state-machine --strict`; both pass
 - [x] 8.4 On a real tailnet, stop tailscaled on a monitored subnet router and confirm one router `DOWN` transition listing its dependents and no dependent transitions; restart it and confirm one recovery and silent dependent `UP`s
 
+## 9. Verification follow-up
+
+- [x] 9.1 Preserve per-check failure runs during silent promotion in `cmd/tail-watch/alert.go`; add startup and release regressions in `cmd/tail-watch/alert_regression_test.go`.
+- [x] 9.2 Preserve outstanding emitted DOWN incidents through suppression, flap settling and release in `cmd/tail-watch/alert.go`, `alert_graph.go`, `alert_flap.go` and `alert_emit.go`; add regression coverage in `alert_suppression_test.go` for timer order, snapshots and continued failures.
+- [x] 9.3 Clarify the interaction of flap recovery and silent suppression in the change specs, `design.md` and `README.md`; retain the original recovery obligation.
+
+## 10. Follow-up validation
+
+- [x] 10.1 Run build, vet, race tests, golangci-lint, govulncheck, changed Markdown lint and strict OpenSpec validation after the verification fixes.
+
+## 11. Verify follow-up
+
+- [x] 11.1 Reconcile the release-recovery rule in the `Recovering` requirement, document flap-timer re-arming in `design.md` D5, and cover a recovery dropped by a full bounded queue in `cmd/tail-watch/alert_suppression_test.go`.
+
 ## Validation notes
 
 - Build, vet, race tests, Markdown lint and strict OpenSpec validation passed.
@@ -64,3 +78,10 @@
   types with deprecated fields have narrow exhaustive-initialization exemptions
   so the rule does not conflict with staticcheck. The metrics parser uses
   `strings.CutLast`. Build, vet, race tests and the vulnerability scan pass.
+- Verification follow-up: startup and release preserve per-check failure runs;
+  suppression preserves outstanding flap recoveries without emitting suppressed
+  transitions or duplicate DOWNs. Regression tests cover both timer orders,
+  continued failure and dirty snapshot reconciliation. Build, vet, race tests,
+  lint, the reachable-vulnerability scan, changed Markdown lint and strict
+  OpenSpec validation pass. The gated real-tailnet test was not rerun for this
+  follow-up.

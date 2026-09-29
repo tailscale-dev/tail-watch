@@ -84,7 +84,7 @@ func (a *alerter) removeLocked(name string) ([]string, error) {
 	if ts == nil {
 		return nil, nil
 	}
-	if ts.emitted == StateDown {
+	if ts.incidentOpen() {
 		return nil, fmt.Errorf("target %s is down", name)
 	}
 	a.disarmHold(ts)
@@ -113,7 +113,7 @@ func (a *alerter) IsDown(name string) bool {
 	if ts == nil {
 		return false
 	}
-	return ts.state == StateDown || ts.state == StateSuppressed || ts.emitted == StateDown
+	return ts.state == StateDown || ts.state == StateSuppressed || ts.incidentOpen()
 }
 
 // Restore seeds a registered but unobserved target as DOWN since the given time.
@@ -210,4 +210,8 @@ func (a *alerter) signalFirst() {
 func (a *alerter) newGeneration() uint64 {
 	a.nextGeneration++
 	return a.nextGeneration
+}
+
+func (ts *targetState) incidentOpen() bool {
+	return ts.emitted == StateDown
 }

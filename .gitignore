@@ -24,5 +24,5 @@ go.work
 bin/
 dist/
 PR_MESSAGE.md
-tasks.md
+/tasks.md
 /tail-watch
