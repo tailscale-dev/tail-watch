@@ -200,6 +200,7 @@ func TestPresenceRunReconnect(t *testing.T) {
 	if _, known := p.Online(tailcfg.NodeID(1)); known {
 		t.Fatal("peer stayed known while the bus was down")
 	}
+	waitPresence(t, func() bool { return strings.Count(logs.String(), "presence bus disconnected") >= 1 })
 	if strings.Count(logs.String(), "presence bus disconnected") != 1 {
 		t.Fatalf("logs %s", logs.String())
 	}

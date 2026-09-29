@@ -34,7 +34,7 @@ func TestNotifyMetricsAfterScriptedRun(t *testing.T) {
 	before := h.clock.timers.Load()
 	h.n.ObserveTransition(downTransition(1, h.clock.Now()))
 	eventually(t, func() bool { return h.sinks["plain"].callCount() == 1 })
-	h.clock.waitTimers(t, before)
+	h.clock.waitTimers(t, before+1)
 	h.clock.Advance(batch.GroupWait)
 	eventually(t, func() bool {
 		return h.sinks["plain"].callCount() == 2 && h.sinks["batch"].callCount() == 1
