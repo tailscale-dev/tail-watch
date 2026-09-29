@@ -280,15 +280,19 @@ func (c *classifier) noteGrant(ctx context.Context, t *Target, handled bool) {
 
 func (c *classifier) finishRound(ctx context.Context, targets []*Target, complete bool) {
 	c.ensureParents(ctx, targets)
+	c.publishMu.Lock()
 	next := c.proposedParents()
 	if path, cyc := graphCycle(next); cyc {
+		c.publishMu.Unlock()
 		if c.log != nil {
 			c.log.WarnContext(ctx, "dependency cycle rejected", "path", path)
 		}
 		c.setReconcile(complete, nil)
 		return
 	}
-	if err := c.publishParents(ctx, next); err != nil {
+	err := c.publishParents(ctx, next)
+	c.publishMu.Unlock()
+	if err != nil {
 		if c.log != nil {
 			c.log.WarnContext(ctx, "dependency update rejected", "err", err)
 		}
@@ -376,6 +380,7 @@ func (c *classifier) newImplicit(peer peerInfo, deps []*Target) *Target {
 	base := builtinTiming()
 	ip, _ := peer.tailscaleIP()
 	t := &Target{
+		Dynamic:          false,
 		Name:             allocImplicitName(peer.Name, string(peer.StableID), c.takenNames()),
 		Addr:             ip.String(),
 		Site:             sharedSite(deps),

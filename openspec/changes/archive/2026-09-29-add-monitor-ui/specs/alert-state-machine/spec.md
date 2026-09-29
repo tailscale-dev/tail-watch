@@ -10,7 +10,10 @@ targets created through the monitor API. A registered
 target SHALL start in `DOWN` when a restore is pending for its name (see
 "Restore of open incidents"). Otherwise it SHALL start in `SUPPRESSED` when
 its parent is already down, and in `UNKNOWN` in every other case. It SHALL follow every rule that applies to configured targets:
-thresholds, flap damping, suppression, grace hold and transitions. Registering
+thresholds, flap damping, suppression, grace hold and transitions. A registered
+target's `parent` SHALL take effect in the dependency graph on registration, so
+suppression applies to it from its first result, and that edge SHALL persist
+across later dependency-learning rounds. Registering
 a name that is already registered SHALL return an error.
 
 The state machine SHALL allow removing a target whose last emitted state is
@@ -32,6 +35,19 @@ recovers.
   fails `fail_threshold` times
 - **THEN** it emits `UNKNOWN -> DOWN` and suppresses the targets that have it
   as parent
+
+#### Scenario: Dynamic target with a down parent
+
+- **WHEN** a dynamic target naming `nyc-router` as parent is registered while
+  `nyc-router` is `DOWN`
+- **THEN** it starts `SUPPRESSED` and is released when `nyc-router` recovers or is
+  removed
+
+#### Scenario: Parent edge survives a learning round
+
+- **WHEN** a dynamic target with a parent is registered and a later learning
+  round changes the learned dependency graph
+- **THEN** the dynamic target keeps its parent
 
 #### Scenario: Remove a down target
 

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tail-watch monitors</title>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <h1>tail-watch</h1>
+    <p class="sub">Monitors</p>
+  </div>
+  <button type="button" id="add" class="primary">Add monitor</button>
+</header>
+
+<main>
+  <p id="banner" class="banner" role="status" hidden></p>
+
+  <div class="table-wrap" hidden>
+    <table id="monitors">
+      <thead>
+        <tr>
+          <th scope="col">State</th>
+          <th scope="col">Monitor</th>
+          <th scope="col">Address</th>
+          <th scope="col">Site</th>
+          <th scope="col">Severity</th>
+          <th scope="col">Checks</th>
+          <th scope="col">Source</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p id="empty" class="empty" hidden>No monitors yet. Add one to start checking a device.</p>
+</main>
+
+<dialog id="editor" aria-labelledby="editor-title">
+  <form id="form" novalidate>
+    <h2 id="editor-title">Add monitor</h2>
+    <div id="editor-notes"></div>
+    <p id="form-error" class="form-error" role="alert" hidden></p>
+
+    <div class="grid">
+      <div class="field" data-field="name">
+        <label for="f-name">Name</label>
+        <input id="f-name" name="name" autocomplete="off" spellcheck="false" placeholder="lab-nas">
+        <p class="hint">Letters, digits, dot, dash and underscore. Cannot change after saving.</p>
+        <p class="error"></p>
+      </div>
+      <div class="field" data-field="addr">
+        <label for="f-addr">Address</label>
+        <input id="f-addr" name="addr" autocomplete="off" spellcheck="false" placeholder="10.20.0.50 or nas.lab">
+        <p class="error"></p>
+      </div>
+      <div class="field" data-field="site">
+        <label for="f-site">Site</label>
+        <input id="f-site" name="site" autocomplete="off" placeholder="lab">
+        <p class="error"></p>
+      </div>
+      <div class="field" data-field="severity">
+        <label for="f-severity">Severity</label>
+        <select id="f-severity" name="severity">
+          <option value="">page (default)</option>
+          <option value="page">page</option>
+          <option value="warn">warn</option>
+        </select>
+        <p class="error"></p>
+      </div>
+      <div class="field wide" data-field="checks">
+        <label for="f-checks">Checks</label>
+        <textarea id="f-checks" name="checks" rows="3" spellcheck="false" placeholder="icmp&#10;tcp:445&#10;http:https://10.20.0.50:5001/|DSM"></textarea>
+        <p class="hint">One per line: <code>icmp</code>, <code>tsping</code>, <code>tcp:PORT</code> or <code>http:URL</code>, optionally <code>|text</code> to match.</p>
+        <p class="error"></p>
+      </div>
+      <div class="field" data-field="parent">
+        <label for="f-parent">Parent</label>
+        <select id="f-parent" name="parent"><option value="">None</option></select>
+        <p class="hint">While the parent is down, this monitor stays quiet.</p>
+        <p class="error"></p>
+      </div>
+      <div class="field" data-field="network">
+        <label for="f-network">Network</label>
+        <select id="f-network" name="network">
+          <option value="">tailnet (default)</option>
+          <option value="tailnet">tailnet</option>
+          <option value="local">local</option>
+        </select>
+        <p class="error"></p>
+      </div>
+      <div class="field check" data-field="insecure_tls">
+        <input id="f-insecure_tls" name="insecure_tls" type="checkbox">
+        <label for="f-insecure_tls">Skip TLS certificate verification for HTTP checks</label>
+        <p class="error"></p>
+      </div>
+    </div>
+
+    <details>
+      <summary>Timing and thresholds</summary>
+      <p class="hint">Leave a field empty to use the default from the config file.</p>
+      <div class="grid">
+        <div class="field" data-field="interval">
+          <label for="f-interval">Interval</label>
+          <input id="f-interval" name="interval" autocomplete="off" placeholder="30s">
+          <p class="error"></p>
+        </div>
+        <div class="field" data-field="timeout">
+          <label for="f-timeout">Timeout</label>
+          <input id="f-timeout" name="timeout" autocomplete="off" placeholder="5s">
+          <p class="error"></p>
+        </div>
+        <div class="field" data-field="fail_threshold">
+          <label for="f-fail_threshold">Failures before down</label>
+          <input id="f-fail_threshold" name="fail_threshold" inputmode="numeric" autocomplete="off" placeholder="3">
+          <p class="error"></p>
+        </div>
+        <div class="field" data-field="recover_threshold">
+          <label for="f-recover_threshold">Passes before up</label>
+          <input id="f-recover_threshold" name="recover_threshold" inputmode="numeric" autocomplete="off" placeholder="2">
+          <p class="error"></p>
+        </div>
+        <div class="field" data-field="flap_limit">
+          <label for="f-flap_limit">Flap limit</label>
+          <input id="f-flap_limit" name="flap_limit" inputmode="numeric" autocomplete="off" placeholder="4">
+          <p class="error"></p>
+        </div>
+        <div class="field" data-field="flap_window">
+          <label for="f-flap_window">Flap window</label>
+          <input id="f-flap_window" name="flap_window" autocomplete="off" placeholder="15m">
+          <p class="error"></p>
+        </div>
+      </div>
+    </details>
+
+    <div class="actions">
+      <p id="check-result" class="check-result" role="status" hidden></p>
+      <button type="button" id="cancel">Cancel</button>
+      <button type="button" id="check">Check</button>
+      <button type="submit" id="save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="confirm" aria-labelledby="confirm-title">
+  <form method="dialog">
+    <h2 id="confirm-title">Delete monitor</h2>
+    <p id="confirm-text"></p>
+    <p id="confirm-warning" class="notice warn" hidden></p>
+    <div class="actions">
+      <button type="button" id="confirm-cancel">Cancel</button>
+      <button type="button" id="confirm-ok" class="danger">Delete</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>

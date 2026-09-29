@@ -60,6 +60,7 @@ func TestSlackGolden(t *testing.T) {
 
 	router := goldenTransition()
 	router.Target = Target{
+		Dynamic:          false,
 		Name:             "nyc-router",
 		Addr:             "100.64.0.9",
 		Site:             "nyc",

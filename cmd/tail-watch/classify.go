@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -209,6 +210,9 @@ type classifier struct {
 	pingFn func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error)
 	icmpFn func(context.Context, netip.Addr, time.Duration) bool
 
+	// publishMu serializes computing and publishing the parent graph, so a
+	// learning round and a runtime add cannot overwrite each other's edges.
+	publishMu      sync.Mutex
 	mu             sync.Mutex
 	configured     []*Target
 	byName         map[string]*Target
@@ -254,6 +258,7 @@ func newClassifier(
 
 		pingFn:    nil,
 		icmpFn:    nil,
+		publishMu: sync.Mutex{},
 		mu:        sync.Mutex{},
 		consumers: nil,
 		lastReconcile: reconcileResult{
@@ -634,7 +639,7 @@ func (c *classifier) ping(
 	defer cancel()
 	res, err := (tspingCheck{
 		resolver: nil,
-	}).Run(ctx, c.env, &Target{Addr: ip.String(), Timeout: timeout,
+	}).Run(ctx, c.env, &Target{Dynamic: false, Addr: ip.String(), Timeout: timeout,
 		Name:             "",
 		Site:             "",
 		Severity:         "",
@@ -669,7 +674,7 @@ func (c *classifier) probeICMP(ctx context.Context, ip netip.Addr, timeout time.
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	_, err := (icmpCheck{}).Run(ctx, c.env, &Target{Addr: ip.String(), Timeout: timeout,
+	_, err := (icmpCheck{}).Run(ctx, c.env, &Target{Dynamic: false, Addr: ip.String(), Timeout: timeout,
 		Name:             "",
 		Site:             "",
 		Severity:         "",
@@ -842,4 +847,58 @@ func pathFromPing(pr *ipnstate.PingResult) pathInfo {
 		out.DERP = pr.DERPRegionCode
 	}
 	return out
+}
+
+// AddConfigured registers a non-implicit target created after startup, such
+// as a dynamic monitor, and publishes the parent graph so its parent edge
+// reaches the alerter. It is undone if the graph cannot be published.
+func (c *classifier) AddConfigured(ctx context.Context, t *Target) error {
+	if c == nil || t == nil {
+		return nil
+	}
+	c.mu.Lock()
+	if _, taken := c.byName[t.Name]; taken {
+		c.mu.Unlock()
+		return fmt.Errorf("target %s is already registered", t.Name)
+	}
+	c.configured = append(slices.Clone(c.configured), t)
+	c.byName[t.Name] = t
+	c.mu.Unlock()
+	if err := c.republishParents(ctx); err != nil {
+		c.dropConfigured(t.Name)
+		return err
+	}
+	return nil
+}
+
+// RemoveConfigured forgets a target added with AddConfigured and republishes
+// the parent graph without it. parentOf keeps the old edge until that publish
+// so the diff removes the edge and its metric series.
+func (c *classifier) RemoveConfigured(ctx context.Context, name string) {
+	if c == nil {
+		return
+	}
+	c.dropConfigured(name)
+	_ = c.republishParents(ctx)
+}
+
+func (c *classifier) dropConfigured(name string) {
+	c.mu.Lock()
+	c.configured = slices.DeleteFunc(slices.Clone(c.configured), func(t *Target) bool { return t.Name == name })
+	delete(c.byName, name)
+	delete(c.learned, name)
+	delete(c.grants, name)
+	c.mu.Unlock()
+	c.layers.DeletePartialMatch(prometheus.Labels{labelTarget: name})
+	c.paths.DeletePartialMatch(prometheus.Labels{labelTarget: name})
+}
+
+func (c *classifier) republishParents(ctx context.Context) error {
+	c.publishMu.Lock()
+	defer c.publishMu.Unlock()
+	next := c.proposedParents()
+	if path, cyc := graphCycle(next); cyc {
+		return errCycle(path)
+	}
+	return c.publishParents(ctx, next)
 }

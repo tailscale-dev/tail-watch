@@ -20,7 +20,7 @@ func TestTCPTimeoutNonAcceptingListener(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err := tcpCheck{port: port}.Run(ctx, env, &Target{Name: "slow", Addr: host,
+	_, err := tcpCheck{port: port}.Run(ctx, env, &Target{Dynamic: false, Name: "slow", Addr: host,
 		Site:             "",
 		Severity:         "",
 		Parent:           "",

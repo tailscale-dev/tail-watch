@@ -62,6 +62,9 @@ func TestInFlightTimeoutUsesStartGeneration(t *testing.T) {
 	al, _, tr := testAlerter(t, []*Target{child, parent}, map[string]string{"nas": "router"})
 	pass(al, child)
 	app := &app{
+		ui:       false,
+		dynamic:  nil,
+		registry: nil,
 		alerts:   al,
 		pub:      newPublisher(),
 		clock:    al.clock,

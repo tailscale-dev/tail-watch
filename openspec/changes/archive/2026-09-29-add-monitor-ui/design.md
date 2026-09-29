@@ -7,7 +7,8 @@ Targets are parsed once by `loadConfig` (`config.go`) into `Config.Targets`, the
 `runtimeRegistry`, seeds the targets, restores open incidents and schedules checks.
 `runtimeRegistry.AddTarget`/`RemoveTarget` already register a target live across the
 alerter, the prober and the notifier; the dependency learner uses them for implicit
-routers. The alerter refuses to remove a configured target with an open incident
+routers. They do not register a configured target with the classifier or its parent
+graph, which this change adds (see "Register with the classifier and the parent graph"). The alerter refuses to remove a configured target with an open incident
 (`alert_target.go`, `removeLocked`) but allows an implicit one. The HTTP mux in
 `runServer` has `/` (prober status, a catch-all), `/metrics` and `/healthz`. The
 project has no Node toolchain. See proposal.md for motivation and scope.
@@ -60,6 +61,28 @@ restore and event payloads. Reusing it for UI monitors would change all three. A
 targets join the `configured` name set passed to `restoreOpen`, so open incidents restore
 through the ordinary configured path.
 
+### Register with the classifier and the parent graph
+
+`runtimeRegistry.AddTarget` reaches the alerter, the prober and the notifier, but two
+pieces of state are fixed at startup. `alerter.AddTarget` never reads `Target.Parent`
+(`a.parents` is set only by the constructor and `UpdateParents`), and the classifier keeps
+`configured`/`byName` from `newClassifier`, then recomputes the whole parent graph from
+`byName` each learning round and publishes it with `UpdateParents`. A dynamic monitor
+registered only through the existing path would never be suppressed by its parent, would get
+no failure-layer classification, and would lose any parent edge the next time a learned
+router changed the graph.
+
+So the registry gains a configured-target path: the classifier gets
+`AddConfigured`/`RemoveConfigured`, which update `configured`, `byName` and the parent
+metrics under its mutex, and `runtimeRegistry.AddTarget`/`RemoveTarget` call them for
+non-implicit targets. The parent edge is published through the classifier's existing
+`publishParents` so the classifier stays the single owner of the graph, and the alerter
+receives it before the target's first check runs. Removal drops the target from both and
+republishes the graph. The startup path keeps seeding YAML targets as before.
+
+Alternative: have the manager call `alerter.UpdateParents` itself. Rejected: the next learn
+round would overwrite it, since the classifier publishes its own view of the whole graph.
+
 ### Persist first, then apply
 
 Order for a change: validate, write the new `targets.json` atomically, then call
@@ -104,7 +127,9 @@ The list joins the resolved targets with the alerter's `Snapshots()` to fill `st
 
 `ui/index.html`, `ui/app.js`, `ui/style.css`. ES modules, `fetch`, a 5s poll of the
 list, a `<dialog>` for the form. The parent selector is filtered client-side to
-monitors with exactly one `icmp` or `tsping` check. No framework, no CDN.
+monitors with exactly one `icmp` or `tsping` check. No framework, no CDN. The layout and styling are developed and checked in a real browser
+with Playwright (desktop and phone widths, light and dark, empty and error states), not
+judged from the markup.
 
 Alternatives: htmx or Preact vendored into the repo. Rejected: it adds a vendored
 license and update surface for one table and one form.
@@ -146,6 +171,17 @@ config `collector.ui: true`. `rawCollector` gains `UI *bool`. The state-dir chec
   restore path.
 - [Skipped `targets.json` entries are not shown in the UI] → Logged only for now; see
   open questions.
+- [The SPA has no automated tests: `ui/` is plain files with no harness, so the list
+  refresh, per-field errors, read-only name on edit, delete confirmation and cancel, and
+  the parent selector filter are checked by hand with Playwright] → Accepted as
+  manual-only; screenshots of the list, form error and delete confirmation are in
+  `docs/images/`. A browser test harness is out of scope.
+- [`dynamicTarget`, `monitorView` and `rawTarget` restate the same target fields, so a
+  new target option must be added to each, plus `raw()` and `viewOf`] → Accepted; the
+  JSON and YAML shapes differ, and consolidating them is a separate refactor.
+- [The `Dynamic` flag is checked in the alerter's removal rule, the classifier and the
+  registry] → Accepted; `Implicit` is left alone. Any new target origin needs the same
+  review of those three places.
 
 ## Migration Plan
 

@@ -42,7 +42,7 @@ func TestPublishCompletionOrder(t *testing.T) {
 	}
 	pub := newPublisher()
 	pub.add(cons)
-	target := &Target{Name: "t",
+	target := &Target{Dynamic: false, Name: "t",
 		Addr:             "",
 		Site:             "",
 		Severity:         "",

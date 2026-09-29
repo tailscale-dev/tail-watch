@@ -131,8 +131,8 @@ tail-watch starts once the node reports healthy. It reads
 image can send ICMP without `CAP_NET_RAW`. `network: local` targets reach
 only what the container's Docker network can reach.
 
-`collector.state_dir` is accepted and unused until notification delivery
-lands. Do not put secrets in the config file.
+`collector.state_dir` holds notification state and, with the UI on, the monitors
+created there. Do not put secrets in the config file.
 
 ## ACLs
 
@@ -254,6 +254,79 @@ Prometheus series use the `tailwatch_` prefix:
 | `tailwatch_path{target,kind}` | gauge, `direct`, `derp`, and `peer_relay` |
 | `tailwatch_target_parent{target,parent}` | gauge, 1 for the current parent |
 | `tailwatch_target_state{target}` | gauge, 0 unknown through 4 flapping |
+
+## Monitor UI
+
+Off by default, tail-watch reads its monitors from the YAML file at startup and
+never changes them. With the UI on, it also serves a page at `/ui/` and a JSON API
+under `/api/v1/` for adding, editing, and deleting monitors while it runs, with no
+restart and no lost grace timers. Monitors from the YAML file appear in the list as
+read-only; only monitors created in the UI can be changed there.
+
+Turn it on with `--ui` or `collector.ui: true`. The flag wins, so `--ui=false` turns
+off a config that enables it. The UI needs `collector.state_dir`, because monitors
+created in the UI are kept in `state_dir/targets.json`. tail-watch exits at startup
+without it, and ignores the UI under `--once`.
+
+```bash
+tail-watch --config /etc/tail-watch/tail-watch.yaml --ui
+```
+
+`targets.json` uses the YAML field names and is written atomically with mode 0600.
+The `defaults` block of the YAML file applies to UI monitors. A UI monitor is
+accepted only if the YAML loader would accept the same target, and a monitor whose
+name matches a YAML target is skipped at startup with a warning; the YAML target
+wins. With the UI off, `targets.json` is left alone and its monitors do not run; a
+startup warning says how many are inactive.
+
+An edit is a delete followed by an add. Editing or deleting a `DOWN` monitor closes
+its open incident with `reason: removed`, and a new incident opens only if the new
+definition fails `fail_threshold` checks. A monitor that other monitors name as
+`parent` cannot be deleted until they are changed. Editing a parent briefly releases
+its suppressed dependents, which can page while the parent is down.
+
+![The monitor list: YAML monitors are read-only, UI monitors have Edit and Delete, and monitors behind a down parent show SUPPRESSED.](docs/images/monitor-ui-list.png)
+
+The form shows validation errors from the same rules the YAML loader uses, next to
+the field they belong to, and creates nothing until they are fixed.
+
+![The add monitor form with an invalid TCP port reported under Checks.](docs/images/monitor-ui-form-error.png)
+
+Deleting a `DOWN` monitor asks first, and says that its open incident closes.
+
+![The delete confirmation for a down monitor.](docs/images/monitor-ui-delete-down.png)
+
+### Reaching the UI
+
+The default `listen` address is `127.0.0.1:9109`, which only the host itself can
+reach. To open the UI from another device on the tailnet, bind an address that
+device can reach, such as the node's tailnet IP, and grant that device access to the
+port. Grants cover the whole port, so they also expose `/metrics`.
+
+```jsonc
+{
+  "grants": [
+    {
+      "src": ["autogroup:admin"],
+      "dst": ["tag:monitor"],
+      "ip": ["tcp:9109"]
+    }
+  ]
+}
+```
+
+In the Compose layout, tail-watch shares the `tailscale` container's network
+namespace, so every process in that namespace can reach the loopback listener.
+
+### Risks
+
+There is no login. Access control is the tailnet ACL and the listen address, and
+tail-watch warns at startup when the address is not loopback. Whoever can reach the
+port can make the collector probe any address it can route to. The API refuses
+requests that are not `application/json` and requests whose `Origin` names another
+host, which blocks cross-site form posts and cross-origin fetches. It does not stop
+DNS rebinding, where the attacker's page and the `Host` header agree. Every write is
+logged with the caller's address.
 
 ## Notifications
 

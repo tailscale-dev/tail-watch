@@ -38,23 +38,29 @@ func TestTCPOpenAndRefused(t *testing.T) {
 	env := new(fakeEnv)
 
 	port := ln.Addr().(*net.TCPAddr).Port
-	res, err := tcpCheck{port: port}.Run(context.Background(), env, &Target{Name: "up", Addr: "127.0.0.1",
-		Site:             "",
-		Severity:         "",
-		Parent:           "",
-		InsecureTLS:      false,
-		Interval:         0,
-		Timeout:          0,
-		FailThreshold:    0,
-		RecoverThreshold: 0,
-		FlapLimit:        0,
-		FlapWindow:       0,
-		Network:          "",
-		Checks:           nil,
-		Implicit:         false,
-		StableID:         "",
-		NodeID:           0,
-	})
+	res, err := tcpCheck{
+		port: port,
+	}.Run(
+		context.Background(),
+		env,
+		&Target{Dynamic: false, Name: "up", Addr: "127.0.0.1",
+			Site:             "",
+			Severity:         "",
+			Parent:           "",
+			InsecureTLS:      false,
+			Interval:         0,
+			Timeout:          0,
+			FailThreshold:    0,
+			RecoverThreshold: 0,
+			FlapLimit:        0,
+			FlapWindow:       0,
+			Network:          "",
+			Checks:           nil,
+			Implicit:         false,
+			StableID:         "",
+			NodeID:           0,
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,23 +74,29 @@ func TestTCPOpenAndRefused(t *testing.T) {
 	}
 	closedPort := closed.Addr().(*net.TCPAddr).Port
 	_ = closed.Close()
-	_, err = tcpCheck{port: closedPort}.Run(context.Background(), env, &Target{Name: "down", Addr: "127.0.0.1",
-		Site:             "",
-		Severity:         "",
-		Parent:           "",
-		InsecureTLS:      false,
-		Interval:         0,
-		Timeout:          0,
-		FailThreshold:    0,
-		RecoverThreshold: 0,
-		FlapLimit:        0,
-		FlapWindow:       0,
-		Network:          "",
-		Checks:           nil,
-		Implicit:         false,
-		StableID:         "",
-		NodeID:           0,
-	})
+	_, err = tcpCheck{
+		port: closedPort,
+	}.Run(
+		context.Background(),
+		env,
+		&Target{Dynamic: false, Name: "down", Addr: "127.0.0.1",
+			Site:             "",
+			Severity:         "",
+			Parent:           "",
+			InsecureTLS:      false,
+			Interval:         0,
+			Timeout:          0,
+			FailThreshold:    0,
+			RecoverThreshold: 0,
+			FlapLimit:        0,
+			FlapWindow:       0,
+			Network:          "",
+			Checks:           nil,
+			Implicit:         false,
+			StableID:         "",
+			NodeID:           0,
+		},
+	)
 	if err == nil || !strings.Contains(err.Error(), "connection refused") {
 		t.Fatalf("err %v", err)
 	}
@@ -115,7 +127,7 @@ func TestHTTPChecks(t *testing.T) {
 
 	t.Run("200", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+srv.URL+"/ok|DSM")
-		if _, err := chk.Run(context.Background(), env, &Target{Addr: addr,
+		if _, err := chk.Run(context.Background(), env, &Target{Dynamic: false, Addr: addr,
 			Name:             "",
 			Site:             "",
 			Severity:         "",
@@ -139,7 +151,7 @@ func TestHTTPChecks(t *testing.T) {
 	t.Run("302", func(t *testing.T) {
 		before := hits["/ok"]
 		chk := mustCheck(t, "http:"+srv.URL+"/bounce")
-		if _, err := chk.Run(context.Background(), env, &Target{Addr: addr,
+		if _, err := chk.Run(context.Background(), env, &Target{Dynamic: false, Addr: addr,
 			Name:             "",
 			Site:             "",
 			Severity:         "",
@@ -165,7 +177,7 @@ func TestHTTPChecks(t *testing.T) {
 	})
 	t.Run("500", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+srv.URL+"/fail")
-		_, err := chk.Run(context.Background(), env, &Target{Addr: addr,
+		_, err := chk.Run(context.Background(), env, &Target{Dynamic: false, Addr: addr,
 			Name:             "",
 			Site:             "",
 			Severity:         "",
@@ -189,7 +201,7 @@ func TestHTTPChecks(t *testing.T) {
 	})
 	t.Run("missing text", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+srv.URL+"/missing|DSM")
-		_, err := chk.Run(context.Background(), env, &Target{Addr: addr,
+		_, err := chk.Run(context.Background(), env, &Target{Dynamic: false, Addr: addr,
 			Name:             "",
 			Site:             "",
 			Severity:         "",
@@ -221,7 +233,7 @@ func TestHTTPChecks(t *testing.T) {
 	ip, _, _ := strings.Cut(tlsHost, ":")
 	t.Run("tls rejected", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+tlsSrv.URL+"/")
-		_, err := chk.Run(context.Background(), env, &Target{Addr: ip,
+		_, err := chk.Run(context.Background(), env, &Target{Dynamic: false, Addr: ip,
 			Name:             "",
 			Site:             "",
 			Severity:         "",
@@ -245,7 +257,7 @@ func TestHTTPChecks(t *testing.T) {
 	})
 	t.Run("insecure tls", func(t *testing.T) {
 		chk := mustCheck(t, "http:"+tlsSrv.URL+"/")
-		if _, err := chk.Run(context.Background(), env, &Target{Addr: ip, InsecureTLS: true,
+		if _, err := chk.Run(context.Background(), env, &Target{Dynamic: false, Addr: ip, InsecureTLS: true,
 			Name:             "",
 			Site:             "",
 			Severity:         "",
@@ -271,7 +283,7 @@ func TestICMPPermissionAndFamily(t *testing.T) {
 	t.Parallel()
 	env := new(fakeEnv)
 	env.listenErr = errors.New("listen ip4:icmp 0.0.0.0: socket: operation not permitted")
-	_, err := icmpCheck{}.Run(context.Background(), env, &Target{Name: "lo", Addr: "127.0.0.1",
+	_, err := icmpCheck{}.Run(context.Background(), env, &Target{Dynamic: false, Name: "lo", Addr: "127.0.0.1",
 		Site:             "",
 		Severity:         "",
 		Parent:           "",
@@ -297,7 +309,7 @@ func TestICMPPermissionAndFamily(t *testing.T) {
 	}
 	env6 := new(fakeEnv)
 	env6.listenErr = errors.New("listen ip6:icmp: socket: operation not permitted")
-	_, _ = icmpCheck{}.Run(context.Background(), env6, &Target{Name: "lo", Addr: "::1",
+	_, _ = icmpCheck{}.Run(context.Background(), env6, &Target{Dynamic: false, Name: "lo", Addr: "::1",
 		Site:             "",
 		Severity:         "",
 		Parent:           "",
@@ -327,7 +339,7 @@ func TestICMPLoopback(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	res, err := icmpCheck{}.Run(ctx, env, &Target{Name: "lo", Addr: "127.0.0.1",
+	res, err := icmpCheck{}.Run(ctx, env, &Target{Dynamic: false, Name: "lo", Addr: "127.0.0.1",
 		Site:             "",
 		Severity:         "",
 		Parent:           "",
@@ -382,6 +394,9 @@ func TestRunCheckRecordsTimeout(t *testing.T) {
 		stdout:   nil,
 		socket:   "",
 		listen:   "",
+		ui:       false,
+		dynamic:  nil,
+		registry: nil,
 		resolver: nil,
 		presence: nil,
 		class:    nil,
@@ -395,7 +410,7 @@ func TestRunCheckRecordsTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	res := a.runCheck(ctx, &Target{Name: "t", Addr: "127.0.0.1",
+	res := a.runCheck(ctx, &Target{Dynamic: false, Name: "t", Addr: "127.0.0.1",
 		Site:             "",
 		Severity:         "",
 		Parent:           "",

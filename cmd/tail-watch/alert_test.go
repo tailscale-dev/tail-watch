@@ -965,6 +965,9 @@ func TestAlerterWiring(t *testing.T) {
 		stdout:   nil,
 		socket:   "",
 		listen:   "",
+		ui:       false,
+		dynamic:  nil,
+		registry: nil,
 		resolver: nil,
 		presence: nil,
 		class:    nil,
@@ -1125,6 +1128,7 @@ func (tr *trap) expectQuiet(t *testing.T, have int) {
 
 func alertTarget(name string, checks ...string) *Target {
 	t := &Target{
+		Dynamic:          false,
 		Name:             name,
 		Addr:             "10.20.0.5",
 		Interval:         15 * time.Second,
@@ -1250,5 +1254,28 @@ func TestRemoveDownImplicitTarget(t *testing.T) {
 	snaps := al.Snapshots()
 	if len(snaps) != 1 || !snaps[0].Removed || !snaps[0].Dirty || snaps[0].State != StateDown {
 		t.Fatalf("removal must leave a removed dirty snapshot of the open incident: %+v", snaps)
+	}
+}
+
+func TestRemoveDownDynamicTarget(t *testing.T) {
+	t.Parallel()
+	dyn := alertTarget("lab-nas", "icmp")
+	dyn.Dynamic = true
+	al, _, tr := testAlerter(t, []*Target{dyn}, nil)
+	failN(al, dyn, "icmp", layerService, 3)
+	tr.wait(t, 1)
+	if !al.IsDown("lab-nas") {
+		t.Fatal("setup: dynamic target should be down")
+	}
+	if err := al.RemoveTarget("lab-nas"); err != nil {
+		t.Fatalf("a down dynamic target must be removable: %v", err)
+	}
+	tr.expectQuiet(t, 1)
+	snaps := al.Snapshots()
+	if len(snaps) != 1 || !snaps[0].Removed || !snaps[0].Dirty || snaps[0].State != StateDown {
+		t.Fatalf("removal must leave a removed dirty snapshot of the open incident: %+v", snaps)
+	}
+	if seriesHas(t, al, "lab-nas") {
+		t.Fatal("series remains")
 	}
 }

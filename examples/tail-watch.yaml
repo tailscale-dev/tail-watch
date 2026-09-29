@@ -7,6 +7,8 @@
 collector:
   listen: 127.0.0.1:9109
   state_dir: /var/lib/tail-watch
+  # ui: true serves the monitor UI at /ui/ (or run with --ui). It needs state_dir.
+  # ui: true
 
 defaults:
   interval: 30s

@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,14 +40,19 @@ const (
 )
 
 type app struct {
-	cfg      *Config
-	env      netEnv
-	log      *slog.Logger
-	clock    tstime.Clock
-	pub      *publisher
-	stdout   io.Writer
-	socket   string
-	listen   string
+	cfg    *Config
+	env    netEnv
+	log    *slog.Logger
+	clock  tstime.Clock
+	pub    *publisher
+	stdout io.Writer
+	socket string
+	listen string
+	ui     bool
+	// dynamic holds the entries read from targets.json when the UI is on.
+	dynamic []dynamicTarget
+	// registry is the live target registry built by startCollectors.
+	registry *runtimeRegistry
 	resolver *tsResolver
 	presence *presence
 	class    *classifier
@@ -78,6 +84,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	listenFlag := fs.String("listen", "", "HTTP listen address (overrides collector.listen)")
 	socketFlag := fs.String("socket", "", "tailscaled LocalAPI socket")
 	onceFlag := fs.Bool("once", false, "run every check once and exit")
+	uiFlag := registerUIFlag(fs)
 	versionFlag := fs.Bool("version", false, "print version and exit")
 	logLevelFlag := fs.String("log-level", "", "log level: debug, info, warn, error (overrides TAIL_WATCH_LOG_LEVEL)")
 	if err := fs.Parse(args); err != nil {
@@ -102,6 +109,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
+	ui, uiErr := resolveUI(cfg, *uiFlag, *onceFlag)
+	if uiErr != nil {
+		_, _ = fmt.Fprintln(stderr, uiErr)
+		return 1
+	}
 	socket := socketPath(*socketFlag)
 	a := &app{
 		cfg:    cfg,
@@ -112,7 +124,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		stdout: stdout,
 		socket: socket,
 		listen: cfg.ListenAddr(*listenFlag),
+		ui:     ui,
 
+		dynamic:  nil,
+		registry: nil,
 		resolver: nil,
 		presence: nil,
 		class:    nil,
@@ -127,6 +142,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		collector: CollectorInfo{Name: "", TailscaleIP: ""},
 	}
 	a.pub.add(debugConsumer{log: log})
+	if dynErr := a.loadDynamicTargets(*onceFlag); dynErr != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", dynErr)
+		return 1
+	}
 	a.bindResolver()
 	if preflightErr := a.preflight(context.Background()); preflightErr != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", preflightErr)
@@ -140,6 +159,34 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return a.runServer()
+}
+
+// registerUIFlag adds the tri-state --ui flag. The returned pointer stays nil
+// unless the flag is given, so --ui=false can override collector.ui.
+func registerUIFlag(fs *flag.FlagSet) **bool {
+	var value *bool
+	fs.BoolFunc("ui", "serve the monitor UI and API (overrides collector.ui; --ui=false turns it off)",
+		func(v string) error {
+			on, err := strconv.ParseBool(v)
+			if err != nil {
+				return err
+			}
+			value = &on
+			return nil
+		})
+	return &value
+}
+
+// resolveUI decides whether the monitor UI is on. --once ignores it, and it
+// needs a state_dir to keep the monitors it creates.
+func resolveUI(cfg *Config, flag *bool, once bool) (bool, error) {
+	if once || !cfg.UIEnabled(flag) {
+		return false, nil
+	}
+	if cfg.Collector.StateDir == "" {
+		return false, errors.New("the UI needs collector.state_dir to store monitors")
+	}
+	return true, nil
 }
 
 // buildNotifier resolves every sink secret and opens the notification state.
@@ -263,6 +310,9 @@ func (a *app) schedule(ctx context.Context, p *prober.Prober) []func() error {
 
 func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeRegistry {
 	a.presence = newPresence(a.log, a.clock, a.watchBus)
+	if a.ui {
+		a.cfg.mergeDynamic(a.dynamic, a.log)
+	}
 	a.bindResolver()
 	targets := make([]*Target, len(a.cfg.Targets))
 	for i := range a.cfg.Targets {
@@ -270,6 +320,7 @@ func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeReg
 		a.bindChecks(targets[i])
 	}
 	reg := newRuntimeRegistry(ctx, a, proberStarter{p: p})
+	a.registry = reg
 	al, err := newAlerter(alertConfig{
 		Clock:      a.clock,
 		Targets:    targets,
@@ -297,11 +348,7 @@ func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeReg
 	a.pub.add(a.class)
 	a.learner = newLearner(a.class)
 	if a.notify != nil {
-		names := make(map[string]bool, len(targets))
-		for _, t := range targets {
-			names[t.Name] = true
-		}
-		a.notify.restoreOpen(names, al, a.class)
+		a.notify.restoreOpen(targetNames(targets), al, a.class)
 		a.notify.Start(ctx)
 	}
 	go a.presence.run(ctx)
@@ -312,6 +359,16 @@ func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeReg
 		}
 	}
 	return reg
+}
+
+// targetNames is the set of names that count as configured for restoreOpen:
+// YAML and dynamic targets, so an open incident on a UI monitor is restored.
+func targetNames(targets []*Target) map[string]bool {
+	names := make(map[string]bool, len(targets))
+	for _, t := range targets {
+		names[t.Name] = true
+	}
+	return names
 }
 
 func (a *app) runOnce() int {
@@ -377,6 +434,7 @@ func (a *app) runServer() int {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ok\n")
 	})
+	a.mountMonitorUI(mux)
 	srv := &http.Server{
 		Addr:              a.listen,
 		Handler:           mux,
@@ -411,6 +469,27 @@ func (a *app) runServer() int {
 		a.log.Error("shutdown", "err", err)
 	}
 	return 0
+}
+
+// mountMonitorUI serves the monitor API when the UI is on. When it is off,
+// /ui/ and /api/v1/ answer 404 explicitly, since "/" would otherwise catch them.
+func (a *app) mountMonitorUI(mux *http.ServeMux) {
+	if !a.ui {
+		mux.HandleFunc("/ui/", http.NotFound)
+		mux.HandleFunc("/api/v1/", notFoundJSON)
+		return
+	}
+	mgr := newMonitorManager(a.cfg, a.dynamic, a.registry, a.alerts, a.log)
+	if a.notify != nil {
+		mgr.closeIncident = a.notify.closeRemoved
+	}
+	mgr.routes(mux)
+	mux.Handle("/ui/", uiHandler())
+	a.log.Info("monitor write API enabled", "addr", a.listen)
+	if !loopbackListen(a.listen) {
+		a.log.Warn("monitor write API is reachable beyond loopback; access is controlled only by the network",
+			"addr", a.listen)
+	}
 }
 
 func (a *app) logf(format string, args ...any) {
@@ -584,8 +663,8 @@ func (r *runtimeRegistry) AddTarget(t *Target) error {
 	if !seeded && r.app != nil {
 		r.app.bindChecks(t)
 	}
-	if r.alert != nil && !seeded {
-		if err := r.alert.AddTarget(t); err != nil {
+	if !seeded {
+		if err := r.registerNew(t); err != nil {
 			return err
 		}
 	}
@@ -617,6 +696,28 @@ func (r *runtimeRegistry) AddTarget(t *Target) error {
 	return nil
 }
 
+// registerNew registers a target that was not seeded at startup. A dynamic
+// target joins the classifier first, so its parent edge is in the alerter's
+// graph before the alerter registers it.
+func (r *runtimeRegistry) registerNew(t *Target) error {
+	classify := t.Dynamic && !t.Implicit && r.app != nil && r.app.class != nil
+	if classify {
+		if err := r.app.class.AddConfigured(context.Background(), t); err != nil {
+			return err
+		}
+	}
+	if r.alert == nil {
+		return nil
+	}
+	if err := r.alert.AddTarget(t); err != nil {
+		if classify {
+			r.app.class.RemoveConfigured(context.Background(), t.Name)
+		}
+		return err
+	}
+	return nil
+}
+
 func (r *runtimeRegistry) RemoveTarget(name string) error {
 	if r.alert != nil {
 		if err := r.alert.RemoveTarget(name); err != nil {
@@ -625,6 +726,12 @@ func (r *runtimeRegistry) RemoveTarget(name string) error {
 		if d, ok := r.alert.(interface{ DiscardPendingRestore(string) }); ok {
 			d.DiscardPendingRestore(name)
 		}
+	}
+	r.mu.Lock()
+	dynamic := r.byName[name] != nil && r.byName[name].Dynamic
+	r.mu.Unlock()
+	if dynamic && r.app != nil && r.app.class != nil {
+		r.app.class.RemoveConfigured(context.Background(), name)
 	}
 	r.mu.Lock()
 	stops := r.probes[name]

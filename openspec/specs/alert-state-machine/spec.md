@@ -211,18 +211,24 @@ With zero configured targets, it SHALL signal immediately.
 ### Requirement: Runtime target registration
 
 The state machine SHALL accept targets registered after startup, such as
-implicit targets for learned parents that are not in the config. A registered
+implicit targets for learned parents that are not in the config, and dynamic
+targets created through the monitor API. A registered
 target SHALL start in `DOWN` when a restore is pending for its name (see
 "Restore of open incidents"). Otherwise it SHALL start in `SUPPRESSED` when
 its parent is already down, and in `UNKNOWN` in every other case. It SHALL follow every rule that applies to configured targets:
-thresholds, flap damping, suppression, grace hold and transitions. Registering
+thresholds, flap damping, suppression, grace hold and transitions. A registered
+target's `parent` SHALL take effect in the dependency graph on registration, so
+suppression applies to it from its first result, and that edge SHALL persist
+across later dependency-learning rounds. Registering
 a name that is already registered SHALL return an error.
 
 The state machine SHALL allow removing a target whose last emitted state is
 not `DOWN`, and SHALL refuse removal with an error when a configured target is
-`DOWN`, so an open incident always gets its recovery. An implicit target MAY be
-removed while `DOWN`: the learner asks only after authoritative topology
-reconciliation, and the removal leaves a terminal dirty snapshot from which the
+`DOWN`, so an open incident always gets its recovery. An implicit or dynamic
+target MAY be removed while `DOWN`. For an implicit target, the learner asks only
+after authoritative topology reconciliation; for a dynamic target, the operator
+asks through the monitor API and accepts that the monitor is gone. In both cases
+the removal leaves a terminal dirty snapshot from which the
 notifier closes the incident with `reason: removed`. A refused caller retries
 later. Removal
 SHALL cancel the target's timers and drop its metric series. Any dependents
@@ -236,6 +242,19 @@ recovers.
 - **THEN** it emits `UNKNOWN -> DOWN` and suppresses the targets that have it
   as parent
 
+#### Scenario: Dynamic target with a down parent
+
+- **WHEN** a dynamic target naming `nyc-router` as parent is registered while
+  `nyc-router` is `DOWN`
+- **THEN** it starts `SUPPRESSED` and is released when `nyc-router` recovers or is
+  removed
+
+#### Scenario: Parent edge survives a learning round
+
+- **WHEN** a dynamic target with a parent is registered and a later learning
+  round changes the learned dependency graph
+- **THEN** the dynamic target keeps its parent
+
 #### Scenario: Remove a down target
 
 - **WHEN** removal is requested for a configured target whose last emitted
@@ -245,6 +264,13 @@ recovers.
 #### Scenario: Remove a down implicit target
 
 - **WHEN** removal is requested for an implicit target whose last emitted state
+  is `DOWN`
+- **THEN** it is removed, emits no transition, and its snapshot is a removed,
+  dirty view that the notifier reconciles into a `reason: removed` recovery
+
+#### Scenario: Remove a down dynamic target
+
+- **WHEN** removal is requested for a dynamic target whose last emitted state
   is `DOWN`
 - **THEN** it is removed, emits no transition, and its snapshot is a removed,
   dirty view that the notifier reconciles into a `reason: removed` recovery

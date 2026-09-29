@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,12 +52,17 @@ type Config struct {
 	Targets   []Target
 	Sinks     []SinkConfig
 	Heartbeat *HeartbeatConfig
+	// RawTargets and Base are the YAML targets and resolved defaults, kept so
+	// a monitor created at runtime is validated against the same rules.
+	RawTargets []rawTarget
+	Base       timing
 }
 
 // CollectorConfig is the process-level section of a config file.
 type CollectorConfig struct {
 	Listen   string
 	StateDir string
+	UI       bool
 }
 
 // Target is one monitored device with its checks and resolved timings.
@@ -76,6 +83,8 @@ type Target struct {
 	Checks           []check
 	// Implicit is set for a reachability target created by dependency learning.
 	Implicit bool
+	// Dynamic is set for a monitor created through the monitor API.
+	Dynamic bool
 	// StableID is the tailnet stable node ID retained for an implicit target.
 	StableID tailcfg.StableNodeID
 	// NodeID is the tailnet node ID of an implicit target.
@@ -92,6 +101,15 @@ func (c *Config) ListenAddr(flag string) string {
 		return c.Collector.Listen
 	}
 	return defaultListen
+}
+
+// UIEnabled reports whether the monitor UI is on. A non-nil flag wins over
+// collector.ui, so --ui=false turns off a config that enables it.
+func (c *Config) UIEnabled(flag *bool) bool {
+	if flag != nil {
+		return *flag
+	}
+	return c != nil && c.Collector.UI
 }
 
 func resolveConfigPath(flag, env string) string {
@@ -127,6 +145,7 @@ type rawConfig struct {
 type rawCollector struct {
 	Listen   string `yaml:"listen"`
 	StateDir string `yaml:"state_dir"`
+	UI       *bool  `yaml:"ui"`
 }
 
 type rawDefaults struct {
@@ -228,32 +247,51 @@ func builtinTiming() timing {
 
 func resolveConfig(raw rawConfig) (*Config, []error) {
 	var errs []error
-	base := builtinTiming()
-	applyDur(&errs, "defaults.interval", raw.Defaults.Interval, &base.Interval)
-	applyDur(&errs, "defaults.timeout", raw.Defaults.Timeout, &base.Timeout)
-	applyDur(&errs, "defaults.flap_window", raw.Defaults.FlapWindow, &base.FlapWindow)
-	applyInt(raw.Defaults.FailThreshold, &base.FailThreshold)
-	applyInt(raw.Defaults.RecoverThreshold, &base.RecoverThreshold)
-	applyInt(raw.Defaults.FlapLimit, &base.FlapLimit)
-
+	base := resolveDefaults(&errs, raw.Defaults)
+	targets, targetErrs := resolveTargets(raw.Targets, base)
+	errs = append(errs, targetErrs...)
 	cfg := &Config{
 		Collector: CollectorConfig{
 			Listen:   raw.Collector.Listen,
 			StateDir: raw.Collector.StateDir,
+			UI:       raw.Collector.UI != nil && *raw.Collector.UI,
 		},
-		Targets:   make([]Target, len(raw.Targets)),
-		Sinks:     nil,
-		Heartbeat: nil,
+		Targets:    targets,
+		Sinks:      nil,
+		Heartbeat:  nil,
+		RawTargets: raw.Targets,
+		Base:       base,
 	}
+	cfg.Sinks = resolveSinks(&errs, raw.Sinks, raw.Collector.StateDir)
+	cfg.Heartbeat = resolveHeartbeat(&errs, raw.Heartbeat)
+	return cfg, errs
+}
+
+func resolveDefaults(errs *[]error, d rawDefaults) timing {
+	base := builtinTiming()
+	applyDur(errs, "defaults.interval", d.Interval, &base.Interval)
+	applyDur(errs, "defaults.timeout", d.Timeout, &base.Timeout)
+	applyDur(errs, "defaults.flap_window", d.FlapWindow, &base.FlapWindow)
+	applyInt(d.FailThreshold, &base.FailThreshold)
+	applyInt(d.RecoverThreshold, &base.RecoverThreshold)
+	applyInt(d.FlapLimit, &base.FlapLimit)
+	return base
+}
+
+// resolveTargets validates a target list as a whole: each target, then the
+// parent references and parent cycles across the list.
+func resolveTargets(raw []rawTarget, base timing) ([]Target, []error) {
+	var errs []error
+	targets := make([]Target, len(raw))
 	seen := map[string]int{}
-	checksOK := make([]bool, len(raw.Targets))
-	for i, rt := range raw.Targets {
+	checksOK := make([]bool, len(raw))
+	for i, rt := range raw {
 		t, ok := resolveTarget(&errs, i, rt, base, seen)
-		cfg.Targets[i] = t
+		targets[i] = t
 		checksOK[i] = ok
 	}
 	byName := map[string]int{}
-	for i, t := range cfg.Targets {
+	for i, t := range targets {
 		if t.Name == "" {
 			continue
 		}
@@ -261,12 +299,12 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 			byName[t.Name] = i
 		}
 	}
-	for i, t := range cfg.Targets {
+	for i, t := range targets {
 		if t.Parent == "" {
 			continue
 		}
 		pi, ok := byName[t.Parent]
-		if !ok || t.Parent == "" {
+		if !ok {
 			errs = append(
 				errs,
 				fmt.Errorf(
@@ -278,7 +316,7 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 			)
 			continue
 		}
-		if checksOK[pi] && !reachabilityOnly(cfg.Targets[pi]) {
+		if checksOK[pi] && !reachabilityOnly(targets[pi]) {
 			errs = append(
 				errs,
 				fmt.Errorf(
@@ -290,10 +328,8 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 			)
 		}
 	}
-	errs = append(errs, parentCycles(cfg.Targets, byName)...)
-	cfg.Sinks = resolveSinks(&errs, raw.Sinks, raw.Collector.StateDir)
-	cfg.Heartbeat = resolveHeartbeat(&errs, raw.Heartbeat)
-	return cfg, errs
+	errs = append(errs, parentCycles(targets, byName)...)
+	return targets, errs
 }
 
 func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[string]int) (Target, bool) {
@@ -314,6 +350,7 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[str
 
 		Checks:   nil,
 		Implicit: false,
+		Dynamic:  false,
 		StableID: "",
 		NodeID:   0,
 	}
@@ -568,4 +605,45 @@ func hasRemoteSubnet(targets []Target) bool {
 		}
 	}
 	return false
+}
+
+var (
+	located   = regexp.MustCompile(`^targets\[(\d+)\]\.`)
+	alsoIndex = regexp.MustCompile(` \(also targets\[\d+\]\)`)
+)
+
+// validateCandidate resolves candidate as the last entry after existing and
+// returns it with the problems it introduces. A problem at the candidate is
+// prefixed with its field, such as checks[1]. A problem the candidate causes
+// elsewhere, such as an invalid parent for a dependent or a parent cycle, has
+// no field prefix.
+func (c *Config) validateCandidate(existing []rawTarget, candidate rawTarget) (Target, []error) {
+	all := append(slices.Clone(existing), candidate)
+	idx := len(existing)
+	targets, errs := resolveTargets(all, c.Base)
+	_, baseline := resolveTargets(existing, c.Base)
+	known := make(map[string]bool, len(baseline))
+	for _, err := range baseline {
+		known[err.Error()] = true
+	}
+	var out []error
+	for _, err := range errs {
+		msg := err.Error()
+		if known[msg] {
+			continue
+		}
+		m := located.FindStringSubmatch(msg)
+		switch {
+		case m == nil:
+			out = append(out, errors.New("parent: "+strings.TrimPrefix(msg, "targets: ")))
+		case m[1] == strconv.Itoa(idx):
+			out = append(out, errors.New(alsoIndex.ReplaceAllString(strings.TrimPrefix(msg, m[0]), "")))
+		default:
+			_, detail, _ := strings.Cut(strings.TrimPrefix(msg, m[0]), ": ")
+			out = append(out, errors.New(detail))
+		}
+	}
+	t := targets[idx]
+	t.Dynamic = true
+	return t, out
 }

@@ -45,7 +45,7 @@ func (w *webhookSink) Send(ctx context.Context, body []byte, m sendMeta) deliver
 		return secretUnavailable(fmt.Errorf("sink %s: url: %w", w.cfg.Name, err))
 	}
 	headers := map[string]string{
-		"Content-Type": "application/json",
+		"Content-Type": contentTypeJSON,
 		"User-Agent":   "tail-watch/" + versionString(),
 	}
 	if w.cfg.Batch {

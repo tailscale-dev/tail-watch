@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -329,15 +330,122 @@ func TestExampleConfig(t *testing.T) {
 func TestListenFlagOverride(t *testing.T) {
 	t.Parallel()
 	cfg := &Config{
-		Collector: CollectorConfig{Listen: "127.0.0.1:1", StateDir: ""},
-		Targets:   nil,
-		Sinks:     nil,
-		Heartbeat: nil,
+		Collector:  CollectorConfig{Listen: "127.0.0.1:1", StateDir: "", UI: false},
+		Targets:    nil,
+		Sinks:      nil,
+		Heartbeat:  nil,
+		RawTargets: nil,
+		Base:       builtinTiming(),
 	}
 	if got := cfg.ListenAddr("127.0.0.1:2"); got != "127.0.0.1:2" {
 		t.Fatal(got)
 	}
 	if got := (new(Config)).ListenAddr(""); got != defaultListen {
 		t.Fatal(got)
+	}
+}
+
+func TestValidateCandidate(t *testing.T) {
+	t.Parallel()
+	cfg, err := parseConfig([]byte(`
+defaults: {interval: 30s, timeout: 5s}
+targets:
+  - {name: router, addr: 10.0.0.1, checks: [icmp]}
+  - {name: nas, addr: 10.0.0.2, checks: [icmp, 'tcp:445']}
+  - {name: cam, addr: 10.0.0.3, checks: [icmp], parent: router}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		candidate rawTarget
+		wants     []string
+	}{
+		{
+			name:      "valid",
+			candidate: rawT("lab", "10.9.0.1", "icmp"),
+			wants:     nil,
+		},
+		{
+			name:      "bad check port",
+			candidate: rawT("lab", "10.9.0.1", "icmp", "tcp:70000"),
+			wants:     []string{"checks[1]: "},
+		},
+		{
+			name: "timeout not below interval",
+			candidate: rawWith(rawT("lab", "10.9.0.1", "icmp"), func(r *rawTarget) {
+				r.Interval, r.Timeout = dur(10*time.Second), dur(10*time.Second)
+			}),
+			wants: []string{"timeout: "},
+		},
+		{
+			name:      "duplicate name",
+			candidate: rawT("nas", "10.9.0.1", "icmp"),
+			wants:     []string{"name: duplicate target name"},
+		},
+		{
+			name:      "unknown parent",
+			candidate: rawWith(rawT("lab", "10.9.0.1", "icmp"), func(r *rawTarget) { r.Parent = "ghost" }),
+			wants:     []string{"parent: "},
+		},
+		{
+			name:      "non-reachability parent",
+			candidate: rawWith(rawT("lab", "10.9.0.1", "icmp"), func(r *rawTarget) { r.Parent = "nas" }),
+			wants:     []string{"parent: ", "exactly one icmp or tsping"},
+		},
+		{
+			name:      "self parent cycle",
+			candidate: rawWith(rawT("lab", "10.9.0.1", "icmp"), func(r *rawTarget) { r.Parent = "lab" }),
+			wants:     []string{"parent: parent cycle: lab -> lab"},
+		},
+		{
+			name:      "several errors at once",
+			candidate: rawT("lab", "", "tcp:70000"),
+			wants:     []string{"addr: ", "checks[0]: "},
+		},
+		{
+			name:      "breaks a dependent's parent",
+			candidate: rawT("router", "10.0.0.1", "tcp:22"),
+			wants:     []string{"cam", "exactly one icmp or tsping"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			existing := cfg.RawTargets
+			if tt.name == "breaks a dependent's parent" {
+				existing = cfg.RawTargets[1:]
+			}
+			got, errs := cfg.validateCandidate(existing, tt.candidate)
+			if len(tt.wants) == 0 {
+				requireValidCandidate(t, got, errs)
+				return
+			}
+			requireCandidateErrors(t, errs, tt.wants)
+		})
+	}
+}
+
+func requireValidCandidate(t *testing.T, got Target, errs []error) {
+	t.Helper()
+	if len(errs) != 0 {
+		t.Fatalf("errors %v", errs)
+	}
+	if !got.Dynamic || got.Interval != 30*time.Second {
+		t.Fatalf("resolved %+v", got)
+	}
+}
+
+func requireCandidateErrors(t *testing.T, errs []error, wants []string) {
+	t.Helper()
+	joined := errors.Join(errs...).Error()
+	for _, want := range wants {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "targets[") {
+		t.Errorf("error still carries a target index:\n%s", joined)
 	}
 }

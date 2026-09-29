@@ -60,7 +60,11 @@ resolved settings, and the current alert `state`. Request and response bodies SH
 JSON. Successful creation SHALL return 201, replace 200, delete 204. A validation
 failure SHALL return 422 with every problem in an `errors` list, each prefixed with the
 field, such as `checks[1]`. A name that already exists, YAML or dynamic, SHALL be
-refused on create with 409. A missing name SHALL return 404. An attempt to change or
+refused on create with 409. A request body over 64 KiB, a body that is not valid JSON, or a body with a field that
+is not a target field SHALL return 400 and change nothing. `POST /validate` naming a YAML
+target SHALL return 409, as create does. Each list entry SHALL also carry `dependents`,
+the names of monitors that name it as `parent`, and for a `ui` entry `definition`, the
+stored entry the edit form starts from. A missing name SHALL return 404. An attempt to change or
 delete a YAML target SHALL return 409 and change nothing. A body `name` that differs
 from the path name on replace SHALL return 422.
 
@@ -85,6 +89,11 @@ from the path name on replace SHALL return 422.
 
 - **WHEN** a create request uses the name of an existing YAML target
 - **THEN** the response is 409 and nothing changes
+
+#### Scenario: Unknown field
+
+- **WHEN** `POST /api/v1/targets` sends a body with a field that is not a target field
+- **THEN** the response is 400 and nothing changes
 
 #### Scenario: Read-only YAML target
 

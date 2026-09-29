@@ -25,3 +25,23 @@ monitor-management capabilities. When the UI is off, `/ui/` and `/api/v1/` SHALL
 
 - **WHEN** the collector runs without the UI and a client requests `/api/v1/targets`
 - **THEN** the response is 404
+
+## ADDED Requirements
+
+### Requirement: Runtime registration of configured targets
+
+A configured target registered after startup, such as a dynamic monitor, SHALL be
+registered with alerting, check scheduling, the notifier and failure classification,
+and its `parent` SHALL join the dependency graph that the classifier publishes. Removing
+it SHALL remove it from all of them and from that graph.
+
+#### Scenario: Dynamic target is classified
+
+- **WHEN** a dynamic target's check fails
+- **THEN** the failure is classified into a layer as for a YAML target
+
+#### Scenario: Removal clears the graph
+
+- **WHEN** a dynamic target that has a parent is removed
+- **THEN** the classifier's parent graph no longer has an edge for it and its
+  `tailwatch_target_parent` series is dropped

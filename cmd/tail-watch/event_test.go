@@ -138,7 +138,8 @@ func TestPayloadGolden(t *testing.T) {
 
 	implicit := goldenTransition()
 	implicit.Target = Target{
-		Name: "nyc-router", Addr: "100.64.0.9", Site: "nyc", Severity: SeverityPage, Implicit: true,
+		Dynamic: false,
+		Name:    "nyc-router", Addr: "100.64.0.9", Site: "nyc", Severity: SeverityPage, Implicit: true,
 		Parent: "", InsecureTLS: false, Interval: 0, Timeout: 0, FailThreshold: 0, RecoverThreshold: 0,
 		FlapLimit: 0, FlapWindow: 0, Network: "", Checks: nil, StableID: "", NodeID: 0,
 	}
@@ -255,6 +256,7 @@ func TestMapTransition(t *testing.T) {
 		got := mapTransition(Transition{
 			Sequence: 0,
 			Target: Target{
+				Dynamic:          false,
 				Name:             "",
 				Addr:             "",
 				Site:             "",

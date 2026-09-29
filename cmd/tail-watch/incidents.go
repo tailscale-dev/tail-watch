@@ -65,7 +65,8 @@ func targetDefOf(t Target) targetDef {
 func (d targetDef) implicitTarget() *Target {
 	base := builtinTiming()
 	return &Target{
-		Name: d.Name, Addr: d.Addr, Site: d.Site, Parent: d.Parent, Severity: d.Severity,
+		Dynamic: false,
+		Name:    d.Name, Addr: d.Addr, Site: d.Site, Parent: d.Parent, Severity: d.Severity,
 		InsecureTLS: false, Interval: base.Interval, Timeout: base.Timeout,
 		FailThreshold: base.FailThreshold, RecoverThreshold: base.RecoverThreshold,
 		FlapLimit: base.FlapLimit, FlapWindow: base.FlapWindow, Network: NetworkTailnet,

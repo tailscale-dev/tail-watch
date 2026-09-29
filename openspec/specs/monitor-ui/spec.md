@@ -1,11 +1,11 @@
-# Spec Delta
+# monitor-ui Specification
 
 ## Purpose
 
 Gives an operator a small browser page, served by the collector itself, to see every
 monitor and to add, edit and delete the ones created through the UI.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: UI availability
 
@@ -14,7 +14,8 @@ serve `/` as the prober status page whether or not it is on. When the UI is off,
 requests under `/ui/` and `/api/v1/` SHALL return 404 and change nothing. The UI SHALL be
 part of the binary and SHALL NOT load scripts, styles, fonts or other resources from any
 other origin. Responses under `/ui/` SHALL send a `Content-Security-Policy` that permits
-only same-origin resources.
+only same-origin resources (`default-src 'self'; base-uri 'none'; form-action 'self';
+frame-ancestors 'none'`), `X-Content-Type-Options: nosniff` and `Cache-Control: no-cache`.
 
 #### Scenario: UI off
 

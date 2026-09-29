@@ -19,6 +19,15 @@
   that code.
   The binary is `tail-watch`. Prometheus series use the `tailwatch_` prefix
   because metric names cannot contain a hyphen.
+- The monitor UI is off unless `--ui` or `collector.ui`: `dynamic.go` (`targets.json`
+  store and startup merge), `monitor_api.go` (manager and handlers, one mutex,
+  persist then apply), `monitor_guard.go` (content type, Origin, `authorize`, audit
+  log), `ui_serve.go` and `ui/` (embedded plain HTML, CSS and JS, no build step).
+  `Target.Dynamic` marks UI monitors; the alerter may remove one while `DOWN`.
+  `classifier.AddConfigured` registers them and republishes the parent graph, which
+  the classifier owns, so never call `UpdateParents` from elsewhere. `runtimeRegistry`
+  calls it for dynamic targets. Re-adding an edited monitor overwrites the removed
+  snapshot, so the manager closes the incident directly with `closeRemoved`.
 - `presence.go` is the IPN bus view. `tsping` name resolution uses it and
   falls back to the 30s `Status()` cache only while that view is unseeded.
 - `alert.go` is one mutex-guarded state machine. Grace and flap timers hand work

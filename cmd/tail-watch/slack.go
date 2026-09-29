@@ -261,7 +261,7 @@ func (s *slackSink) Send(ctx context.Context, body []byte, m sendMeta) deliveryR
 		return secretUnavailable(fmt.Errorf("sink %s: url: %w", s.cfg.Name, err))
 	}
 	headers := map[string]string{
-		"Content-Type": "application/json",
+		"Content-Type": contentTypeJSON,
 		"User-Agent":   "tail-watch/" + versionString(),
 	}
 	return httpPost(ctx, s.client, url, body, headers, m.At)

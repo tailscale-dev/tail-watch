@@ -130,12 +130,46 @@ func TestRestartDuringOutageRecoversWithOriginalID(t *testing.T) {
 	}
 }
 
+func TestDynamicIncidentRestoresWithoutSecondPage(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	clk := newCountingClock()
+	tr := downTransition(1, clk.Now())
+	tr.Target.Dynamic = true
+	seedOpenIncident(t, dir, tr)
+	var origID string
+	for _, inc := range readState(t, dir).Incidents {
+		origID = inc.ID
+	}
+
+	lab := alertTarget("nyc-nas", "icmp")
+	lab.Dynamic = true
+	an := newAlertedNotifier(t, dir, []*Target{lab})
+	an.n.restoreOpen(targetNames([]*Target{lab}), an.al, nil)
+	if !an.al.IsDown("nyc-nas") {
+		t.Fatal("open incident must restore the dynamic target as DOWN")
+	}
+	an.start(t)
+	failN(an.al, lab, "icmp", layerService, 3)
+	time.Sleep(50 * time.Millisecond)
+	if downs, _ := downIDs(t, an.sinks["a"]); len(downs) != 0 {
+		t.Fatal("a restored dynamic outage must not page again")
+	}
+	recoverTarget(an.al, lab)
+	f := an.sinks["a"]
+	eventually(t, func() bool { _, r := downIDs(t, f); return len(r) == 1 })
+	if _, recs := downIDs(t, f); recs[0].DownEventID != origID {
+		t.Fatalf("recovery %+v, want original incident %s", recs[0], origID)
+	}
+}
+
 func TestImplicitIncidentSurvivesFailedDiscovery(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	clk := newCountingClock()
 	tr := downTransition(1, clk.Now())
 	tr.Target = Target{
+		Dynamic:  false,
 		Name:     "nyc-router",
 		Addr:     "100.64.0.9",
 		Site:     "nyc",
@@ -255,7 +289,8 @@ func TestRestoredImplicitIncidentClosesWhenRemoved(t *testing.T) {
 	clk := newCountingClock()
 	tr := downTransition(1, clk.Now())
 	tr.Target = Target{
-		Name: "nyc-router", Addr: "100.64.0.9", Site: "nyc", Severity: SeverityPage, Implicit: true,
+		Dynamic: false,
+		Name:    "nyc-router", Addr: "100.64.0.9", Site: "nyc", Severity: SeverityPage, Implicit: true,
 		StableID: tailcfg.StableNodeID("nSTABLE1"), NodeID: 42, Parent: "", InsecureTLS: false, Interval: 0,
 		Timeout: 0, FailThreshold: 0, RecoverThreshold: 0, FlapLimit: 0, FlapWindow: 0,
 		Network: NetworkTailnet, Checks: nil,
@@ -272,6 +307,38 @@ func TestRestoredImplicitIncidentClosesWhenRemoved(t *testing.T) {
 	an.start(t)
 	if err := an.al.RemoveTarget("nyc-router"); err != nil {
 		t.Fatalf("authoritative removal of a down implicit target must succeed: %v", err)
+	}
+	an.clock.Advance(reconcileInterval)
+	f := an.sinks["a"]
+	eventually(t, func() bool { _, r := downIDs(t, f); return len(r) == 1 })
+	_, recs := downIDs(t, f)
+	if recs[0].Reason != reasonRemoved || recs[0].DownEventID != origID {
+		t.Fatalf("got %+v, want a removed recovery of %s", recs[0], origID)
+	}
+	if len(an.n.openIncidents()) != 0 {
+		t.Fatal("incident must be closed after removal")
+	}
+}
+
+func TestDynamicTargetRemovedWhileDownClosesRemoved(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	clk := newCountingClock()
+	tr := downTransition(1, clk.Now())
+	tr.Target.Dynamic = true
+	seedOpenIncident(t, dir, tr)
+	var origID string
+	for _, inc := range readState(t, dir).Incidents {
+		origID = inc.ID
+	}
+
+	lab := alertTarget("nyc-nas", "icmp")
+	lab.Dynamic = true
+	an := newAlertedNotifier(t, dir, []*Target{lab})
+	an.n.restoreOpen(targetNames([]*Target{lab}), an.al, nil)
+	an.start(t)
+	if err := an.al.RemoveTarget("nyc-nas"); err != nil {
+		t.Fatalf("a down dynamic target must be removable: %v", err)
 	}
 	an.clock.Advance(reconcileInterval)
 	f := an.sinks["a"]

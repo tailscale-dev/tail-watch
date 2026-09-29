@@ -4,6 +4,10 @@
 
 ### Added
 
+- An opt-in monitor UI (`--ui` or `collector.ui`). It serves `/ui/` and a JSON API
+  under `/api/v1/` to add, edit, and delete monitors on a running collector. UI
+  monitors are stored in `state_dir/targets.json`, YAML monitors stay read-only, and
+  deleting a `DOWN` monitor closes its incident with `reason: removed`.
 - Targets move between `UNKNOWN`, `UP`, `DOWN`, and `SUPPRESSED` after
   consecutive failures, with flap damping and suppression of dependents
   behind a down reachability parent. `tailwatch_target_state` exports that

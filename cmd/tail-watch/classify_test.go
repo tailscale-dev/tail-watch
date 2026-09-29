@@ -426,6 +426,7 @@ func TestFreshICMPSkipsSupplementalProbe(t *testing.T) {
 	env := new(countingEnv)
 
 	target := &Target{
+		Dynamic:  false,
 		Name:     "printer",
 		Addr:     "127.0.0.1",
 		Network:  NetworkLocal,
@@ -477,6 +478,7 @@ func TestObserveLayers(t *testing.T) {
 	t.Parallel()
 	router := peerTarget("nyc-subnet-router", "nyc-router")
 	nas := &Target{
+		Dynamic:  false,
 		Name:     "nyc-nas",
 		Addr:     "10.20.0.50",
 		Network:  NetworkTailnet,
@@ -497,6 +499,7 @@ func TestObserveLayers(t *testing.T) {
 		NodeID:           0,
 	}
 	local := &Target{
+		Dynamic:  false,
 		Name:     "printer",
 		Addr:     "192.168.1.20",
 		Network:  NetworkLocal,
@@ -616,6 +619,7 @@ func TestObserveLayers(t *testing.T) {
 		t.Fatalf("lan %q", lan.Layer)
 	}
 	lonely := &Target{
+		Dynamic:  false,
 		Name:     "lab-pdu",
 		Addr:     "10.99.0.5",
 		Network:  NetworkTailnet,
@@ -669,6 +673,7 @@ func TestLearningFallbackHAAndLocal(t *testing.T) {
 	router := peerTarget("nyc-subnet-router", "nyc-router")
 	backup := peerTarget("nyc-subnet-router-b", "nyc-router-b")
 	nas := &Target{
+		Dynamic:  false,
 		Name:     "nyc-nas",
 		Addr:     "10.20.0.50",
 		Site:     "nyc",
@@ -689,6 +694,7 @@ func TestLearningFallbackHAAndLocal(t *testing.T) {
 		NodeID:           0,
 	}
 	local := &Target{
+		Dynamic:  false,
 		Name:     "printer",
 		Addr:     "192.168.1.9",
 		Network:  NetworkLocal,
@@ -771,7 +777,8 @@ func TestMissingNodeIPUsesRoute(t *testing.T) {
 	t.Parallel()
 	router := peerTarget("nyc-subnet-router", "nyc-router")
 	nas := &Target{
-		Name: "nyc-nas", Addr: "10.20.0.50", Network: NetworkTailnet,
+		Dynamic: false,
+		Name:    "nyc-nas", Addr: "10.20.0.50", Network: NetworkTailnet,
 		Timeout: time.Second, Interval: time.Minute,
 
 		Site:             "",
@@ -815,7 +822,8 @@ func TestLearningConcurrencyCap(t *testing.T) {
 	targets := make([]*Target, learnParallel+4)
 	for i := range targets {
 		targets[i] = &Target{
-			Name: fmt.Sprintf("lan-%02d", i), Addr: fmt.Sprintf("10.30.0.%d", i+1),
+			Dynamic: false,
+			Name:    fmt.Sprintf("lan-%02d", i), Addr: fmt.Sprintf("10.30.0.%d", i+1),
 			Network: NetworkTailnet, Timeout: time.Second, Interval: time.Minute,
 
 			Site:             "",
@@ -870,7 +878,8 @@ func TestImplicitTargetsAndGrantLog(t *testing.T) {
 	var logs bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&logs, nil))
 	mixed := &Target{
-		Name: "nyc-router", Addr: "nyc-router", Network: NetworkTailnet,
+		Dynamic: false,
+		Name:    "nyc-router", Addr: "nyc-router", Network: NetworkTailnet,
 		Checks: []check{tspingCheck{
 			resolver: nil,
 		}, tcpCheck{port: 443}},
@@ -890,6 +899,7 @@ func TestImplicitTargetsAndGrantLog(t *testing.T) {
 		NodeID:           0,
 	}
 	nas := &Target{
+		Dynamic:  false,
 		Name:     "nyc-nas",
 		Addr:     "10.20.0.50",
 		Site:     "nyc",
@@ -910,6 +920,7 @@ func TestImplicitTargetsAndGrantLog(t *testing.T) {
 		NodeID:           0,
 	}
 	other := &Target{
+		Dynamic:  false,
 		Name:     "other-nas",
 		Addr:     "10.20.0.51",
 		Site:     "sfo",
@@ -993,6 +1004,7 @@ func TestGrantWarningRounds(t *testing.T) {
 	var logs bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&logs, nil))
 	pdu := &Target{
+		Dynamic:  false,
 		Name:     "lab-pdu",
 		Addr:     "10.99.0.5",
 		Network:  NetworkTailnet,
@@ -1064,6 +1076,7 @@ func TestLearnerSchedule(t *testing.T) {
 		FollowRealTime:   false,
 	})
 	nas := &Target{
+		Dynamic:  false,
 		Name:     "nyc-nas",
 		Addr:     "10.20.0.50",
 		Network:  NetworkTailnet,
@@ -1122,6 +1135,7 @@ func TestLearnerSchedule(t *testing.T) {
 func TestReconciliationRetainsThenRemoves(t *testing.T) {
 	t.Parallel()
 	nas := &Target{
+		Dynamic:  false,
 		Name:     "nyc-nas",
 		Addr:     "10.20.0.50",
 		Network:  NetworkTailnet,
@@ -1143,7 +1157,8 @@ func TestReconciliationRetainsThenRemoves(t *testing.T) {
 	}
 	c, pres := newTestClassifier(t, new(fakeEnv), nas)
 	restored := &Target{
-		Name: "old-router", Addr: "100.64.0.9", Network: NetworkTailnet, Implicit: true,
+		Dynamic: false,
+		Name:    "old-router", Addr: "100.64.0.9", Network: NetworkTailnet, Implicit: true,
 		NodeID: 9, StableID: "nOLD", Checks: []check{tspingCheck{
 			resolver: nil,
 		}},
@@ -1204,9 +1219,14 @@ func TestReconciliationRetainsThenRemoves(t *testing.T) {
 
 func TestNoRemoteLANCompletesImmediately(t *testing.T) {
 	t.Parallel()
-	node := &Target{Name: "build-1", Addr: "100.64.0.4", Network: NetworkTailnet, Checks: []check{tspingCheck{
-		resolver: nil,
-	}},
+	node := &Target{
+		Dynamic: false,
+		Name:    "build-1",
+		Addr:    "100.64.0.4",
+		Network: NetworkTailnet,
+		Checks: []check{tspingCheck{
+			resolver: nil,
+		}},
 		Site:             "",
 		Severity:         "",
 		Parent:           "",
@@ -1223,6 +1243,7 @@ func TestNoRemoteLANCompletesImmediately(t *testing.T) {
 	}
 	c, _ := newTestClassifier(t, new(fakeEnv), node)
 	restored := &Target{
+		Dynamic:  false,
 		Name:     "ghost",
 		Addr:     "100.64.0.9",
 		Implicit: true,
@@ -1262,6 +1283,7 @@ func TestNoRemoteLANCompletesImmediately(t *testing.T) {
 func TestGraphCycleAndHARelease(t *testing.T) {
 	t.Parallel()
 	router := &Target{
+		Dynamic: false,
 		Name:    "r",
 		Addr:    "nyc-router",
 		Parent:  "switch",
@@ -1283,7 +1305,12 @@ func TestGraphCycleAndHARelease(t *testing.T) {
 		StableID:         "",
 		NodeID:           0,
 	}
-	sw := &Target{Name: "switch", Addr: "10.20.0.1", Network: NetworkTailnet, Checks: []check{icmpCheck{}},
+	sw := &Target{
+		Dynamic:          false,
+		Name:             "switch",
+		Addr:             "10.20.0.1",
+		Network:          NetworkTailnet,
+		Checks:           []check{icmpCheck{}},
 		Site:             "",
 		Severity:         "",
 		Parent:           "",
@@ -1331,6 +1358,7 @@ func TestGraphCycleAndHARelease(t *testing.T) {
 	a := peerTarget("router-a", "nyc-router")
 	b := peerTarget("router-b", "nyc-router-b")
 	child := &Target{
+		Dynamic:  false,
 		Name:     "cam",
 		Addr:     "10.20.0.50",
 		Network:  NetworkTailnet,
@@ -1381,7 +1409,12 @@ func TestGraphCycleAndHARelease(t *testing.T) {
 
 func TestSwitchParentDoesNotReplaceHandler(t *testing.T) {
 	t.Parallel()
-	sw := &Target{Name: "nyc-core-switch", Addr: "10.20.0.1", Network: NetworkTailnet, Checks: []check{icmpCheck{}},
+	sw := &Target{
+		Dynamic:          false,
+		Name:             "nyc-core-switch",
+		Addr:             "10.20.0.1",
+		Network:          NetworkTailnet,
+		Checks:           []check{icmpCheck{}},
 		Site:             "",
 		Severity:         "",
 		Parent:           "",
@@ -1397,6 +1430,7 @@ func TestSwitchParentDoesNotReplaceHandler(t *testing.T) {
 		NodeID:           0,
 	}
 	cam := &Target{
+		Dynamic: false,
 		Name:    "nyc-cam-3",
 		Addr:    "10.20.0.50",
 		Parent:  "nyc-core-switch",
@@ -1447,6 +1481,7 @@ func TestSwitchParentDoesNotReplaceHandler(t *testing.T) {
 func TestLayerAndParentMetrics(t *testing.T) {
 	t.Parallel()
 	nas := &Target{
+		Dynamic:  false,
 		Name:     "nyc-nas",
 		Addr:     "10.20.0.50",
 		Network:  NetworkTailnet,
@@ -1557,7 +1592,7 @@ func TestRegisterBeforeSchedule(t *testing.T) {
 		pool:   nil,
 	}
 	t.Helper()
-	if err := reg.AddTarget(&Target{Name: "nyc-router", Checks: []check{tspingCheck{
+	if err := reg.AddTarget(&Target{Dynamic: false, Name: "nyc-router", Checks: []check{tspingCheck{
 		resolver: nil,
 	}},
 		Addr:             "",
@@ -1687,6 +1722,7 @@ func (c captureConsumer) ObserveClassified(cl Classified) { c.fn(cl) }
 
 func peerTarget(name, addr string) *Target {
 	return &Target{
+		Dynamic: false,
 		Name:    name,
 		Addr:    addr,
 		Network: NetworkTailnet,
