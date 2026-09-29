@@ -219,8 +219,12 @@ thresholds, flap damping, suppression, grace hold and transitions. Registering
 a name that is already registered SHALL return an error.
 
 The state machine SHALL allow removing a target whose last emitted state is
-not `DOWN`, and SHALL refuse removal with an error when it is `DOWN`, so an
-open incident always gets its recovery. The caller retries later. Removal
+not `DOWN`, and SHALL refuse removal with an error when a configured target is
+`DOWN`, so an open incident always gets its recovery. An implicit target MAY be
+removed while `DOWN`: the learner asks only after authoritative topology
+reconciliation, and the removal leaves a terminal dirty snapshot from which the
+notifier closes the incident with `reason: removed`. A refused caller retries
+later. Removal
 SHALL cancel the target's timers and drop its metric series. Any dependents
 that were `SUPPRESSED` because of it SHALL be released, as when a parent
 recovers.
@@ -234,9 +238,16 @@ recovers.
 
 #### Scenario: Remove a down target
 
-- **WHEN** removal is requested for a target whose last emitted state is
-  `DOWN`
+- **WHEN** removal is requested for a configured target whose last emitted
+  state is `DOWN`
 - **THEN** the removal returns an error and the target stays registered
+
+#### Scenario: Remove a down implicit target
+
+- **WHEN** removal is requested for an implicit target whose last emitted state
+  is `DOWN`
+- **THEN** it is removed, emits no transition, and its snapshot is a removed,
+  dirty view that the notifier reconciles into a `reason: removed` recovery
 
 #### Scenario: Remove a suppressed target
 

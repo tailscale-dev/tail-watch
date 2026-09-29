@@ -1,0 +1,21 @@
+{
+  "text": ":red_circle: DOWN  nyc-router (learned)  tcp:445  (unrouted)\naddr 100.64.0.9 · site nyc · path direct 12 ms\nerror: connection refused\ndown since 14:00 UTC · 3 failures · collector monitor-nyc\nand 14 targets behind it: nyc-host-01, nyc-host-02, nyc-host-03, nyc-host-04, nyc-host-05, nyc-host-06, nyc-host-07, nyc-host-08, nyc-host-09, nyc-host-10, …",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":red_circle: DOWN  nyc-router (learned)  tcp:445  (unrouted)\naddr 100.64.0.9 · site nyc · path direct 12 ms\nerror: connection refused\ndown since 14:00 UTC · 3 failures · collector monitor-nyc\nand 14 targets behind it: nyc-host-01, nyc-host-02, nyc-host-03, nyc-host-04, nyc-host-05, nyc-host-06, nyc-host-07, nyc-host-08, nyc-host-09, nyc-host-10, …"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "monitor-nyc · 2026-04-02 14:02 UTC"
+        }
+      ]
+    }
+  ]
+}

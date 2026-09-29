@@ -200,6 +200,7 @@ func TestPresenceRunReconnect(t *testing.T) {
 	if _, known := p.Online(tailcfg.NodeID(1)); known {
 		t.Fatal("peer stayed known while the bus was down")
 	}
+	waitPresence(t, func() bool { return strings.Count(logs.String(), "presence bus disconnected") >= 1 })
 	if strings.Count(logs.String(), "presence bus disconnected") != 1 {
 		t.Fatalf("logs %s", logs.String())
 	}
@@ -386,4 +387,21 @@ func nycNodeUnsetOnline() *tailcfg.Node {
 	n := nycNode(true)
 	n.Online = nil
 	return n
+}
+
+func TestTagsForIgnoresLocalTargets(t *testing.T) {
+	t.Parallel()
+	remote := alertTarget("nyc-nas", "icmp")
+	remote.Addr = "10.20.0.50"
+	local := alertTarget("lab-nas", "icmp")
+	local.Addr = "10.20.0.50"
+	local.Network = NetworkLocal
+	_, pres := newTestClassifier(t, new(fakeEnv), remote, local)
+	pres.apply(ipn.Notify{InitialStatus: presenceStatus()})
+	if got := pres.TagsFor("nyc-nas"); len(got) != 1 || got[0] != "tag:router" {
+		t.Fatalf("tailnet target tags %v", got)
+	}
+	if got := pres.TagsFor("lab-nas"); got != nil {
+		t.Fatalf("a local target must not inherit tailnet tags, got %v", got)
+	}
 }

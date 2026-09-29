@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"runtime"
@@ -51,10 +52,13 @@ type app struct {
 	class    *classifier
 	learner  *learner
 	alerts   *alerter
+	notify   *notifier
 	metrics  prometheus.Registerer
-	watch    func(context.Context, ipn.NotifyWatchOpt) (ipnWatch, error)
-	probeMu  sync.Mutex
-	probes   map[string]*sync.Mutex
+	// collector identifies this node in notification payloads.
+	collector CollectorInfo
+	watch     func(context.Context, ipn.NotifyWatchOpt) (ipnWatch, error)
+	probeMu   sync.Mutex
+	probes    map[string]*sync.Mutex
 }
 
 func main() {
@@ -64,6 +68,9 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "check-config" {
 		return runCheckConfig(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "notify-test" {
+		return runNotifyTest(args[1:], stdout, stderr)
 	}
 	fs := flag.NewFlagSet("tail-watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -111,10 +118,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		class:    nil,
 		learner:  nil,
 		alerts:   nil,
+		notify:   nil,
 		metrics:  nil,
 		watch:    nil,
 		probeMu:  sync.Mutex{},
 		probes:   nil,
+
+		collector: CollectorInfo{Name: "", TailscaleIP: ""},
 	}
 	a.pub.add(debugConsumer{log: log})
 	a.bindResolver()
@@ -125,7 +135,37 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if *onceFlag {
 		return a.runOnce()
 	}
+	if notifyErr := a.buildNotifier(); notifyErr != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", notifyErr)
+		return 1
+	}
 	return a.runServer()
+}
+
+// buildNotifier resolves every sink secret and opens the notification state.
+// It runs before the prober so a bad secret or a corrupt snapshot stops startup.
+func (a *app) buildNotifier() error {
+	if err := a.cfg.resolveSecrets(); err != nil {
+		return err
+	}
+	for _, sc := range a.cfg.Sinks {
+		if sc.Type == sinkWebhook && !sc.Secret.isSet() {
+			a.log.Warn("webhook sink is unsigned: no secret_env or secret_file", "sink", sc.Name)
+		}
+	}
+	if len(a.cfg.Sinks) == 0 {
+		return nil
+	}
+	n, err := newNotifier(notifierConfig{
+		Clock: a.clock, Log: a.log, Sinks: a.cfg.Sinks, Collector: a.collector,
+		StateDir: a.cfg.Collector.StateDir, Alerts: nil, Tags: nil, Registry: a.metricRegisterer(),
+		NewSink: nil, Env: a.env, Jitter: nil, IntakeCap: 0,
+	})
+	if err != nil {
+		return err
+	}
+	a.notify = n
+	return nil
 }
 
 func runCheckConfig(args []string, stdout, stderr io.Writer) int {
@@ -147,6 +187,12 @@ func runCheckConfig(args []string, stdout, stderr io.Writer) int {
 	for _, t := range cfg.Targets {
 		_, _ = fmt.Fprintf(stdout, "%s interval=%s timeout=%s network=%s checks=%s\n",
 			t.Name, t.Interval, t.Timeout, t.Network, formatChecks(t.Checks))
+	}
+	for _, s := range cfg.Sinks {
+		_, _ = fmt.Fprintln(stdout, describeSink(s))
+	}
+	if cfg.Heartbeat != nil {
+		_, _ = fmt.Fprintf(stdout, "heartbeat interval=%s\n", cfg.Heartbeat.Interval)
 	}
 	return 0
 }
@@ -238,6 +284,10 @@ func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeReg
 	a.alerts = al
 	context.AfterFunc(ctx, al.stopDrain)
 	al.addConsumer(transitionLog{log: a.log})
+	if a.notify != nil {
+		a.notify.attach(al, a.presence.TagsFor)
+		al.addConsumer(a.notify)
+	}
 	reg.alert = al
 	reg.seed(targets)
 	a.class = newClassifier(a.presence, a.env, a.log, a.clock, a.metricRegisterer(), targets, reg)
@@ -246,6 +296,14 @@ func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeReg
 	a.class.addConsumer(al)
 	a.pub.add(a.class)
 	a.learner = newLearner(a.class)
+	if a.notify != nil {
+		names := make(map[string]bool, len(targets))
+		for _, t := range targets {
+			names[t.Name] = true
+		}
+		a.notify.restoreOpen(names, al, a.class)
+		a.notify.Start(ctx)
+	}
 	go a.presence.run(ctx)
 	go a.learner.run(ctx)
 	for _, t := range targets {
@@ -295,6 +353,10 @@ func (a *app) runServer() int {
 	defer stop()
 	p := prober.New().WithSpread(true).WithMetricNamespace("tailwatch")
 	probes := a.schedule(ctx, p)
+	if hb := a.cfg.Heartbeat; hb != nil {
+		beat := newHeartbeat(*hb, a.clock, a.log, a.env, a.alerts.FirstRoundDone(), a.metricRegisterer())
+		go beat.run(ctx)
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/", tsweb.StdHandler(
 		p.StatusHandler(prober.WithTitle("tail-watch")),
@@ -342,6 +404,9 @@ func (a *app) runServer() int {
 	for _, stop := range probes {
 		_ = stop()
 	}
+	if a.notify != nil {
+		a.notify.Stop()
+	}
 	if err := srv.Shutdown(shutCtx); err != nil {
 		a.log.Error("shutdown", "err", err)
 	}
@@ -371,6 +436,7 @@ func (a *app) preflight(ctx context.Context) error {
 		GOOS:    runtime.GOOS,
 		Socket:  a.socket,
 	})
+	a.collector = collectorFrom(res)
 	if res.Hostname != "" || len(res.IPs) > 0 || len(res.Tags) > 0 {
 		a.log.InfoContext(ctx, "collector identity", "hostname", res.Hostname, "ips", res.IPs, "tags", res.Tags)
 	}
@@ -641,4 +707,20 @@ func versionString() string {
 		return info.Main.Version
 	}
 	return "dev"
+}
+
+// collectorFrom picks the payload identity: the node's hostname and its first
+// Tailscale IPv4 address, or IPv6 when it has none.
+func collectorFrom(res preflightResult) CollectorInfo {
+	col := CollectorInfo{Name: res.Hostname, TailscaleIP: ""}
+	for _, ip := range res.IPs {
+		if addr, err := netip.ParseAddr(ip); err == nil && addr.Is4() {
+			col.TailscaleIP = ip
+			return col
+		}
+	}
+	if len(res.IPs) > 0 {
+		col.TailscaleIP = res.IPs[0]
+	}
+	return col
 }

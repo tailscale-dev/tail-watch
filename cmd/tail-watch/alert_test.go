@@ -974,7 +974,7 @@ func TestAlerterWiring(t *testing.T) {
 		probes:   nil,
 		watch: func(context.Context, ipn.NotifyWatchOpt) (ipnWatch, error) {
 			return nil, errors.New("stopped")
-		},
+		}, notify: nil, collector: CollectorInfo{Name: "", TailscaleIP: ""},
 	}
 	runtime := app.startCollectors(ctx, nil)
 	t.Cleanup(func() {
@@ -1233,4 +1233,22 @@ func seriesHas(t *testing.T, al *alerter, name string) bool {
 func advanceAlertClock(al *alerter, clk *tstest.Clock, d time.Duration) {
 	clk.Advance(d)
 	al.timerCallbacks.Wait()
+}
+
+func TestRemoveDownImplicitTarget(t *testing.T) {
+	t.Parallel()
+	implicit := alertTarget("nyc-router", "tsping")
+	implicit.Implicit = true
+	al, _, _ := testAlerter(t, []*Target{implicit}, nil)
+	failN(al, implicit, "tsping", layerService, 3)
+	if !al.IsDown("nyc-router") {
+		t.Fatal("setup: implicit target should be down")
+	}
+	if err := al.RemoveTarget("nyc-router"); err != nil {
+		t.Fatalf("a down implicit target must be removable: %v", err)
+	}
+	snaps := al.Snapshots()
+	if len(snaps) != 1 || !snaps[0].Removed || !snaps[0].Dirty || snaps[0].State != StateDown {
+		t.Fatalf("removal must leave a removed dirty snapshot of the open incident: %+v", snaps)
+	}
 }

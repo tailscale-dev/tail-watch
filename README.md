@@ -255,6 +255,343 @@ Prometheus series use the `tailwatch_` prefix:
 | `tailwatch_target_parent{target,parent}` | gauge, 1 for the current parent |
 | `tailwatch_target_state{target}` | gauge, 0 unknown through 4 flapping |
 
+## Notifications
+
+Every alert transition becomes a versioned JSON event that tail-watch delivers to
+the sinks in the `sinks` list. A probe never waits on a sink: each sink has its own
+worker and bounded queue, and a slow receiver cannot delay a check or another sink.
+Sinks are `webhook` and `slack`. Secrets come only from `*_env` or `*_file` keys,
+never from the YAML itself, and are read again on every send, so a rotated secret
+needs no restart. Logs show a URL only as scheme and host (`https://hooks.slack.com/…`).
+
+| Event | When |
+| --- | --- |
+| `target.down` | a target goes `DOWN` and has no open incident |
+| `target.recovered` | a target with an open incident reaches `UP` |
+| `target.flapping` | a target crosses `flap_limit` |
+| `collector.started` | once, after every target and check has a first result |
+| `test` | only from `tail-watch notify-test` |
+
+A start with everything `UP` is silent apart from `collector.started`. A target
+that is already failing at startup pages once.
+
+Severity is `info`, `warn`, or `page`. `target.down` uses the target's `severity`
+(default `page`), a recovery uses the severity of the down it resolves, flapping is
+`warn`, and `collector.started` and `test` are `info`.
+
+### Sink options
+
+```yaml
+sinks:
+  - name: ops-webhook
+    type: webhook
+    url_env: OPS_WEBHOOK_URL          # or url_file
+    secret_env: OPS_WEBHOOK_SECRET    # HMAC key; without it requests are unsigned
+    headers_env:
+      Authorization: OPS_WEBHOOK_AUTH # header name: env var holding the value
+    min_severity: page                # info < warn < page
+    events: [target.down, target.recovered]
+    max_age: 1h
+    queue: disk                       # needs collector.state_dir
+    queue_size: 1000
+    batch: true
+    group_wait: 10s
+    max_batch: 100
+  - name: ops-slack
+    type: slack
+    url_env: SLACK_WEBHOOK_URL
+    mention_on_page: "<!subteam^S0123ABC>"
+    status_url: https://monitor-nyc.example.ts.net:9109
+    group_wait: 10s
+    match:
+      sites: [nyc, sfo]               # also targets (globs) and tags
+```
+
+Every sink accepts `events` (default all), `min_severity` (default `info`), `match`
+with `sites`, `targets` and `tags`, `max_age` (default `1h`), `queue` (`memory` or
+`disk`, default `memory`), and `queue_size` (default `1000`). An event reaches a sink
+only when its type is listed, its severity is high enough, and every `match` key
+matches. `tags` compares the Tailscale tags of the node the target resolves to. The
+names `incidents`, `intake` and `state` are reserved because they appear as metric
+labels. `tail-watch check-config` prints each sink's name, type, filters and queue mode,
+never a secret.
+
+A recovery ignores the current filters: it goes to every sink that was selected for its
+down, so a sink with `events: [target.down]` still hears when the target recovers. A
+sink that never saw the down never sees the recovery.
+
+### Payload
+
+Every event is one JSON object. Within `version: 1` fields are only ever added.
+
+```json
+{
+  "version": 1,
+  "id": "evt_01JAB3K9T6M4X2Q8R7N5W0YZCD",
+  "type": "target.down",
+  "severity": "page",
+  "time": "2026-04-02T14:02:11Z",
+  "collector": { "name": "monitor-nyc", "tailscale_ip": "100.101.102.103" },
+  "target": { "name": "nyc-nas", "addr": "10.20.0.50", "site": "nyc", "parent": "nyc-router" },
+  "check": "tcp:445",
+  "layer": "service",
+  "error": "connection refused",
+  "since": "2026-04-02T14:00:41Z",
+  "failures": 3,
+  "path": { "kind": "direct", "endpoint": "203.0.113.5:41641", "latency_ms": 12 },
+  "dependents": []
+}
+```
+
+`layer` is `unrouted`, `control`, `tunnel`, `lan`, or `service` and appears only on
+`target.down` and `target.flapping`. `target.implicit: true` marks a router tail-watch
+learned rather than one from your config. `target.recovered` adds `duration_seconds`
+and `down_event_id`, and `reason: "removed"` when the target disappeared instead of
+recovering. Fields that do not apply are omitted, not sent as `null`. `late: true`
+marks an event first attempted more than a minute after its `time`; it keeps its
+original `time`.
+
+`id` is `evt_` plus a 26 character Crockford base32 string that sorts by creation time.
+It is the same across every retry and every sink. Delivery is at least once, so
+receivers must deduplicate on `id` and must accept a `target.recovered` whose
+`down_event_id` they never saw.
+
+### Webhook sink
+
+Each event is one `POST` with `Content-Type: application/json`,
+`User-Agent: tail-watch/<version>`, `Tail-Watch-Event-Id`, and any `headers_env`
+headers. Redirects are not followed and each request times out after 10s.
+
+| Response | What tail-watch does |
+| --- | --- |
+| `2xx` | delivered |
+| `408`, `5xx`, timeout, network error | retry with growing delay |
+| `429` | retry, waiting at least `Retry-After` |
+| anything else, including `3xx` and other `4xx` | drop, log once, count `permanent` |
+
+The delay is 1s, 2s, 4s and so on with 0.5–1.5× jitter, never more than 5 minutes. An
+event older than `max_age` when an attempt is due is dropped and counted as `expired`.
+
+With a secret, each request carries `Tail-Watch-Signature: t=<unix seconds>,v1=<hex>`,
+where `v1` is the lowercase hex HMAC-SHA256 of `<t>.<body>` under the secret. A retry
+sends identical body bytes with a fresh `t`. Verify it, and reject stale timestamps:
+
+```go
+func verify(secret, header string, body []byte, tolerance time.Duration) bool {
+	var ts, sig string
+	for _, part := range strings.Split(header, ",") {
+		k, v, _ := strings.Cut(part, "=")
+		switch k {
+		case "t":
+			ts = v
+		case "v1":
+			sig = v
+		}
+	}
+	secs, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil || time.Since(time.Unix(secs, 0)).Abs() > tolerance {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	fmt.Fprintf(mac, "%s.%s", ts, body)
+	return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(sig))
+}
+```
+
+With `batch: true` the sink waits `group_wait` after the first queued event, or until
+`max_batch` events are waiting, and sends
+`{"version": 1, "batch_id": "bat_…", "events": [...]}` with `Tail-Watch-Batch-Id` in
+place of `Tail-Watch-Event-Id`. The signature covers the whole body. A retry resends the
+same bytes and `batch_id`; events that arrive meanwhile go into the next batch, and a
+permanent failure or expiry drops the whole batch and counts every event in it.
+
+### Slack sink
+
+A Slack sink posts to an incoming-webhook URL. Each message carries Block Kit blocks
+and a plain-text fallback:
+
+```text
+:red_circle: DOWN  nyc-nas  tcp:445  (service)
+addr 10.20.0.50 · site nyc · parent nyc-router · path direct 12 ms
+error: connection refused
+down since 14:00 UTC · 3 failures · collector monitor-nyc
+```
+
+A router learned at runtime shows `(learned)` after its name. A down with dependents adds
+`and N targets behind it` and names up to 10. `mention_on_page` is prepended only to a
+`target.down` of severity `page`, never to recoveries, flapping notices or warnings. With
+`status_url` each target line links to `<status_url>/#<target>`. Events that arrive
+within `group_wait` of the first become one message of at most 10 lines followed by
+`and N more`, and the sink sends at most one message per second. Retry, `Retry-After`,
+permanent-failure and `max_age` rules match the webhook sink. Slack sinks reject `batch`,
+`max_batch`, `secret_*` and `headers_env`.
+
+### Queues, `state_dir` and open incidents
+
+`queue: memory` (the default) loses pending events when tail-watch restarts. `queue: disk`
+needs `collector.state_dir` and keeps them. With `state_dir`, tail-watch keeps one file,
+`notification-state.json`, holding open incidents, per-sink delivery state and the
+pending events of disk sinks. Each change is written to a temporary file, fsynced,
+renamed over the file, and the directory is fsynced, and only then can a worker send
+the new events. The directory is created `0700` and the file `0600`; tail-watch warns if
+the directory is readable by group or others. The file holds hostnames, addresses and
+event payloads, never URLs, secrets or header values. If the file cannot be decoded,
+startup fails with the path so you can repair it; tail-watch never silently forgets
+open incidents.
+
+Open incidents are tracked even without `state_dir`. With it, a restart during an outage
+does not page again, and the eventual recovery names the original `down_event_id`. A
+configured target deleted from the config while an incident was open closes with
+`reason: removed`. If the snapshot cannot be written, tail-watch keeps delivering from
+memory, logs the loss of durability once, counts `tailwatch_notify_persist_errors_total`,
+and retries the whole state every second.
+
+Delivery is at least once after a successful commit, and the limits are explicit and
+counted: an event dropped because the queue is full, expired, permanently rejected, or
+lost on a memory queue at restart shows up in `tailwatch_notify_dropped_total`. A `down`
+dropped before any request was made takes its unsent `recovered` with it; if a request
+was ever made, the `recovered` is still sent, because the receiver may have accepted a
+request whose response was lost. Each sink keeps strict order.
+
+Disk commits are serialized. A slow disk can delay every durable enqueue and any worker
+waiting to record an attempt, but it never delays a check, and the intake that receives
+transitions from the alert state machine never blocks: if its 4096 slots fill, the
+transition is dropped, counted as `dropped{sink="intake"}`, and the target's state is
+reconciled within a second once there is room, so a lost recovery is still sent.
+
+| Metric | Kind |
+| --- | --- |
+| `tailwatch_notify_sent_total{sink,type}` | counter |
+| `tailwatch_notify_failed_total{sink,reason}` | counter, reason `timeout`, `http_5xx`, `http_429`, `http_4xx_permanent`, `network` |
+| `tailwatch_notify_dropped_total{sink,reason}` | counter, reason `queue_full`, `expired`, `permanent`, `restart` |
+| `tailwatch_notify_persist_errors_total{sink}` | counter, sink is always `state` |
+| `tailwatch_notify_queue_len{sink}` | gauge |
+| `tailwatch_notify_latency_seconds{sink}` | histogram, event creation to confirmed delivery |
+| `tailwatch_notify_batch_size{sink}` | histogram, batched webhook sinks only |
+| `tailwatch_open_incidents` | gauge, when `state_dir` is set |
+| `tailwatch_heartbeat_failures_total` | counter |
+
+Alert on `increase(tailwatch_notify_dropped_total[15m]) > 0` and on a
+`tailwatch_notify_queue_len` that stays above zero: both mean an alert did not get out.
+
+### Watching the watcher
+
+A dead collector cannot report itself, so point `heartbeat` at a dead-man's-switch
+service:
+
+```yaml
+heartbeat:
+  url_env: HEARTBEAT_URL   # or url_file
+  interval: 1m
+```
+
+tail-watch sends a `GET` every `interval`, starting once every target and check has a
+first result, with a 10s timeout. A failed ping is logged, counted in
+`tailwatch_heartbeat_failures_total`, and not retried before the next interval. When the
+process exits the pings stop and the service alerts.
+
+### Trying it out
+
+```bash
+./bin/tail-watch notify-test --config examples/tail-watch.yaml
+./bin/tail-watch notify-test --sink ops-slack --timeout 10s
+```
+
+`notify-test` sends one `test` event through each sink's real signing, rendering and
+retry code, bypassing filters, queues and `state_dir`. It prints one line per sink with
+the HTTP status or error and exits 0 only when every selected sink answered `2xx` within
+`--timeout` (default 30s). It works when tailscaled is down, using the OS hostname as
+the collector name. Run it after every config change.
+
+### Egress path
+
+Sinks use the host's ordinary routing table, so the collector's node must reach them.
+tail-watch warns at startup when an exit node is active, because notifications would
+then leave through the exit node. A receiver on your own tailnet needs a grant from
+`tag:monitor`:
+
+```jsonc
+{ "src": ["tag:monitor"], "dst": ["tag:ops-receiver"], "ip": ["tcp:443"] }
+```
+
+### Live notification test
+
+`TestLiveNotifications` runs the whole notification path on a real tailnet. It is off
+unless `TAIL_WATCH_LIVE_TAILNET=1`. It starts the collector and one fixture node per
+check (`icmp`, `tsping`, `tcp`, `http`, and a LAN target behind a subnet router), fails and
+heals each one, restarts the collector mid-outage with `queue: disk`, and runs
+`notify-test`. A signature-verifying webhook receiver in the test process checks every
+event and heartbeat. The compose fixtures are in
+`cmd/tail-watch/testdata/compose.live-notify.yaml`. Devices are ephemeral, named
+`tail-watch-live-notify-*`, and deleted afterwards.
+
+```bash
+TAIL_WATCH_LIVE_TAILNET=1 TAIL_WATCH_LIVE_TAG= \
+  TAIL_WATCH_SLACK_PULUMI_ENV=<org>/tail-watch-live/slack \
+  go test -count=1 -timeout 18m -run TestLiveNotifications -v ./cmd/tail-watch
+```
+
+With `TAIL_WATCH_LIVE_TAG` unset the collector joins as `tag:monitor`, so the tailnet
+policy must own that tag and grant it the fixtures: merge
+`cmd/tail-watch/testdata/snippet.hujson`. The grants that matter are `tcp:9000` and
+`tcp:8080` to members (the `tcp` and `http` fixtures) and `icmp` to `10.10.0.0/16` (the LAN
+target). Without the two TCP grants those fixtures are down from the start, with
+`i/o timeout` errors because the packets are dropped. Setting `TAIL_WATCH_LIVE_TAG=` to
+empty runs the collector as an untagged member node, which needs no policy change.
+
+Tailnet credentials come from the `tailscale-phase-2/tailscale` pulumi env
+(`TAIL_WATCH_PULUMI_ENV` overrides it). Slack is optional: without a webhook the test
+runs the webhook sink only. Slack is one-way, so the test checks tail-watch's own sent and
+failed counters for that sink; look in the channel for the messages.
+`TAIL_WATCH_LIVE_MENTION` sets `mention_on_page` for the Slack sink.
+
+The Slack sink uses a memory queue, so an event still inside its `group_wait` window when
+the test restarts the collector is lost and counted as `dropped{reason="restart"}`. The
+test accepts that reason and fails on any other drop or failure. The webhook sink uses
+`queue: disk` and must survive the restart without paging again.
+
+To bring up only the tailnet side, without the collector process or any scenario, use
+`scripts/live-stack.sh up`. It mints ephemeral keys from the pulumi env, starts the
+collector's tailscale node and the five fixture nodes, approves the LAN route, and prints
+each node's address. `scripts/live-stack.sh down` removes the containers and deletes
+that stack's devices. The webhook can live in a pulumi env such as
+`richard-shade-gmail-com/tail-watch-live/slack`; pass its name as
+`TAIL_WATCH_SLACK_PULUMI_ENV`. To rotate it, run
+`pulumi env set <env> environmentVariables.SLACK_WEBHOOK_URL '<new url>' --secret`.
+
+Set `queue: disk` on the Slack sink if an alert must survive a collector restart. The
+default `queue: memory` loses events still waiting in the group window.
+
+#### Getting a Slack webhook URL
+
+tail-watch posts to an incoming webhook URL. It does not use bot or app-level tokens
+(`xoxb-`, `xapp-`), and a bot token cannot produce one. Slack's own guide,
+[Sending messages using incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/),
+is the reference; its steps are:
+
+1. Create an app at <https://api.slack.com/apps?new_app=1>, or open an existing one.
+2. In the app's settings sidebar choose **Incoming Webhooks** and switch
+   **Activate Incoming Webhooks** on.
+3. Click **Add New Webhook to Workspace**, pick the channel, and click **Allow**.
+4. Copy the URL from **Webhook URLs for Your Workspace**. It starts with
+   `https://hooks.slack.com/services/`.
+
+Slack has also documented the `incoming-webhook` scope, which produces a webhook during
+an OAuth install and shows a channel picker. If your app's sidebar has no
+**Incoming Webhooks** entry, that is the alternative to try. The settings pages change
+over time, so if these steps do not match what you see, treat this section as out of date
+and check Slack's guide.
+
+Check the URL with
+`curl -X POST -H 'Content-type: application/json' --data '{"text":"hello"}' "$SLACK_WEBHOOK_URL"`,
+which answers `ok`. Store it as a secret, not in a file:
+
+```bash
+pulumi env init <org>/tail-watch-live/slack
+pulumi env set <org>/tail-watch-live/slack \
+  environmentVariables.SLACK_WEBHOOK_URL 'https://hooks.slack.com/services/...' --secret
+```
+
 ## Development and releases
 
 `mise run check` builds, tests, and lints with the pinned tools. The lint

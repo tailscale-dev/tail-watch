@@ -390,7 +390,7 @@ func TestRunCheckRecordsTimeout(t *testing.T) {
 		metrics:  nil,
 		watch:    nil,
 		probeMu:  sync.Mutex{},
-		probes:   nil,
+		probes:   nil, notify: nil, collector: CollectorInfo{Name: "", TailscaleIP: ""},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

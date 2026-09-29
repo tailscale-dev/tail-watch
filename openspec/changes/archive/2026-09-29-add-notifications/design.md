@@ -193,6 +193,12 @@ Before starting any checks, load and replay the snapshot, register recorded
 implicit reachability targets, then restore open incidents as DOWN. Closing
 incidents only replay pending recovery intents and never restore DOWN.
 
+The alert state machine refuses to remove a configured `DOWN` target but allows
+removing a `DOWN` implicit one (see the `alert-state-machine` delta). The
+learner asks for that only after authoritative reconciliation; the removal
+leaves a removed, dirty snapshot and the notifier's reconcile pass closes the
+incident with `reason: removed`.
+
 Close explicitly removed configured targets with `reason: removed`. Keep
 unresolved implicit incidents through partial/failed discovery. Only a complete,
 authoritative topology reconciliation can establish that a restored implicit
@@ -208,9 +214,10 @@ acknowledgment or an explicit measured drop.
 ### D8. Webhook sink (`webhook.go`)
 
 `http.Client` with `Timeout: 10s` and
-`CheckRedirect: http.ErrUseLastResponse`; transport dials through the default
-dialer (sinks follow the host routing table, including tailnet receivers
-reached over MagicDNS). Signature:
+`CheckRedirect: http.ErrUseLastResponse`; the transport dials through
+`netEnv.Dial`, which uses the host's default dialer, so sinks follow the host
+routing table, including tailnet receivers reached over MagicDNS, and the
+"every network access goes through `netEnv`" rule holds. Signature:
 write `[]byte(t + ".")` and the exact body bytes to
 `mac := hmac.New(sha256.New, secret)`, then use
 `hex.EncodeToString(mac.Sum(nil))`. `Sum` does not consume message input.

@@ -1,0 +1,21 @@
+{
+  "text": ":large_green_circle: RECOVERED nyc-nas tcp:445 after 13m30s",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":large_green_circle: RECOVERED nyc-nas tcp:445 after 13m30s"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "monitor-nyc · 2026-04-02 14:14 UTC"
+        }
+      ]
+    }
+  ]
+}

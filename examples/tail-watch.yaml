@@ -58,3 +58,29 @@ targets:
       - icmp
       - tcp:9100
       - "http:http://192.168.1.50/|ready"
+
+# Notifications. Secrets come only from *_env or *_file keys.
+# Try them with: tail-watch notify-test --config examples/tail-watch.yaml
+sinks:
+  - name: ops-webhook
+    type: webhook
+    url_env: OPS_WEBHOOK_URL
+    secret_env: OPS_WEBHOOK_SECRET # HMAC key for Tail-Watch-Signature
+    min_severity: page
+    events: [target.down, target.recovered]
+    queue: disk # survives restarts; needs collector.state_dir
+
+  - name: ops-slack
+    type: slack
+    url_env: SLACK_WEBHOOK_URL
+    min_severity: warn
+    mention_on_page: "<!subteam^S0123ABC>"
+    group_wait: 10s
+    status_url: https://monitor-nyc.example.ts.net:9109
+    match:
+      sites: [nyc, lab]
+
+# Pings a dead-man's-switch service so a dead collector still alerts.
+heartbeat:
+  url_env: HEARTBEAT_URL
+  interval: 1m

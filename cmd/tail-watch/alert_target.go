@@ -63,7 +63,9 @@ func (a *alerter) addLocked(t *Target) error {
 	return nil
 }
 
-// RemoveTarget drops a target whose last emitted state is not DOWN.
+// RemoveTarget drops a target whose last emitted state is not DOWN. An implicit
+// target may be removed while DOWN: the learner asks only after authoritative
+// reconciliation, and the removed snapshot lets the notifier close its incident.
 // Suppressed dependents are released the way a parent recovery releases them.
 func (a *alerter) RemoveTarget(name string) error {
 	if a == nil {
@@ -84,7 +86,7 @@ func (a *alerter) removeLocked(name string) ([]string, error) {
 	if ts == nil {
 		return nil, nil
 	}
-	if ts.incidentOpen() {
+	if ts.incidentOpen() && !ts.target.Implicit {
 		return nil, fmt.Errorf("target %s is down", name)
 	}
 	a.disarmHold(ts)

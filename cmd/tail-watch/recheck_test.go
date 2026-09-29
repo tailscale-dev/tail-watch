@@ -78,7 +78,7 @@ func TestInFlightTimeoutUsesStartGeneration(t *testing.T) {
 		metrics:  nil,
 		watch:    nil,
 		probeMu:  sync.Mutex{},
-		probes:   nil,
+		probes:   nil, notify: nil, collector: CollectorInfo{Name: "", TailscaleIP: ""},
 	}
 	app.pub.add(bridge{al: al})
 	done := make(chan struct{})
