@@ -79,6 +79,9 @@
 - Follow the Tailscale commit style in `AGENTS.md`: a `dir: verb ...`
   subject, a plain-text body, and a `Fixes #n` or `Updates #n` trailer. It
   does not use Conventional Commits, so do not run commitlint.
+- The exception is the PR title: release-please reads the squash-merge title,
+  so write it as `feat:`, `fix:`, `perf:`, `revert:` or `docs:`. Commits with
+  only a `dir: verb` subject never open a release PR.
 
 ## Upgrading Go dependencies
 
