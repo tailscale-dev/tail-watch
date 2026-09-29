@@ -36,13 +36,15 @@ The [documentation index](docs/README.md) lists every page. The main ones:
 
 - Learn: [Set up your first monitor](docs/tutorial/first-monitor.md)
 - Do: [Deploy](docs/how-to/deploy.md), [write the ACLs](docs/how-to/acls.md),
-  [send alerts to Slack](docs/how-to/slack-sink.md), and
+  [send alerts to Slack](docs/how-to/slack-sink.md),
+  [manage monitors in the UI](docs/how-to/monitor-ui.md), and
   [troubleshoot](docs/how-to/troubleshoot.md)
 - Look up: [configuration](docs/reference/config.md),
   [command line](docs/reference/cli.md), [metrics](docs/reference/metrics.md), and
   [event payload](docs/reference/payload.md)
-- Understand: [failure layers](docs/explanation/failure-layers.md) and
-  [alert state](docs/explanation/alert-state.md)
+- Understand: [failure layers](docs/explanation/failure-layers.md),
+  [alert state](docs/explanation/alert-state.md), and
+  [monitor UI risks](docs/explanation/monitor-ui-risks.md)
 
 ## Contributing
 
