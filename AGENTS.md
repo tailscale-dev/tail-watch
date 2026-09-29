@@ -8,7 +8,13 @@ test rules are in [CLAUDE.md](CLAUDE.md).
 Follow Tailscale's commit style, from `docs/commit-messages.md` in
 [tailscale/tailscale](https://github.com/tailscale/tailscale/blob/main/docs/commit-messages.md).
 It is the Go and Linux kernel style. Do not use Conventional Commits
-(`feat:`, `fix(scope):`).
+(`feat:`, `fix(scope):`) in commits on a branch.
+
+The one exception is the PR title. release-please reads only Conventional
+Commits on `main`, so squash-merge every PR with a title such as
+`fix: ...`, `feat: ...`, or `feat!: ...` for a breaking change. A branch
+commit that follows the Tailscale style is invisible to release-please, and
+without a `feat`, `fix`, `perf`, `revert`, or `docs` title no release PR opens.
 
 ```text
 cmd/tail-watch: retry tsping once before failing
@@ -72,7 +78,9 @@ The subject is the first line:
 
 ### Pull requests
 
-- The PR title is the subject line of its commit. GitHub appends `(#nnnn)`
-  when it squash-merges; do not type that yourself.
+- Write the PR title as a Conventional Commit (`fix: retry tsping once`), not
+  a `dir: verb` line. It becomes the squash-merge commit subject that
+  release-please reads. GitHub appends `(#nnnn)` when it squash-merges; do not
+  type that yourself.
 - A PR usually holds one commit. If it holds several, say so in the PR body
   so reviewers can review each commit on its own.
