@@ -28,6 +28,7 @@ archives:
     files:
       - LICENSE
       - README.md
+      - docs/**/*
       - examples/tail-watch.yaml
 
 checksum:

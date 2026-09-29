@@ -63,6 +63,17 @@
   authoritative reconciliation, and the removed dirty snapshot makes the notifier close
   the incident with `reason: removed`.
 
+## Documentation
+
+- User docs live in `docs/`, split by Diataxis quadrant: `tutorial/`, `how-to/`,
+  `reference/`, `explanation/`, and `contributing/`. `docs/README.md` is the index and
+  `README.md` is only an overview with links. A fact lives in one page; link to it.
+- When a config key, flag, metric, event field, or log message changes, update
+  `reference/config.md`, `reference/cli.md`, `reference/metrics.md`,
+  `reference/payload.md`, or `how-to/troubleshoot.md` in the same change.
+- Check a config snippet with `tail-watch check-config`. `check-config` and `--once`
+  do not resolve `*_env` secrets, so it passes with them unset.
+
 ## Commits
 
 - Follow the Tailscale commit style in `AGENTS.md`: a `dir: verb ...`

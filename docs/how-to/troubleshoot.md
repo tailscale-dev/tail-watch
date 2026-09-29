@@ -1,0 +1,40 @@
+# Troubleshoot
+
+Find the message tail-watch printed, then apply the fix. Startup failures
+print to stderr and exit 1; log lines are JSON on stderr.
+
+## Startup failures and warnings
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `tailscaled is using userspace networking; tail-watch requires kernel-mode tailscaled` | `tailscaled` runs with `--tun=userspace-networking`, which cannot carry ICMP to LAN addresses | Run `tailscaled` in kernel mode. In Compose set `TS_USERSPACE: "false"` as `examples/compose.yaml` does. See [Deploy](deploy.md) |
+| `node is missing tag:monitor` (a warning) | The collector node does not carry the tag your grants are written for | Join with an auth key tagged `tag:monitor`, or re-tag the node. See [ACLs](acls.md) |
+| `cannot open an ICMP socket: set net.ipv4.ping_group_range or grant CAP_NET_RAW` | The process cannot open an ICMP socket. TCP, HTTP and `tsping` checks still run | Allow unprivileged ping: `sysctl -w net.ipv4.ping_group_range="0 2147483647"` (or a range that includes the collector's group), or grant `CAP_NET_RAW`. In Docker, set the sysctl on the container as the example Compose file does |
+| `tailscaled is not reachable at <socket>: ...` | The LocalAPI socket is missing, wrong, or unreadable by the collector's user. On Linux the default is `/var/run/tailscale/tailscaled.sock` | Pass `--socket <path>`, check `tailscaled` is running, and make the socket readable by the collector's user. In Docker mount the socket and use a `--user` or `--group-add` that can read it (the image runs as uid 65532) |
+| `tailscaled state is <state>; run tailscale up` | `tailscaled` is running but not logged in | Run `tailscale up` |
+| `remote subnet targets require accepted routes; run tailscale set --accept-routes` | A `network: tailnet` target has a literal non-Tailscale IP and the host does not accept subnet routes | Run `tailscale set --accept-routes`, then check `ip route get <addr>`. See [Remote subnets](remote-subnets.md) |
+| `exit node is active; notifications will route through the exit node` (a warning) | An exit node is set on the collector, so sinks and the heartbeat egress through it | Clear the exit node, or make sure receivers accept that source. See [Webhook](webhook-sink.md) |
+| `sink <name>: url: environment variable <VAR> is unset or empty` (also `secret:`, `header <name>:`, `heartbeat:`) | A `*_env` variable is unset or empty at startup. Secret files report `secret file <path> is empty` | Export the variable in the service's environment. Compose and systemd do not inherit your shell. Run `notify-test` to confirm. See [Slack](slack-sink.md) and [Heartbeat](heartbeat.md) |
+| `notification state <path> is corrupt (...); repair or move the file aside and restart, but note open incidents are forgotten if it is removed` | `notification-state.json` in `collector.state_dir` cannot be decoded, so startup stops rather than forget open incidents | Restore or repair the file from a backup. If you move it aside, open incidents are forgotten and their recoveries are not sent. See [Incidents and queues](../explanation/incidents-and-queues.md) |
+| `the UI needs collector.state_dir to store monitors` | `--ui` or `collector.ui: true` is set with no `state_dir` | Set `collector.state_dir`, or turn the UI off with `--ui=false`. See [Monitor UI](monitor-ui.md) |
+| `queue: disk requires collector.state_dir` | A sink uses the disk queue with no `state_dir` | Set `collector.state_dir` or use `queue: memory` |
+| `dynamic monitors are inactive: the UI is off` (a warning) | `targets.json` has monitors but the UI is off, so they do not run | Turn the UI on, or ignore it |
+| `webhook sink is unsigned: no secret_env or secret_file` (a warning) | A webhook sink has no HMAC key | Add `secret_env`. See [Webhook](webhook-sink.md) |
+
+## Check failures
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `no peer handles <addr>; check grants to tag:monitor` | No peer owns or routes the address for this collector: a missing grant, an unapproved or unaccepted route, or the wrong address | Add the grant from `tag:monitor` and approve the route. See [ACLs](acls.md) and [Remote subnets](remote-subnets.md). tail-watch logs it once per target, again only if the grant returns and is lost |
+| TCP check ends with `i/o timeout` | The grant does not allow that port, so packets are dropped | Add `tcp:<port>` to the grant |
+
+## Validate before you restart
+
+- `tail-watch check-config --config <file>` validates the file without
+  contacting `tailscaled`.
+- `tail-watch notify-test` sends one test event per sink and reports the
+  HTTP status or the error.
+- `tail-watch --once --config <file>` runs every check once.
+
+Flags are in the [command-line reference](../reference/cli.md). To see every
+check result in the log, use `--log-level debug`.

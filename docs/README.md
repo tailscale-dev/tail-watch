@@ -1,0 +1,42 @@
+# tail-watch documentation
+
+tail-watch checks whether traffic to your tailnet nodes and the subnets behind them
+gets through, and tells you which layer failed. These pages are grouped by what you
+need to do.
+
+## Tutorial
+
+- [Set up your first monitor](tutorial/first-monitor.md): from the example Compose
+  file to an alert in Slack.
+
+## How-to guides
+
+- [Deploy tail-watch](how-to/deploy.md): binary, Docker, and Compose without a
+  dedicated host.
+- [Write the ACLs](how-to/acls.md): grants for `tag:monitor`.
+- [Monitor remote subnets and local LANs](how-to/remote-subnets.md)
+- [Manage monitors in the UI](how-to/monitor-ui.md)
+- [Send alerts to Slack](how-to/slack-sink.md)
+- [Send alerts to a webhook](how-to/webhook-sink.md): signing, batching, retries.
+- [Watch the watcher with a heartbeat](how-to/heartbeat.md)
+- [Troubleshoot](how-to/troubleshoot.md)
+
+## Reference
+
+- [Configuration](reference/config.md)
+- [Command line](reference/cli.md)
+- [Checks](reference/checks.md)
+- [Metrics](reference/metrics.md)
+- [Event payload](reference/payload.md)
+
+## Explanation
+
+- [Failure layers](explanation/failure-layers.md)
+- [Alert state](explanation/alert-state.md)
+- [Incidents and queues](explanation/incidents-and-queues.md)
+- [Monitor UI risks](explanation/monitor-ui-risks.md)
+
+## Contributing
+
+- [Live notification test](contributing/live-notification-test.md)
+- [Development and releases](contributing/releases.md)
