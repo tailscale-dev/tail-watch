@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "id": "evt_01JAB3K9T6M4X2Q8R7N5W0YZCK",
+  "type": "collector.started",
+  "severity": "info",
+  "time": "2026-04-02T14:02:11Z",
+  "collector": {
+    "name": "monitor-nyc",
+    "tailscale_ip": "100.101.102.103"
+  }
+}

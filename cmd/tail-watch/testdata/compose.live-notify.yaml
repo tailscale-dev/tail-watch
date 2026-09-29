@@ -1,0 +1,107 @@
+# Merged over examples/compose.yaml by TestLiveNotifications. One tailnet node per
+# check the collector runs, so each check can be failed and healed on its own:
+#
+#   fx-icmp    icmp    ICMP is dropped with iptables to fail, and the rule removed to heal
+#   fx-tsping  tsping  the container is paused to fail
+#   fx-tcp     tcp     a listener on 9000, stopped with /tmp/down
+#   fx-http    http    an nc responder on 8080 serving "tail-watch-ok", stopped with /tmp/down
+#   lan-router icmp    subnet router for 10.10.53.0/24, answering 10.10.53.1
+#
+# Required: TS_FX_PREFIX, TS_KEY_ICMP, TS_KEY_TSPING, TS_KEY_TCP, TS_KEY_HTTP,
+# TS_KEY_LAN. Sink URLs and secrets are passed through from the environment.
+x-fixture: &fixture
+  image: tailscale/tailscale:v1.102.5
+  cap_add: [NET_ADMIN, NET_RAW]
+  devices: [/dev/net/tun]
+
+x-fixture-env: &fixture-env
+  TS_USERSPACE: "false"
+  TS_ACCEPT_DNS: "false"
+  TS_STATE_DIR: /var/lib/tailscale
+  TS_SOCKET: /var/run/tailscale/tailscaled.sock
+
+services:
+  tailscale:
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  tail-watch:
+    environment:
+      - SLACK_WEBHOOK_URL
+      - OPS_WEBHOOK_URL
+      - OPS_WEBHOOK_SECRET
+      - HEARTBEAT_URL
+    volumes:
+      - notify-state:/var/lib/tail-watch
+
+  fx-icmp:
+    <<: *fixture
+    hostname: ${TS_FX_PREFIX:?}-icmp
+    environment:
+      <<: *fixture-env
+      TS_AUTHKEY: ${TS_KEY_ICMP:?}
+      TS_HOSTNAME: ${TS_FX_PREFIX:?}-icmp
+
+  fx-tsping:
+    <<: *fixture
+    hostname: ${TS_FX_PREFIX:?}-tsping
+    environment:
+      <<: *fixture-env
+      TS_AUTHKEY: ${TS_KEY_TSPING:?}
+      TS_HOSTNAME: ${TS_FX_PREFIX:?}-tsping
+
+  fx-tcp:
+    <<: *fixture
+    hostname: ${TS_FX_PREFIX:?}-tcp
+    entrypoint:
+      - sh
+      - -c
+      - |
+        (while true; do
+          if [ -e /tmp/down ]; then sleep 1; else nc -l -p 9000 -e true 2>/dev/null; fi
+        done) &
+        exec /usr/local/bin/containerboot
+    environment:
+      <<: *fixture-env
+      TS_AUTHKEY: ${TS_KEY_TCP:?}
+      TS_HOSTNAME: ${TS_FX_PREFIX:?}-tcp
+
+  fx-http:
+    <<: *fixture
+    hostname: ${TS_FX_PREFIX:?}-http
+    entrypoint:
+      - sh
+      - -c
+      - |
+        cat > /tmp/resp.sh <<'EOS'
+        while read -r l; do [ -z "$${l%?}" ] && break; done
+        printf 'HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 13\r\n\r\ntail-watch-ok'
+        EOS
+        (while true; do
+          if [ -e /tmp/down ]; then sleep 1; else nc -l -p 8080 -e sh /tmp/resp.sh 2>/dev/null; fi
+        done) &
+        exec /usr/local/bin/containerboot
+    environment:
+      <<: *fixture-env
+      TS_AUTHKEY: ${TS_KEY_HTTP:?}
+      TS_HOSTNAME: ${TS_FX_PREFIX:?}-http
+
+  lan-router:
+    <<: *fixture
+    hostname: ${TS_FX_PREFIX:?}-lan
+    entrypoint:
+      - sh
+      - -c
+      - ip addr replace 10.10.53.1/32 dev lo && exec /usr/local/bin/containerboot
+    environment:
+      <<: *fixture-env
+      TS_AUTHKEY: ${TS_KEY_LAN:?}
+      TS_HOSTNAME: ${TS_FX_PREFIX:?}-lan
+      TS_ROUTES: 10.10.53.0/24
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv4.conf.all.rp_filter: "2"
+      net.ipv4.conf.lo.rp_filter: "0"
+
+volumes:
+  notify-state:

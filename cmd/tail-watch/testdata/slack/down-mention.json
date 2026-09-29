@@ -1,0 +1,28 @@
+{
+  "text": "<!subteam^S0123ABC>\n:red_circle: DOWN  nyc-nas  tcp:445  (service)\naddr 10.20.0.50 · site nyc · parent nyc-router · path direct 12 ms\nerror: connection refused\ndown since 14:00 UTC · 3 failures · collector monitor-nyc",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "<!subteam^S0123ABC>"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":red_circle: DOWN  nyc-nas  tcp:445  (service)\naddr 10.20.0.50 · site nyc · parent nyc-router · path direct 12 ms\nerror: connection refused\ndown since 14:00 UTC · 3 failures · collector monitor-nyc"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "monitor-nyc · 2026-04-02 14:02 UTC"
+        }
+      ]
+    }
+  ]
+}

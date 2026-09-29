@@ -387,3 +387,20 @@ func nycNodeUnsetOnline() *tailcfg.Node {
 	n.Online = nil
 	return n
 }
+
+func TestTagsForIgnoresLocalTargets(t *testing.T) {
+	t.Parallel()
+	remote := alertTarget("nyc-nas", "icmp")
+	remote.Addr = "10.20.0.50"
+	local := alertTarget("lab-nas", "icmp")
+	local.Addr = "10.20.0.50"
+	local.Network = NetworkLocal
+	_, pres := newTestClassifier(t, new(fakeEnv), remote, local)
+	pres.apply(ipn.Notify{InitialStatus: presenceStatus()})
+	if got := pres.TagsFor("nyc-nas"); len(got) != 1 || got[0] != "tag:router" {
+		t.Fatalf("tailnet target tags %v", got)
+	}
+	if got := pres.TagsFor("lab-nas"); got != nil {
+		t.Fatalf("a local target must not inherit tailnet tags, got %v", got)
+	}
+}

@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "id": "evt_01JAB3K9T6M4X2Q8R7N5W0YZCD",
+  "type": "target.down",
+  "severity": "page",
+  "time": "2026-04-02T14:02:11Z",
+  "collector": {
+    "name": "monitor-nyc",
+    "tailscale_ip": "100.101.102.103"
+  },
+  "target": {
+    "name": "nyc-nas",
+    "addr": "10.20.0.50",
+    "site": "nyc",
+    "parent": "nyc-router"
+  },
+  "check": "tcp:445",
+  "layer": "service",
+  "error": "connection refused",
+  "since": "2026-04-02T14:00:41Z",
+  "failures": 3,
+  "path": {
+    "kind": "direct",
+    "endpoint": "203.0.113.5:41641",
+    "latency_ms": 12
+  },
+  "dependents": []
+}

@@ -79,8 +79,9 @@ Every event SHALL be serialized as one JSON object with `version` (integer,
 `layer`, `error`, `since`, `failures`, `path`
 (`kind`, `endpoint`, `derp_region`, `latency_ms`, each present only when
 known), and `dependents` (always an array on `target.down` and
-`target.recovered`). `target.recovered` SHALL add `duration_seconds` and
-`down_event_id`. Fields that do not apply SHALL be omitted, not sent as null.
+`target.recovered`). `target.recovered` SHALL add `duration_seconds` (from the
+outage's `since` to recovery) and `down_event_id`, and MAY repeat the down's
+`check`, `error`, `since`, `failures` and `path`. Fields that do not apply SHALL be omitted, not sent as null.
 `layer` SHALL be one of `unrouted`, `control`, `tunnel`, `lan` or `service`
 on `target.down` and `target.flapping`, and SHALL be omitted on all other
 events. Payload changes within `version: 1` SHALL only add fields.

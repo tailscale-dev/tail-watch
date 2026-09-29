@@ -328,10 +328,11 @@ func TestExampleConfig(t *testing.T) {
 
 func TestListenFlagOverride(t *testing.T) {
 	t.Parallel()
-	cfg := &Config{Collector: CollectorConfig{Listen: "127.0.0.1:1",
-		StateDir: "",
-	},
-		Targets: nil,
+	cfg := &Config{
+		Collector: CollectorConfig{Listen: "127.0.0.1:1", StateDir: ""},
+		Targets:   nil,
+		Sinks:     nil,
+		Heartbeat: nil,
 	}
 	if got := cfg.ListenAddr("127.0.0.1:2"); got != "127.0.0.1:2" {
 		t.Fatal(got)

@@ -68,9 +68,13 @@ Non-goals (later phases):
 
 ### Modified Capabilities
 
-None. `collector-config` still lives only in the unarchived
-`add-tsmon-collector` change, so sink and heartbeat config requirements are
-specified in this change's own capabilities.
+- `alert-state-machine`: removing a `DOWN` implicit target is allowed, so
+  authoritative topology reconciliation can close a restored learned router's
+  incident as `removed`. Configured targets still cannot be removed while `DOWN`.
+
+`collector-config` still lives only in the unarchived `add-tsmon-collector`
+change, so sink and heartbeat config requirements are specified in this
+change's own capabilities.
 
 ## Impact
 

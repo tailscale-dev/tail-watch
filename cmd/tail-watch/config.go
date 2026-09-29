@@ -48,6 +48,8 @@ const (
 type Config struct {
 	Collector CollectorConfig
 	Targets   []Target
+	Sinks     []SinkConfig
+	Heartbeat *HeartbeatConfig
 }
 
 // CollectorConfig is the process-level section of a config file.
@@ -115,9 +117,11 @@ func loadConfig(path string) (*Config, error) {
 }
 
 type rawConfig struct {
-	Collector rawCollector `yaml:"collector"`
-	Defaults  rawDefaults  `yaml:"defaults"`
-	Targets   []rawTarget  `yaml:"targets"`
+	Collector rawCollector  `yaml:"collector"`
+	Defaults  rawDefaults   `yaml:"defaults"`
+	Targets   []rawTarget   `yaml:"targets"`
+	Sinks     []rawSink     `yaml:"sinks"`
+	Heartbeat *rawHeartbeat `yaml:"heartbeat"`
 }
 
 type rawCollector struct {
@@ -237,7 +241,9 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 			Listen:   raw.Collector.Listen,
 			StateDir: raw.Collector.StateDir,
 		},
-		Targets: make([]Target, len(raw.Targets)),
+		Targets:   make([]Target, len(raw.Targets)),
+		Sinks:     nil,
+		Heartbeat: nil,
 	}
 	seen := map[string]int{}
 	checksOK := make([]bool, len(raw.Targets))
@@ -285,6 +291,8 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 		}
 	}
 	errs = append(errs, parentCycles(cfg.Targets, byName)...)
+	cfg.Sinks = resolveSinks(&errs, raw.Sinks, raw.Collector.StateDir)
+	cfg.Heartbeat = resolveHeartbeat(&errs, raw.Heartbeat)
 	return cfg, errs
 }
 

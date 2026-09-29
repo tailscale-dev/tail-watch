@@ -9,10 +9,12 @@
 	"grants": [
 		// The peer the test discovers is a member device. The grant also puts
 		// it in the collector's netmap, which is all tsping (disco) needs.
+		// TestLiveNotifications also probes its fixture nodes with icmp, tcp:9000
+		// (the tcp check) and tcp:8080 (the http check).
 		{
 			"src": ["tag:monitor"],
 			"dst": ["autogroup:member"],
-			"ip":  ["tcp:22"],
+			"ip":  ["icmp:*", "tcp:22", "tcp:8080", "tcp:9000"],
 		},
 		// Subnet targets, including the test router's 10.10.50.1.
 		{

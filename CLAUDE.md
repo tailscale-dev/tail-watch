@@ -27,44 +27,32 @@
   `recheck.go` runs at most
   eight immediate rechecks. `Result.Generation` is the per-target release
   counter; `execute` stamps the value from when the check acquired its lock.
-- Later phase-1 changes add the notification files in the same directory.
-- Create only one `prober.Prober` per process. `prober.New()` registers
-  metrics on the default Prometheus registry and panics if called again.
-  Unit tests call check methods directly and do not construct a `Prober`.
-- Every network access goes through `netEnv`. Do not add a package-level
-  dialer. `tsping` name resolution may fall back to the host resolver.
-- `TestLiveTailnetDocker` stays skipped unless `TAIL_WATCH_LIVE_TAILNET=1`. It
-  reads `tailscale-phase-2/tailscale` from `pulumi env` (`TAIL_WATCH_PULUMI_ENV`
-  overrides that) and drives `examples/compose.yaml` through
-  `docker compose`, so it tests the shipped non-root image. It builds
-  `tail-watch`, starts `tailscale`, and runs `compose run tail-watch --once`. The
-  collector key is tagged `TAIL_WATCH_LIVE_TAG` (default `tag:monitor`; set it
-  empty for an untagged member node). The tailnet policy must own that tag
-  and grant it the peer and `10.10.0.0/16`: merge
-  `cmd/tail-watch/testdata/snippet.hujson` into the lab policy (it lives in
-  `tailscale-utils-lab`, `lab/policy/lab.acl.hujson`). Until then, run with
-  `TAIL_WATCH_LIVE_TAG=`. If no connected device has an
-  enabled subnet route, the test merges
-  `cmd/tail-watch/testdata/compose.live-router.yaml`, which adds a router for
-  `10.10.50.0/24` that answers `10.10.50.1`. `TAIL_WATCH_LIVE_PEER` and
-  `TAIL_WATCH_LIVE_SUBNET` override the discovered targets. Cleanup runs
-  `compose down --volumes` and deletes only the `tail-watch-live-<id>` devices
-  that run created. Its Tailscale API calls are test setup, not collector
-  traffic, so they do not go through `netEnv`.
-- `TestLiveTailnetClassification` (same gate and credentials) always adds its
-  own router on `10.10.51.0/24`, a separate prefix so the two live tests never
-  form an HA pair. It runs the collector as a daemon, scrapes `/metrics`
-  from the `tailscale` service, removes the router's LAN address (expects
-  `lan`), then stops the router (expects `control`). Control marks a stopped
-  node disconnected in seconds, but peers' netmaps have taken 28s to more than
-  3 min to get `Online=false`. Until then `tunnel` is the correct layer, so the
-  control wait is 8 min.
-- `TestLiveTailnetAlerts` uses its own router on `10.10.52.0/24`. It stops
-  and restarts that router, checks target-state gauges, and verifies exactly
-  one router DOWN and recovery in the transition logs, with silent dependents.
-  It uses the same live-test gate and credentials.
-- Keep the compose `tailscale` service's `ping_group_range` sysctl. tail-watch
-  runs as uid 65532 in that network namespace and opens ICMP as `udp4`.
+- Notifications: `event.go` (payload, ids, transition mapping, routing),
+  `incidents.go` (incident and per-sink delivery state, `restoreOpen`), `queue.go`
+  (bounded queues, atomic `notification-state.json`, startup replay), `notify.go` (the
+  coordinator and per-sink workers), `deliver.go` (shared retry loop), `sink.go`,
+  `webhook.go`, `slack.go`, `heartbeat.go`, `notifytest.go`, `notify_metrics.go`, and
+  sink schema in `config_sinks.go`.
+- One `notifier` mutex guards the whole `book` (incidents plus queues), and every mutation
+  commits the snapshot under it, so workers only see durable intents after the commit.
+  `ObserveTransition` only writes the 4096-slot intake channel; never add I/O to it.
+  A dropped transition is repaired by `reconcile()` from the alerter's dirty snapshots
+  (1s ticker); target removal reaches the notifier only that way.
+- Notification tests use `notify_helpers_test.go`: `countingClock` wraps `tstest.Clock`
+  and counts timers and tickers. Wait with `waitTimers`/`tickers` before `Advance`, or a
+  worker that has not armed its timer yet misses the advance. Retry timers and group-wait
+  timers both come from `NewTimer`, so count them when scripting a sequence.
+- Golden files live in `cmd/tail-watch/testdata/{payload,slack}`; regenerate with
+  `go test -run 'TestPayloadGolden|TestSlackGolden' -update ./cmd/tail-watch`, then
+  review the diff.
+- Startup order matters: `newNotifier` (corrupt state or unset secrets stop startup) runs
+  in `run()` before the prober; `restoreOpen` runs in `startCollectors` after the alerter
+  and classifier exist and before any target is scheduled. `--once` never builds a notifier,
+  resolves secrets, or sends a heartbeat.
+- `alerter.RemoveTarget` refuses a configured target with an open incident but allows a
+  DOWN implicit one. The learner removes a restored learned router only after an
+  authoritative reconciliation, and the removed dirty snapshot makes the notifier close
+  the incident with `reason: removed`.
 
 ## Commits
 
@@ -95,3 +83,13 @@
 - Validate with `openspec validate <change> --strict` after editing artifacts.
 - `.claude/` is generated by OpenSpec and excluded from markdownlint. MD013 is
   off under `openspec/` because apply tracks one task per checkbox line.
+
+## Live notification test
+
+- `TestLiveNotifications` (same gate as the other live tests) uses
+  `cmd/tail-watch/testdata/compose.live-notify.yaml`; `scripts/live-stack.sh up|down`
+  brings up just the nodes for manual work. The tailscale image's busybox has no `httpd`,
+  so the http fixture is an `nc` responder that must read the request before replying.
+- The Slack webhook is read from `SLACK_WEBHOOK_URL` or from the pulumi env named by
+  `TAIL_WATCH_SLACK_PULUMI_ENV`; never write it to a file or log it (`redactSecrets`
+  strips `hooks.slack.com` URLs).

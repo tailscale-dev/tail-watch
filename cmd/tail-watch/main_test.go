@@ -742,3 +742,23 @@ func httpGet(t *testing.T, url string) string {
 	}
 	return string(b)
 }
+
+func TestCollectorFromPrefersIPv4(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		ips  []string
+		want string
+	}{
+		{"v4 first", []string{"100.64.0.8", "fd7a:115c:a1e0::1"}, "100.64.0.8"},
+		{"v4 after v6", []string{"fd7a:115c:a1e0::1", "100.64.0.8"}, "100.64.0.8"},
+		{"v6 only", []string{"fd7a:115c:a1e0::1"}, "fd7a:115c:a1e0::1"},
+		{"none", nil, ""},
+	}
+	for _, tt := range tests {
+		got := collectorFrom(preflightResult{Hostname: "monitor", IPs: tt.ips, Tags: nil, Warnings: nil})
+		if got.Name != "monitor" || got.TailscaleIP != tt.want {
+			t.Errorf("%s: got %+v want ip %q", tt.name, got, tt.want)
+		}
+	}
+}
