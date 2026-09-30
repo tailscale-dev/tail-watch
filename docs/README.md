@@ -39,4 +39,5 @@ need to do.
 ## Contributing
 
 - [Live notification test](contributing/live-notification-test.md)
+- [Monitor UI browser tests](contributing/ui-browser-test.md)
 - [Development and releases](contributing/releases.md)

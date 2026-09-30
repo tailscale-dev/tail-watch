@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"tailscale.com/tstime"
+	"tailscale.com/types/opt"
 )
 
 type apiEnv struct {
@@ -428,6 +430,207 @@ func TestMonitorWriteAuditLog(t *testing.T) {
 	}
 }
 
+type fakePeerSource struct {
+	peers  []peerInfo
+	seeded bool
+}
+
+func (f *fakePeerSource) Peers() []peerInfo { return f.peers }
+func (f *fakePeerSource) seededNow() bool   { return f.seeded }
+
+func peerListFixture() []peerInfo {
+	return []peerInfo{
+		{
+			NodeID:     1,
+			StableID:   "",
+			Name:       "nyc-router",
+			DNSName:    "nyc-router.tailnet.ts.net",
+			HostName:   "nyc-router-host",
+			IPs:        []netip.Addr{netip.MustParseAddr("100.64.0.1")},
+			Routes:     []netip.Prefix{netip.MustParsePrefix("10.20.0.0/16")},
+			AllowedIPs: nil,
+			Tags:       []string{"tag:router"},
+			Online:     opt.NewBool(true),
+		},
+		{
+			NodeID:     2,
+			StableID:   "",
+			Name:       "lab-nas",
+			DNSName:    "lab-nas.tailnet.ts.net",
+			HostName:   "nas",
+			IPs:        []netip.Addr{netip.MustParseAddr("100.64.0.2")},
+			Routes:     nil,
+			AllowedIPs: nil,
+			Tags:       nil,
+			Online:     opt.NewBool(false),
+		},
+	}
+}
+
+func getPeers(t *testing.T, e *apiEnv) (int, string) {
+	t.Helper()
+	// A plain GET with no Content-Type, as fetch sends it.
+	return e.do(t, http.MethodGet, "/api/v1/peers", "", withHeader("Content-Type", ""))
+}
+
+func TestMonitorPeerList(t *testing.T) {
+	t.Parallel()
+	fixture := peerListFixture()
+	tests := []struct {
+		name   string
+		source peerSource
+		seeded bool
+		peers  []peerView
+	}{
+		{
+			name:   "seeded with peers",
+			source: &fakePeerSource{peers: fixture, seeded: true},
+			seeded: true,
+			peers: []peerView{
+				{
+					Name:     "lab-nas",
+					DNSName:  "lab-nas.tailnet.ts.net",
+					HostName: "nas",
+					IPs:      []string{"100.64.0.2"},
+					Tags:     []string{},
+					Online:   new(false),
+					Routes:   []string{},
+				},
+				{
+					Name:     "nyc-router",
+					DNSName:  "nyc-router.tailnet.ts.net",
+					HostName: "nyc-router-host",
+					IPs:      []string{"100.64.0.1"},
+					Tags:     []string{"tag:router"},
+					Online:   new(true),
+					Routes:   []string{"10.20.0.0/16"},
+				},
+			},
+		},
+		{
+			name: "unknown online state",
+			source: &fakePeerSource{seeded: true, peers: []peerInfo{{
+				NodeID:     3,
+				StableID:   "",
+				Name:       "new-node",
+				DNSName:    "",
+				HostName:   "",
+				IPs:        []netip.Addr{netip.MustParseAddr("100.64.0.3")},
+				Routes:     nil,
+				AllowedIPs: nil,
+				Tags:       nil,
+				Online:     opt.Bool(""),
+			}}},
+			seeded: true,
+			peers: []peerView{{
+				Name:     "new-node",
+				DNSName:  "",
+				HostName: "",
+				IPs:      []string{"100.64.0.3"},
+				Tags:     []string{},
+				Online:   nil,
+				Routes:   []string{},
+			}},
+		},
+		{
+			name: "no MagicDNS name",
+			source: &fakePeerSource{seeded: true, peers: []peerInfo{{
+				NodeID:     4,
+				StableID:   "",
+				Name:       "printer",
+				DNSName:    "",
+				HostName:   "printer",
+				IPs:        []netip.Addr{netip.MustParseAddr("100.64.0.4")},
+				Routes:     nil,
+				AllowedIPs: nil,
+				Tags:       nil,
+				Online:     opt.NewBool(true),
+			}}},
+			seeded: true,
+			peers: []peerView{{
+				Name:     "printer",
+				DNSName:  "",
+				HostName: "printer",
+				IPs:      []string{"100.64.0.4"},
+				Tags:     []string{},
+				Online:   new(true),
+				Routes:   []string{},
+			}},
+		},
+		{
+			name:   "unseeded",
+			source: &fakePeerSource{peers: nil, seeded: false},
+			seeded: false,
+			peers:  []peerView{},
+		},
+		{
+			name:   "bus down after seeding keeps stale entries hidden",
+			source: &fakePeerSource{peers: fixture, seeded: false},
+			seeded: false,
+			peers:  []peerView{},
+		},
+		{
+			name:   "nil source",
+			source: nil,
+			seeded: false,
+			peers:  []peerView{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := newAPIEnv(t)
+			e.mgr.peers = tt.source
+			status, body := getPeers(t, e)
+			if status != http.StatusOK {
+				t.Fatalf("status %d %s", status, body)
+			}
+			var got peerListView
+			if err := json.Unmarshal([]byte(body), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Seeded != tt.seeded {
+				t.Errorf("seeded %v, want %v", got.Seeded, tt.seeded)
+			}
+			wantJSON, _ := json.Marshal(tt.peers)
+			gotJSON, _ := json.Marshal(got.Peers)
+			if string(gotJSON) != string(wantJSON) {
+				t.Errorf("peers %s, want %s", gotJSON, wantJSON)
+			}
+			if len(tt.peers) == 0 && !strings.Contains(body, `"peers":[]`) {
+				t.Errorf("peers must be [] not null: %s", body)
+			}
+		})
+	}
+}
+
+// TestMonitorPeerListHidesUnseenPeers stands in for a device the tailnet
+// policy hides from the collector: the source simply never holds it, so the
+// response cannot contain it.
+func TestMonitorPeerListHidesUnseenPeers(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	e.mgr.peers = &fakePeerSource{peers: peerListFixture(), seeded: true}
+	status, body := getPeers(t, e)
+	if status != http.StatusOK {
+		t.Fatalf("status %d %s", status, body)
+	}
+	var got peerListView
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, p := range got.Peers {
+		names = append(names, p.Name)
+	}
+	if !slices.Equal(names, []string{"lab-nas", "nyc-router"}) {
+		t.Fatalf("peers %v, want only the visible ones sorted by name", names)
+	}
+	if strings.Contains(body, "hidden") {
+		t.Fatal("a device outside the collector's view appeared")
+	}
+}
+
 func TestLoopbackListen(t *testing.T) {
 	t.Parallel()
 	for addr, want := range map[string]bool{
@@ -458,7 +661,8 @@ func TestMountMonitorUI(t *testing.T) {
 		mux.Handle("/", status)
 		a.mountMonitorUI(mux)
 		for _, r := range []struct{ method, path string }{
-			{"GET", "/ui/"}, {"GET", "/api/v1/targets"}, {"POST", "/api/v1/targets"}, {"GET", "/ui/app.js"},
+			{"GET", "/ui/"}, {"GET", "/api/v1/targets"}, {"POST", "/api/v1/targets"},
+			{"GET", "/api/v1/peers"}, {"GET", "/ui/app.js"},
 		} {
 			if code, _ := get(t, mux, r.method, r.path); code != http.StatusNotFound {
 				t.Errorf("%s %s: %d", r.method, r.path, code)

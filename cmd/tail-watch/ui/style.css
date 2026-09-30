@@ -198,7 +198,7 @@ dialog h2 { font-size: 17px; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
 .field { display: grid; gap: 4px; align-content: start; }
 .field.wide { grid-column: 1 / -1; }
-.field label { font-weight: 600; font-size: 13px; }
+.field label, .field .label { font-weight: 600; font-size: 13px; }
 .field.check { grid-column: 1 / -1; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; }
 .field.check label { font-weight: 400; }
 .field.check .error { grid-column: 1 / -1; }
@@ -217,7 +217,29 @@ input[readonly] { color: var(--muted); background: var(--surface-2); }
 .hint { color: var(--muted); font-size: 12.5px; }
 .error { color: var(--down); font-size: 12.5px; white-space: pre-line; }
 .error:empty { display: none; }
-.field.invalid input, .field.invalid select, .field.invalid textarea { border-color: var(--down); }
+.field.invalid > input, .field.invalid > select, .field.invalid > textarea { border-color: var(--down); }
+
+#f-checks { display: grid; gap: 8px; justify-items: start; }
+#check-rows { display: grid; gap: 8px; width: 100%; }
+#check-rows:empty { display: none; }
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.check-row.invalid { border-color: var(--down); }
+.check-row select, .check-row input { width: auto; }
+.check-row .check-type { min-width: 11em; }
+.check-row .check-port { width: 6em; }
+.check-row .check-path { flex: 1 1 10em; }
+.check-row .check-text, .check-row .check-raw { flex: 1 1 14em; }
+.check-row .check-remove { margin-left: auto; }
+.check-row .check-error { flex: 1 1 100%; }
 
 details { border-top: 1px solid var(--border); padding-top: 12px; }
 summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }

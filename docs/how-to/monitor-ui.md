@@ -77,26 +77,69 @@ namespace, so every process in that namespace can reach a loopback listener.
 
 Steps:
 
-1. Click **Add monitor**. Fill in name, address, checks and the other fields.
-   The `defaults` block of the YAML file applies to UI monitors.
-2. Click **Check** to validate without saving, then **Save**. Errors appear
-   next to the field they belong to, and nothing is created until they are
-   fixed. They come from the same rules the YAML loader uses.
+1. Click **Add monitor**. Fill in name, address and the other fields. The
+   `defaults` block of the YAML file applies to UI monitors.
+2. Under **Checks**, click **Add check** once for each check to run. The list
+   starts empty, and a monitor needs at least one check. Each row has a type:
 
-   ![The add monitor form with an invalid TCP port reported under Checks.](../images/monitor-ui-form-error.png)
+   | Type | Fields |
+   | --- | --- |
+   | Ping (ICMP) | none |
+   | Tailscale ping | none |
+   | TCP port | the port |
+   | HTTP request | scheme, optional port, path, and optional text the body must contain |
 
-3. The list shows every monitor. YAML monitors are read-only; only monitors
+   An HTTP check always uses the Address as its host, so there is no host
+   field and it follows any change you make to the Address. **Remove** drops a
+   row. The rows become the check strings of the [checks reference](../reference/checks.md);
+   you never type that syntax. A check in a stored monitor that no row can
+   express, for example a hand-edited `targets.json` entry, appears as a
+   **Custom** row holding the raw string, and is saved unchanged.
+3. Click **Check** to validate without saving, then **Save**. Errors appear
+   next to the field they belong to, and a rejected check is marked on its own
+   row. Saving with no checks is refused with a message under the list.
+   Nothing is created until the errors are fixed. They come from the same rules
+   the YAML loader uses.
+
+   ![The add monitor form with an invalid TCP port reported on its check row.](../images/monitor-ui-form-error.png)
+
+4. The list shows every monitor. YAML monitors are read-only; only monitors
    created in the UI have **Edit** and **Delete**. Monitors behind a down
    parent show `SUPPRESSED`.
 
    ![The monitor list: YAML monitors are read-only, UI monitors have Edit and Delete, and monitors behind a down parent show SUPPRESSED.](../images/monitor-ui-list.png)
 
-4. To delete, click **Delete** and confirm. Deleting a `DOWN` monitor asks
+5. To delete, click **Delete** and confirm. Deleting a `DOWN` monitor asks
    first, and says its open incident closes.
 
    ![The delete confirmation for a down monitor.](../images/monitor-ui-delete-down.png)
 
+## Pick a node from the list
+
+The Address field suggests the tailnet peers the collector can currently see,
+read from `GET /api/v1/peers`. Open the form and start typing to filter the
+suggestions; each one shows the peer's Tailscale IP, its tags and whether it
+is online. Choosing a suggestion fills the Address with the peer's name, or its
+first Tailscale IP when it has none, and fills the Name with the same value.
+A Name you typed is kept, and choosing another suggestion replaces a Name the
+picker filled. Typing an address by hand always works.
+
+![The add monitor form with an address behind a subnet router: the hint under Address names the router that handles it.](../images/monitor-ui-peers.png)
+
 Behavior to expect:
+
+- The list means the collector can *see* the peer, not that it is *healthy*:
+  a suggested node can still fail the checks you pick.
+- Until the first status arrives from `tailscaled`, and whenever the
+  connection to it is down, the list is empty. A failed fetch is silent too.
+  In both cases type the address as before; nothing blocks saving.
+- The Name of an existing monitor never changes when you pick a suggestion
+  while editing it.
+- When the address is an IP inside a peer's subnet routes, a hint under the
+  field names the peer that handles it, so you can pick a monitor of that
+  router as the Parent. The Parent select itself is unchanged.
+
+Behavior to expect when editing or deleting:
 
 - An edit is a delete followed by an add. Editing or deleting a `DOWN`
   monitor closes its open incident with `reason: removed`. A new incident

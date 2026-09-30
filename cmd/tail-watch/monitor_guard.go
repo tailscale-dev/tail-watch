@@ -118,6 +118,7 @@ func sameOrigin(r *http.Request) bool {
 // routes registers the monitor API on mux.
 func (m *monitorManager) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/targets", m.handleList)
+	mux.HandleFunc("GET /api/v1/peers", m.handlePeers)
 	mux.HandleFunc("POST /api/v1/targets", m.guard(m.handleCreate, true))
 	mux.HandleFunc("PUT /api/v1/targets/{name}", m.guard(m.handleReplace, true))
 	mux.HandleFunc("DELETE /api/v1/targets/{name}", m.guard(m.handleDelete, true))

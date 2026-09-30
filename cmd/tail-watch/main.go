@@ -480,6 +480,7 @@ func (a *app) mountMonitorUI(mux *http.ServeMux) {
 		return
 	}
 	mgr := newMonitorManager(a.cfg, a.dynamic, a.registry, a.alerts, a.log)
+	mgr.peers = a.presence
 	if a.notify != nil {
 		mgr.closeIncident = a.notify.closeRemoved
 	}

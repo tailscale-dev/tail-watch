@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -23,6 +24,13 @@ type snapshotSource interface {
 	Snapshots() []alertSnapshot
 }
 
+// peerSource is the part of the presence view the peer list reads. A nil
+// source behaves as unseeded.
+type peerSource interface {
+	Peers() []peerInfo
+	seededNow() bool
+}
+
 // monitorManager owns the dynamic monitors: their file, their validation and
 // their live registration. One mutex serializes every change, so a change is
 // persisted and then applied before the next one starts.
@@ -31,6 +39,7 @@ type monitorManager struct {
 	dir       string
 	reg       targetRegistry
 	alerts    snapshotSource
+	peers     peerSource
 	log       *slog.Logger
 	authorize func(*http.Request) error
 	save      func(dir string, targets []dynamicTarget) error
@@ -56,6 +65,7 @@ func newMonitorManager(cfg *Config, entries []dynamicTarget, reg targetRegistry,
 		dir:       cfg.Collector.StateDir,
 		reg:       reg,
 		alerts:    alerts,
+		peers:     nil,
 		log:       log,
 		authorize: func(*http.Request) error { return nil },
 		save:      saveDynamic,
@@ -430,4 +440,63 @@ func (m *monitorManager) handleValidate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+type peerView struct {
+	Name     string   `json:"name"`
+	DNSName  string   `json:"dns_name"`
+	HostName string   `json:"host_name"`
+	IPs      []string `json:"ips"`
+	Tags     []string `json:"tags"`
+	Online   *bool    `json:"online"`
+	Routes   []string `json:"routes"`
+}
+
+// peerListView is the body of GET /api/v1/peers. Peers is always a list,
+// never null.
+type peerListView struct {
+	Seeded bool       `json:"seeded"`
+	Peers  []peerView `json:"peers"`
+}
+
+func peerViewOf(p peerInfo) peerView {
+	v := peerView{
+		Name:     p.Name,
+		DNSName:  p.DNSName,
+		HostName: p.HostName,
+		IPs:      make([]string, 0, len(p.IPs)),
+		Tags:     slices.Clone(p.Tags),
+		Online:   nil,
+		Routes:   make([]string, 0, len(p.Routes)),
+	}
+	if v.Tags == nil {
+		v.Tags = []string{}
+	}
+	for _, ip := range p.IPs {
+		v.IPs = append(v.IPs, ip.String())
+	}
+	for _, r := range p.Routes {
+		v.Routes = append(v.Routes, r.String())
+	}
+	if online, ok := p.Online.Get(); ok {
+		v.Online = &online
+	}
+	return v
+}
+
+// handlePeers lists the peers the collector can currently see. An unseeded
+// view answers with an empty list rather than its last-known entries: those
+// are of unknown age, and the seeded flag says the view cannot be trusted.
+func (m *monitorManager) handlePeers(w http.ResponseWriter, _ *http.Request) {
+	if m.peers == nil || !m.peers.seededNow() {
+		writeJSON(w, http.StatusOK, peerListView{Seeded: false, Peers: []peerView{}})
+		return
+	}
+	peers := m.peers.Peers()
+	views := make([]peerView, len(peers))
+	for i, p := range peers {
+		views[i] = peerViewOf(p)
+	}
+	slices.SortFunc(views, func(a, b peerView) int { return strings.Compare(a.Name, b.Name) })
+	writeJSON(w, http.StatusOK, peerListView{Seeded: true, Peers: views})
 }

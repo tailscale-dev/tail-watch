@@ -54,7 +54,9 @@
       </div>
       <div class="field" data-field="addr">
         <label for="f-addr">Address</label>
-        <input id="f-addr" name="addr" autocomplete="off" spellcheck="false" placeholder="10.20.0.50 or nas.lab">
+        <input id="f-addr" name="addr" autocomplete="off" spellcheck="false" list="peers" placeholder="10.20.0.50 or nas.lab">
+        <datalist id="peers"></datalist>
+        <p class="hint" id="addr-route" hidden></p>
         <p class="error"></p>
       </div>
       <div class="field" data-field="site">
@@ -72,9 +74,12 @@
         <p class="error"></p>
       </div>
       <div class="field wide" data-field="checks">
-        <label for="f-checks">Checks</label>
-        <textarea id="f-checks" name="checks" rows="3" spellcheck="false" placeholder="icmp&#10;tcp:445&#10;http:https://10.20.0.50:5001/|DSM"></textarea>
-        <p class="hint">One per line: <code>icmp</code>, <code>tsping</code>, <code>tcp:PORT</code> or <code>http:URL</code>, optionally <code>|text</code> to match.</p>
+        <span class="label" id="checks-label">Checks</span>
+        <div id="f-checks" role="group" aria-labelledby="checks-label">
+          <div id="check-rows"></div>
+          <button type="button" id="add-check">Add check</button>
+        </div>
+        <p class="hint">Each check runs against the address above. An HTTP check uses the address as its host.</p>
         <p class="error"></p>
       </div>
       <div class="field" data-field="parent">

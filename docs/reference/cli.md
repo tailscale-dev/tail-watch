@@ -147,6 +147,14 @@ Served on the listen address by the collector, not under `--once`.
 | `/api/v1/targets` | Monitor API: `GET` list, `POST` create. `404` unless the UI is on. |
 | `/api/v1/targets/{name}` | Monitor API: `PUT` replace, `DELETE` remove. |
 | `/api/v1/validate` | Monitor API: `POST` validate a monitor without saving it. |
+| `/api/v1/peers` | Monitor API: `GET` the tailnet peers the collector can currently see, for the address picker. `404` unless the UI is on. |
+
+`GET /api/v1/peers` answers `{"seeded": bool, "peers": [...]}`. Each peer
+carries `name` (MagicDNS short name, else host name), `dns_name`,
+`host_name`, `ips` (its Tailscale IPs), `tags`, `online` (`true`, `false` or
+`null` when unknown) and `routes` (the subnet routes it is primary for).
+`seeded` is `false`, with an empty list, until the first status arrives from
+`tailscaled` and whenever the connection to it is down.
 
 Write requests to `/api/v1/` must be `application/json` and must not carry an
 `Origin` for another host. There is no authentication. See

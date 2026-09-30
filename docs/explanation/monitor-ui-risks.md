@@ -106,7 +106,13 @@ subject to the same two checks but is not audited or authorized, because it
 changes nothing.
 
 The list endpoint that returns the monitors is a read, and it is not guarded by
-either check.
+either check. The same is true of `GET /api/v1/peers`, which returns the
+tailnet peers the collector can currently see: names, Tailscale IPs, tags,
+online state and subnet routes. Anyone who can reach the UI can read that
+inventory. It is limited to peers the collector itself can reach — a device the
+tailnet policy hides from the collector never appears — and it is readable by
+DNS rebinding (below) the same way `/api/v1/targets` is. If that exposure is
+not acceptable, leave the UI off.
 
 The pages under `/ui/` also send a Content Security Policy that allows only
 same-origin resources, and the page loads nothing from other origins. This

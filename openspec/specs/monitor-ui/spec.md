@@ -59,16 +59,87 @@ The page SHALL provide a form to add a monitor and to edit a UI-created one, cov
 SHALL be shown next to the field they name. The parent field SHALL offer only monitors
 that have exactly one `icmp` or one `tsping` check.
 
+The `checks` field SHALL be a list of check rows, not text in the check syntax. The list
+SHALL start empty when the form opens to add a monitor. The operator SHALL add a row with
+an "Add check" control and remove any row with its own control. A row SHALL have a type of
+ICMP, TSPing, TCP or HTTP. A TCP row SHALL have a port. An HTTP row SHALL have a scheme
+(`http` or `https`), an optional port, a path and an optional text the body must contain,
+and its host SHALL be taken from the address field when the form is submitted, with an IPv6
+address in brackets. On submit the form SHALL send each row, in order and without
+dropping any, as the existing check string (`icmp`, `tsping`, `tcp:<port>`,
+`http:<url>[|<text>]`). The form SHALL NOT reject an empty list itself: the server's
+validation SHALL decide. A server error that carries a row index SHALL be shown on that
+row, and one without an index SHALL be shown with the list. When editing, the form SHALL
+show the monitor's existing check strings as rows. A string that no row type can express,
+or an HTTP string whose host is not the address, SHALL be shown as a Custom row holding
+the raw string and SHALL be sent unchanged.
+
 #### Scenario: Validation error shown per field
 
-- **WHEN** the operator submits `tcp:70000` as a check
-- **THEN** the form shows the server's error next to the checks field and creates
-  nothing
+- **WHEN** the operator submits a TCP row with port `70000`
+- **THEN** the form shows the server's error on that row and creates nothing
 
 #### Scenario: Name is fixed on edit
 
 - **WHEN** the operator edits an existing UI-created monitor
 - **THEN** the name field cannot be changed
+
+#### Scenario: Form opens with no checks
+
+- **WHEN** the operator opens the form to add a monitor
+- **THEN** the checks list has no rows and an "Add check" control
+
+#### Scenario: Empty checks fail, then a check succeeds
+
+- **WHEN** the operator fills name and address, saves with no rows, then adds a TCP row
+  with port `445` and saves
+- **THEN** the first save creates nothing and shows the server's "checks must not be
+  empty" message with the list, and the second save creates the monitor with `tcp:445`
+
+#### Scenario: Remove a row
+
+- **WHEN** the operator adds two rows and removes the first
+- **THEN** only the second remains and is the one sent
+
+#### Scenario: Incomplete row is reported on its row
+
+- **WHEN** the operator adds an ICMP row and a TCP row with no port and saves
+- **THEN** the error is shown on the second row and the first row is unmarked
+
+#### Scenario: HTTP row takes its host from the address
+
+- **WHEN** the address is `10.20.0.50` and the operator adds an HTTP row with scheme
+  `https`, port `5001`, path `/` and text `DSM`
+- **THEN** the form sends `http:https://10.20.0.50:5001/|DSM`
+
+#### Scenario: HTTP host follows an address change
+
+- **WHEN** the operator adds an HTTP row and then changes the address from `nas` to `nas2`
+- **THEN** the form sends a URL whose host is `nas2`
+
+#### Scenario: IPv6 address is bracketed
+
+- **WHEN** the address is `fd7a:115c:a1e0::1` and the operator adds an HTTP row with path
+  `/`
+- **THEN** the form sends `http:http://[fd7a:115c:a1e0::1]/`
+
+#### Scenario: Edit shows rows
+
+- **WHEN** the operator edits a monitor stored with `icmp`, `tcp:445` and
+  `http:https://10.20.0.50:5001/|DSM` at address `10.20.0.50`
+- **THEN** the form shows an ICMP row, a TCP row with port `445`, and an HTTP row with
+  scheme `https`, port `5001`, path `/` and text `DSM`
+
+#### Scenario: Unparseable check kept as a Custom row
+
+- **WHEN** the operator edits a monitor whose stored check is `tls:443`
+- **THEN** the form shows a Custom row holding `tls:443` and sends it unchanged, and the
+  server's error for it is shown on that row
+
+#### Scenario: HTTP check for another host kept as a Custom row
+
+- **WHEN** a stored check is `http:http://other.lab/` and the address is `nas.lab`
+- **THEN** the form shows it as a Custom row, not as an HTTP row with a different host
 
 ### Requirement: Delete confirmation
 
@@ -85,3 +156,66 @@ the confirmation SHALL say that deleting it closes its open incident.
 
 - **WHEN** the operator cancels the confirmation
 - **THEN** the monitor is unchanged
+
+### Requirement: Address suggestions
+
+The add and edit form SHALL offer the peers from the peer list as suggestions for the
+address field. Choosing a suggestion SHALL fill the address field with the peer's `name`, or
+with its first Tailscale IP when the peer has no name, and SHALL also fill the name field
+with that same value when the name field is empty or still holds a value the suggestions
+filled earlier. A name the operator typed SHALL NOT be overwritten, and the name field of
+an existing monitor SHALL NOT change. A suggestion SHALL show the peer's Tailscale IP, tags
+and online state so the operator can tell peers apart. The suggestions SHALL be fetched when
+the form opens, and free-text entry SHALL always remain possible: an empty list, an
+unseeded list, or a failed fetch SHALL NOT block, change or delay submitting an address the
+operator typed. When the typed address is an IP address that falls inside the `routes` of a
+peer, the form SHALL show which peer handles it. The parent field SHALL be unchanged by
+suggestions.
+
+#### Scenario: Pick a peer
+
+- **WHEN** the operator opens the form and chooses the suggestion `lab-nas`
+- **THEN** the address field holds `lab-nas` and the name field holds `lab-nas`
+
+#### Scenario: Typed name is kept
+
+- **WHEN** the operator types the name `nas` and then chooses the suggestion `lab-nas`
+- **THEN** the address field holds `lab-nas` and the name field still holds `nas`
+
+#### Scenario: Another suggestion replaces a filled name
+
+- **WHEN** the operator chooses `lab-nas` and then chooses `nyc-router`
+- **THEN** both fields hold `nyc-router`
+
+#### Scenario: Editing keeps the name
+
+- **WHEN** the operator edits an existing monitor and chooses a suggestion
+- **THEN** the address field changes and the name field does not
+
+#### Scenario: Suggestion shows what distinguishes peers
+
+- **WHEN** two peers are offered
+- **THEN** each suggestion shows its Tailscale IP, its tags and whether it is online
+
+#### Scenario: Empty or unseeded list
+
+- **WHEN** the peer list is empty or `seeded` is false
+- **THEN** the form shows no suggestions and the operator can type any address and
+  submit it
+
+#### Scenario: Peer list cannot be fetched
+
+- **WHEN** the request for the peer list fails
+- **THEN** the form still opens, no error blocks it, and a typed address is submitted as
+  usual
+
+#### Scenario: Address behind a subnet router
+
+- **WHEN** the operator types `10.20.0.50` and `nyc-router` is primary for `10.20.0.0/16`
+- **THEN** the form shows that `nyc-router` handles that address, and the parent field
+  is not changed
+
+#### Scenario: Address handled by no peer
+
+- **WHEN** the operator types `192.168.99.1` and no peer routes it
+- **THEN** the form shows no handling peer
