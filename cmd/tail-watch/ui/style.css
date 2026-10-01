@@ -265,6 +265,10 @@ details .grid { margin-top: 10px; }
   background: var(--surface);
   display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .check-result { margin-right: auto; color: var(--up); font-weight: 600; }
+.check-result span { display: block; }
+.check-result .failed { color: var(--down); }
+#probe-failures { margin: 0; padding-left: 30px; }
+#probe-failures code { font-weight: 600; }
 
 @media (max-width: 940px) {
   .bar { padding-top: 16px; }

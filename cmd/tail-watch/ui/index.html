@@ -161,5 +161,17 @@
     </div>
   </form>
 </dialog>
+
+<dialog id="probe-confirm" aria-labelledby="probe-confirm-title">
+  <form method="dialog">
+    <h2 id="probe-confirm-title">Some checks failed</h2>
+    <p id="probe-confirm-text">These checks failed just now. Save the monitor anyway?</p>
+    <ul id="probe-failures" class="notice warn"></ul>
+    <div class="actions">
+      <button type="button" id="probe-confirm-no">No, let me edit</button>
+      <button type="button" id="probe-confirm-yes" class="danger">Save anyway</button>
+    </div>
+  </form>
+</dialog>
 </body>
 </html>

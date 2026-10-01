@@ -9,7 +9,7 @@ const INT_FIELDS = new Set(["fail_threshold", "recover_threshold", "flap_limit"]
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
-const app = { monitors: [], signature: "", editing: null, deleting: null, lastOk: true, peers: [], pickedName: "", checks: [] };
+const app = { monitors: [], signature: "", editing: null, deleting: null, probeSave: null, lastOk: true, peers: [], pickedName: "", checks: [] };
 
 async function api(method, path, body) {
   const res = await fetch(path, {
@@ -491,10 +491,9 @@ function collect() {
   return def;
 }
 
-async function submit(event) {
-  event.preventDefault();
-  clearErrors();
-  const def = collect();
+// persist runs the unchanged create or replace call for a definition whose
+// probe passed or was confirmed.
+async function persist(def) {
   const save = $("#save");
   save.disabled = true;
   try {
@@ -516,14 +515,85 @@ async function submit(event) {
   }
 }
 
+// submit probes the definition first. All checks passing saves at once; a
+// failing check asks for confirmation; a failed probe saves nothing.
+async function submit(event) {
+  event.preventDefault();
+  clearErrors();
+  const def = collect();
+  const save = $("#save");
+  save.disabled = true;
+  let probe = null;
+  try {
+    probe = await api("POST", "/api/v1/probe", def);
+  } catch {
+    probe = null;
+  } finally {
+    save.disabled = false;
+  }
+  if (!probe) {
+    showErrors(["Could not reach the collector."]);
+    return;
+  }
+  if (!probe.ok) {
+    showErrors(probe.data?.errors ?? [`Probe failed (HTTP ${probe.status}).`]);
+    return;
+  }
+  const failures = (probe.data?.results ?? [])
+    .map((r, index) => ({ ...r, index }))
+    .filter((r) => !r.ok);
+  if (failures.length === 0) {
+    await persist(def);
+    return;
+  }
+  openProbeConfirm(def, failures);
+}
+
+function openProbeConfirm(def, failures) {
+  app.probeSave = { def, failures };
+  $("#probe-failures").replaceChildren(
+    ...failures.map((f) => el("li", {}, el("code", { text: f.check }), document.createTextNode(`: ${f.error}`))),
+  );
+  $("#probe-confirm").showModal();
+  $("#probe-confirm-no").focus();
+}
+
+// declineProbe closes the confirmation without saving and marks the failing
+// check rows with the per-row error display, leaving every value intact.
+function declineProbe() {
+  $("#probe-confirm").close();
+  const pending = app.probeSave;
+  app.probeSave = null;
+  if (!pending) return;
+  const rows = document.querySelectorAll("#form .check-row");
+  for (const f of pending.failures) {
+    const row = rows[f.index];
+    if (!row) continue;
+    $(".check-error", row).textContent = f.error;
+    row.classList.add("invalid");
+    for (const input of row.querySelectorAll("input, select")) input.setAttribute("aria-invalid", "true");
+  }
+}
+
+async function confirmProbeSave() {
+  const pending = app.probeSave;
+  app.probeSave = null;
+  $("#probe-confirm").close();
+  if (pending) await persist(pending.def);
+}
+
 async function check() {
   clearErrors();
-  const res = await api("POST", "/api/v1/validate", collect()).catch(() => null);
+  const res = await api("POST", "/api/v1/probe", collect()).catch(() => null);
   if (!res) {
     showErrors(["Could not reach the collector."]);
   } else if (res.ok) {
+    const lines = (res.data?.results ?? []).map((r) => r.ok
+      ? el("span", { class: "ok", text: `${r.check}: ok (${r.latency_ms} ms)` })
+      : el("span", { class: "failed", text: `${r.check}: failed (${r.error})` }));
     const result = $("#check-result");
-    result.textContent = "Looks valid.";
+    if (lines.length > 0) result.replaceChildren(...lines);
+    else result.textContent = "No checks to run.";
     result.hidden = false;
   } else {
     showErrors(res.data?.errors ?? [`Request failed (HTTP ${res.status}).`]);
@@ -581,6 +651,12 @@ $("#f-addr").addEventListener("input", () => {
 });
 $("#confirm-cancel").addEventListener("click", () => $("#confirm").close());
 $("#confirm-ok").addEventListener("click", confirmDelete);
+$("#probe-confirm-no").addEventListener("click", declineProbe);
+$("#probe-confirm-yes").addEventListener("click", confirmProbeSave);
+$("#probe-confirm").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  declineProbe();
+});
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
 });

@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -15,9 +18,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tstime"
 	"tailscale.com/types/opt"
 )
@@ -82,6 +88,7 @@ targets:
 	}
 	logs := &bytes.Buffer{}
 	mgr := newMonitorManager(cfg, nil, reg, al, slog.New(slog.NewJSONHandler(logs, nil)))
+	mgr.env = new(fakeEnv)
 	var closed []string
 	mgr.closeIncident = func(name string) { closed = append(closed, name) }
 	mux := http.NewServeMux()
@@ -430,6 +437,315 @@ func TestMonitorWriteAuditLog(t *testing.T) {
 	}
 }
 
+// openTCPPort returns a loopback port with a listener accepting and closing
+// connections until the test ends.
+func openTCPPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// closedTCPPort returns a loopback port nothing listens on.
+func closedTCPPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	return port
+}
+
+// wantProbeResult is the expected outcome of one probed check.
+type wantProbeResult struct {
+	check string
+	ok    bool
+	err   string
+}
+
+// probeCase is one POST /api/v1/probe call and its expected answer. results
+// is nil when the call must not run a check.
+type probeCase struct {
+	name     string
+	body     string
+	env      func(dialed *atomic.Bool) netEnv
+	want     int
+	wantBody string
+	results  []wantProbeResult
+}
+
+// noDialEnv returns an env whose dial records the attempt and fails.
+func noDialEnv(dialed *atomic.Bool) netEnv {
+	env := new(fakeEnv)
+	env.dial = func(context.Context, string, string) (net.Conn, error) {
+		dialed.Store(true)
+		return nil, errors.New("must not dial")
+	}
+	return env
+}
+
+// blockDialEnv returns an env whose dial records the attempt and blocks until
+// the context is done.
+func blockDialEnv(dialed *atomic.Bool) netEnv {
+	env := new(fakeEnv)
+	env.dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		dialed.Store(true)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return env
+}
+
+func TestMonitorProbe(t *testing.T) {
+	t.Parallel()
+	http404 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "nope", http.StatusNotFound)
+	}))
+	t.Cleanup(http404.Close)
+	httpPort := http404.Listener.Addr().(*net.TCPAddr).Port
+	up1, up2 := openTCPPort(t), openTCPPort(t)
+	dead := closedTCPPort(t)
+
+	tests := []probeCase{
+		{
+			name: "all pass",
+			body: fmt.Sprintf(
+				`{"name":"lab-probe","addr":"127.0.0.1","checks":["tcp:%d","tcp:%d"]}`, up1, up2,
+			),
+			env:      nil,
+			want:     http.StatusOK,
+			wantBody: "",
+			results: []wantProbeResult{
+				{check: fmt.Sprintf("tcp:%d", up1), ok: true, err: ""},
+				{check: fmt.Sprintf("tcp:%d", up2), ok: true, err: ""},
+			},
+		},
+		{
+			name:     "connection refused",
+			body:     fmt.Sprintf(`{"name":"lab-probe","addr":"127.0.0.1","checks":["tcp:%d"]}`, dead),
+			env:      nil,
+			want:     http.StatusOK,
+			wantBody: "",
+			results: []wantProbeResult{
+				{check: fmt.Sprintf("tcp:%d", dead), ok: false, err: "connection refused"},
+			},
+		},
+		{
+			name: "non-200 HTTP status",
+			body: fmt.Sprintf(
+				`{"name":"lab-http","addr":"127.0.0.1","checks":["http:http://127.0.0.1:%d/"]}`, httpPort,
+			),
+			env:      nil,
+			want:     http.StatusOK,
+			wantBody: "",
+			results: []wantProbeResult{
+				{check: fmt.Sprintf("http:http://127.0.0.1:%d/", httpPort), ok: false, err: "HTTP status 404"},
+			},
+		},
+		{
+			name:     "invalid definition runs no check",
+			body:     `{"name":"lab-bad","addr":"10.9.0.2","checks":["tcp:70000"]}`,
+			env:      noDialEnv,
+			want:     http.StatusUnprocessableEntity,
+			wantBody: "checks[0]",
+			results:  nil,
+		},
+		{
+			name:     "yaml name runs no check",
+			body:     `{"name":"nyc-nas","addr":"10.9.0.9","checks":["tcp:65000"]}`,
+			env:      noDialEnv,
+			want:     http.StatusConflict,
+			wantBody: "config file",
+			results:  nil,
+		},
+		{
+			name:     "slow check is bounded",
+			body:     `{"name":"lab-slow","addr":"10.9.0.3","checks":["tcp:65000"],"interval":"15s","timeout":"200ms"}`,
+			env:      blockDialEnv,
+			want:     http.StatusOK,
+			wantBody: "",
+			results: []wantProbeResult{
+				{check: "tcp:65000", ok: false, err: "timeout: "},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runProbeCase(t, tt)
+		})
+	}
+}
+
+func runProbeCase(t *testing.T, tt probeCase) {
+	t.Helper()
+	e := newAPIEnv(t)
+	var dialed atomic.Bool
+	if tt.env != nil {
+		e.mgr.env = tt.env(&dialed)
+	}
+	status, body := e.do(t, http.MethodPost, "/api/v1/probe", tt.body)
+	if status != tt.want || !strings.Contains(body, tt.wantBody) {
+		t.Fatalf("got %d %s, want %d containing %q", status, body, tt.want, tt.wantBody)
+	}
+	if tt.results == nil {
+		if dialed.Load() {
+			t.Fatal("a check ran")
+		}
+	} else {
+		checkProbeResults(t, body, tt.results)
+	}
+	if got := e.list(t); len(got) != 2 {
+		t.Fatalf("probe changed the list: %v", got)
+	}
+}
+
+func checkProbeResults(t *testing.T, body string, want []wantProbeResult) {
+	t.Helper()
+	var resp probeView
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Results) != len(want) {
+		t.Fatalf("results %+v, want %d", resp.Results, len(want))
+	}
+	for i, w := range want {
+		got := resp.Results[i]
+		if got.Check != w.check || got.OK != w.ok {
+			t.Errorf("results[%d] = %+v, want check %q ok %v", i, got, w.check, w.ok)
+		}
+		if w.err == "" && got.Error != "" {
+			t.Errorf("results[%d] error %q, want none", i, got.Error)
+		}
+		if w.err != "" && !strings.Contains(got.Error, w.err) {
+			t.Errorf("results[%d] error %q, want %q", i, got.Error, w.err)
+		}
+	}
+}
+
+func TestMonitorProbeGuard(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	var dialed atomic.Bool
+	e.mgr.env = noDialEnv(&dialed)
+	body := `{"name":"lab-probe","addr":"10.9.0.4","checks":["tcp:65000"]}`
+	if s, b := e.do(
+		t, http.MethodPost, "/api/v1/probe", body, withHeader("Content-Type", "text/plain"),
+	); s != http.StatusUnsupportedMediaType {
+		t.Errorf("non-JSON content type: %d %s", s, b)
+	}
+	if s, b := e.do(
+		t, http.MethodPost, "/api/v1/probe", body, withHeader("Origin", "https://example.com"),
+	); s != http.StatusForbidden {
+		t.Errorf("foreign origin: %d %s", s, b)
+	}
+	e.mgr.authorize = func(*http.Request) error { return errors.New("read-only viewer") }
+	if s, b := e.do(t, http.MethodPost, "/api/v1/probe", body); s != http.StatusForbidden ||
+		!strings.Contains(b, "read-only viewer") {
+		t.Errorf("denied probe: %d %s", s, b)
+	}
+	if dialed.Load() {
+		t.Error("a refused probe ran a check")
+	}
+	e.mgr.authorize = func(*http.Request) error { return nil }
+	if s, b := e.do(t, http.MethodPost, "/api/v1/probe", body); s != http.StatusOK {
+		t.Fatalf("probe: %d %s", s, b)
+	}
+	if got := e.list(t); len(got) != 2 {
+		t.Fatalf("probe changed the list: %v", got)
+	}
+	out := e.logs.String()
+	for _, want := range []string{
+		`"op":"probe"`, `"target":"lab-probe"`, `"outcome":"accepted"`, `"outcome":"refused"`, `"remote":"127.0.0.1:`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("audit log missing %s:\n%s", want, out)
+		}
+	}
+}
+
+// TestMonitorProbeDoesNotHoldLock proves the probe runs its checks after the
+// manager's mutex is released: a probe whose check never answers must not
+// stall a concurrent create.
+func TestMonitorProbeDoesNotHoldLock(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	env := new(fakeEnv)
+	env.dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		once.Do(func() { close(started) })
+		select {
+		case <-release:
+			return nil, errors.New("released")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	e.mgr.env = env
+	type answer struct {
+		status int
+		err    error
+	}
+	probeDone := make(chan answer, 1)
+	go func() {
+		s, err := postStatus(t, e.srv.URL+"/api/v1/probe",
+			`{"name":"lab-slow","addr":"10.9.0.3","checks":["tcp:65000"],"interval":"30s","timeout":"25s"}`)
+		probeDone <- answer{status: s, err: err}
+	}()
+	<-started
+	createDone := make(chan answer, 1)
+	go func() {
+		s, err := postStatus(t, e.srv.URL+"/api/v1/targets", labNAS)
+		createDone <- answer{status: s, err: err}
+	}()
+	select {
+	case a := <-createDone:
+		if a.err != nil || a.status != http.StatusCreated {
+			t.Fatalf("create during probe: %d %v", a.status, a.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("create blocked behind a running probe")
+	}
+	close(release)
+	if a := <-probeDone; a.err != nil || a.status != http.StatusOK {
+		t.Fatalf("probe: %d %v", a.status, a.err)
+	}
+}
+
+// postStatus POSTs body as JSON and reports the status. Unlike apiEnv.do it
+// returns errors, so it is safe to call from a helper goroutine.
+func postStatus(t *testing.T, url, body string) (int, error) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", contentTypeJSON)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, nil
+}
+
 type fakePeerSource struct {
 	peers  []peerInfo
 	seeded bool
@@ -662,7 +978,7 @@ func TestMountMonitorUI(t *testing.T) {
 		a.mountMonitorUI(mux)
 		for _, r := range []struct{ method, path string }{
 			{"GET", "/ui/"}, {"GET", "/api/v1/targets"}, {"POST", "/api/v1/targets"},
-			{"GET", "/api/v1/peers"}, {"GET", "/ui/app.js"},
+			{"POST", "/api/v1/probe"}, {"GET", "/api/v1/peers"}, {"GET", "/ui/app.js"},
 		} {
 			if code, _ := get(t, mux, r.method, r.path); code != http.StatusNotFound {
 				t.Errorf("%s %s: %d", r.method, r.path, code)
@@ -760,5 +1076,47 @@ func TestUIServedWithSameOriginPolicy(t *testing.T) {
 func uiApp(e *apiEnv, listen string, log *slog.Logger) *app {
 	a := new(app)
 	a.ui, a.listen, a.cfg, a.registry, a.alerts, a.log = true, listen, e.mgr.cfg, e.reg, e.al, log
+	a.env, a.clock = e.mgr.env, tstime.StdClock{}
 	return a
+}
+
+// A probed tsping check must resolve through the app's shared resolver and
+// report a timeout with the prober's "timeout: " prefix, which only runCheck
+// adds for tsping.
+func TestMonitorProbeTSPingMatchesProber(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	a := uiApp(e, "127.0.0.1:9109", slog.New(slog.DiscardHandler))
+	var fetched atomic.Bool
+	a.resolver = newTSResolver(nil, nil, func(ctx context.Context) (*ipnstate.Status, error) {
+		fetched.Store(true)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	mux := http.NewServeMux()
+	a.mountMonitorUI(mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	body := `{"name":"lab-ts","addr":"lab-ts.invalid","checks":["tsping"],"interval":"15s","timeout":"200ms"}`
+	req, err := http.NewRequestWithContext(
+		t.Context(), http.MethodPost, srv.URL+"/api/v1/probe", strings.NewReader(body),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", contentTypeJSON)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("probe: %d %s", resp.StatusCode, b)
+	}
+	checkProbeResults(t, string(b), []wantProbeResult{{check: "tsping", ok: false, err: "timeout: "}})
+	if !fetched.Load() {
+		t.Error("the probe did not use the app's resolver")
+	}
 }

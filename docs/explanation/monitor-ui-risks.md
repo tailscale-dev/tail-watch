@@ -103,7 +103,10 @@ Two details about the second check are worth knowing. A request with no
 send one. That is intentional, since the guard targets browsers, and it
 means the guard is not access control. The dry-run validation endpoint is
 subject to the same two checks but is not audited or authorized, because it
-changes nothing.
+changes nothing. The probe endpoint behind **Check** and **Save** also changes
+nothing, but it is authorized and audited like a write. It sends traffic on
+demand toward an address the caller names and returns what came back, so
+without the guard it would be a port scanner for anyone who can reach the UI.
 
 The list endpoint that returns the monitors is a read, and it is not guarded by
 either check. The same is true of `GET /api/v1/peers`, which returns the
@@ -146,7 +149,7 @@ YAML file and restarting remains a complete alternative.
 
 ## The audit log
 
-Every create, replace and delete is logged at info level, whether it was
+Every create, replace, delete and probe is logged at info level, whether it was
 accepted or refused. Each entry has the operation, the monitor name, the
 outcome and the caller's remote address. Refused requests are logged too,
 including those rejected for content type or origin, which makes probing

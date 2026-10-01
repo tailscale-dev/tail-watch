@@ -150,6 +150,8 @@ func TestUIBrowserReopenedFormForgetsPickedName(t *testing.T) {
 func TestUIBrowserEditKeepsName(t *testing.T) {
 	t.Parallel()
 	page := uiPage(t, uiPeers())
+	probe := probeOK
+	stubProbe(t, page, &probe)
 	openAddForm(t, page)
 	fill(t, page, "#f-addr", "lab-nas")
 	addCheck(t, page, "icmp")
@@ -191,6 +193,8 @@ func TestUIBrowserSuggestionLabelsAndRouteHint(t *testing.T) {
 func TestUIBrowserUnseededStillSubmits(t *testing.T) {
 	t.Parallel()
 	page := uiPage(t, &fakePeerSource{peers: peerListFixture(), seeded: false})
+	probe := probeOK
+	stubProbe(t, page, &probe)
 	if err := page.Locator("#add").Click(); err != nil {
 		t.Fatal(err)
 	}
@@ -214,6 +218,8 @@ func TestUIBrowserUnseededStillSubmits(t *testing.T) {
 func TestUIBrowserFailedFetchStillSubmits(t *testing.T) {
 	t.Parallel()
 	page := uiPage(t, uiPeers())
+	probe := probeOK
+	stubProbe(t, page, &probe)
 	if err := page.Route("**/api/v1/peers", func(r playwright.Route) { _ = r.Abort() }); err != nil {
 		t.Fatal(err)
 	}

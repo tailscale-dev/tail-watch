@@ -38,25 +38,15 @@ func setAuditName(w http.ResponseWriter, name string) {
 	}
 }
 
-func operationOf(method string) string {
-	switch method {
-	case http.MethodPost:
-		return "create"
-	case http.MethodPut:
-		return "replace"
-	case http.MethodDelete:
-		return "delete"
-	default:
-		return strings.ToLower(method)
-	}
-}
-
 // guard wraps a handler that changes a monitor. The order is: audit the
 // outcome, require JSON (415), reject a foreign Origin (403), then ask
-// authorize (403). Nothing changes unless all of them pass. The dry-run
-// validation call passes write=false: it changes nothing, so it is neither
-// audited nor authorized.
-func (m *monitorManager) guard(next http.HandlerFunc, write bool) http.HandlerFunc {
+// authorize (403). Nothing changes unless all of them pass. op is the audit
+// operation. The dry-run validation call passes an empty op: it changes
+// nothing, so it is neither audited nor authorized. The probe passes "probe"
+// even though it persists nothing: it emits network traffic toward an address
+// the caller names, so it is authorized and audited like a write.
+func (m *monitorManager) guard(next http.HandlerFunc, op string) http.HandlerFunc {
+	write := op != ""
 	return func(rw http.ResponseWriter, r *http.Request) {
 		w := &auditWriter{ResponseWriter: rw, status: 0, name: r.PathValue("name")}
 		defer func() {
@@ -64,7 +54,7 @@ func (m *monitorManager) guard(next http.HandlerFunc, write bool) http.HandlerFu
 				return
 			}
 			m.log.LogAttrs(r.Context(), slog.LevelInfo, "monitor write",
-				slog.String("op", operationOf(r.Method)),
+				slog.String("op", op),
 				slog.String("target", w.name),
 				slog.Int("status", w.status),
 				slog.String("outcome", outcomeOf(w.status)),
@@ -119,10 +109,11 @@ func sameOrigin(r *http.Request) bool {
 func (m *monitorManager) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/targets", m.handleList)
 	mux.HandleFunc("GET /api/v1/peers", m.handlePeers)
-	mux.HandleFunc("POST /api/v1/targets", m.guard(m.handleCreate, true))
-	mux.HandleFunc("PUT /api/v1/targets/{name}", m.guard(m.handleReplace, true))
-	mux.HandleFunc("DELETE /api/v1/targets/{name}", m.guard(m.handleDelete, true))
-	mux.HandleFunc("POST /api/v1/validate", m.guard(m.handleValidate, false))
+	mux.HandleFunc("POST /api/v1/targets", m.guard(m.handleCreate, "create"))
+	mux.HandleFunc("PUT /api/v1/targets/{name}", m.guard(m.handleReplace, "replace"))
+	mux.HandleFunc("DELETE /api/v1/targets/{name}", m.guard(m.handleDelete, "delete"))
+	mux.HandleFunc("POST /api/v1/validate", m.guard(m.handleValidate, ""))
+	mux.HandleFunc("POST /api/v1/probe", m.guard(m.handleProbe, "probe"))
 	mux.HandleFunc("/api/v1/", notFoundJSON)
 }
 

@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/mxschmitt/playwright-go"
 )
@@ -67,6 +70,27 @@ func save(t *testing.T, page playwright.Page) {
 		t.Fatal(err)
 	}
 }
+
+// stubProbe answers POST /api/v1/probe with body as the results list, so a
+// save is gated on a scripted probe instead of real network checks. body is
+// a pointer so a test can change the answer between saves.
+func stubProbe(t *testing.T, page playwright.Page, body *string) {
+	t.Helper()
+	if err := page.Route("**/api/v1/probe", func(r playwright.Route) {
+		_ = r.Fulfill(playwright.RouteFulfillOptions{
+			Status:      new(200),
+			ContentType: new("application/json"),
+			Body:        `{"results":` + *body + `}`,
+			Headers:     nil,
+			Path:        nil,
+			Response:    nil,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const probeOK = `[{"check":"icmp","ok":true,"latency_ms":1}]`
 
 // savedChecks reads a monitor's stored checks from the API, or nil if absent.
 func savedChecks(t *testing.T, page playwright.Page, name string) []string {
@@ -140,6 +164,8 @@ func TestUIBrowserEmptyChecksFailThenCheckSucceeds(t *testing.T) {
 		t.Fatalf("empty save created a monitor with checks %v", got)
 	}
 
+	probe := probeOK
+	stubProbe(t, page, &probe)
 	i := addCheck(t, page, "tcp")
 	fillRow(t, page, i, "port", "445")
 	save(t, page)
@@ -149,6 +175,8 @@ func TestUIBrowserEmptyChecksFailThenCheckSucceeds(t *testing.T) {
 func TestUIBrowserRemoveCheckRow(t *testing.T) {
 	t.Parallel()
 	page := uiPage(t, uiPeers())
+	probe := probeOK
+	stubProbe(t, page, &probe)
 	startAdd(t, page, "lab-nas", "lab-nas")
 	addCheck(t, page, "icmp")
 	i := addCheck(t, page, "tcp")
@@ -207,6 +235,8 @@ func TestUIBrowserHTTPRowBuildsURLFromAddress(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			page := uiPage(t, uiPeers())
+			probe := probeOK
+			stubProbe(t, page, &probe)
 			startAdd(t, page, "web", tc.addr)
 			i := addCheck(t, page, "http")
 			row := checkRowLoc(page, i)
@@ -223,6 +253,8 @@ func TestUIBrowserHTTPRowBuildsURLFromAddress(t *testing.T) {
 func TestUIBrowserHTTPHostFollowsAddressChange(t *testing.T) {
 	t.Parallel()
 	page := uiPage(t, uiPeers())
+	probe := probeOK
+	stubProbe(t, page, &probe)
 	startAdd(t, page, "web", "nas")
 	addCheck(t, page, "http")
 	fill(t, page, "#f-addr", "nas2")
@@ -233,6 +265,8 @@ func TestUIBrowserHTTPHostFollowsAddressChange(t *testing.T) {
 func TestUIBrowserEditShowsRowsAndKeepsThem(t *testing.T) {
 	t.Parallel()
 	page := uiPage(t, uiPeers())
+	probe := probeOK
+	stubProbe(t, page, &probe)
 	startAdd(t, page, "web", "10.20.0.50")
 	addCheck(t, page, "icmp")
 	i := addCheck(t, page, "tcp")
@@ -342,5 +376,286 @@ func TestUIBrowserDuplicateRowReportedOnSecondRow(t *testing.T) {
 	}
 	if n := countOf(t, page.Locator(".check-row.invalid")); n != 1 {
 		t.Errorf("%d rows marked invalid, want 1", n)
+	}
+}
+
+// probeTCPRefused is a probe answer whose only check was refused.
+const probeTCPRefused = `[{"check":"tcp:443","ok":false,"latency_ms":3,` +
+	`"error":"dial tcp 10.0.0.9:443: connect: connection refused"}]`
+
+// probeDialogWait waits for the probe confirmation dialog to open.
+func probeDialogWait(t *testing.T, page playwright.Page) {
+	t.Helper()
+	if err := page.Locator("#probe-confirm[open]").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUIBrowserProbeGateSavesOnPass(t *testing.T) {
+	t.Parallel()
+	page := uiPage(t, uiPeers())
+	var consoleErrs []string
+	page.OnConsole(func(m playwright.ConsoleMessage) {
+		if m.Type() == "error" {
+			consoleErrs = append(consoleErrs, m.Text())
+		}
+	})
+	if _, err := page.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	probe := probeOK
+	stubProbe(t, page, &probe)
+	startAdd(t, page, "lab-nas", "lab-nas")
+	i := addCheck(t, page, "tcp")
+	fillRow(t, page, i, "port", "445")
+	save(t, page)
+	wantSaved(t, page, "lab-nas", "tcp:445")
+	if n := countOf(t, page.Locator("#probe-confirm[open]")); n != 0 {
+		t.Error("the confirmation opened for a passing probe")
+	}
+	if len(consoleErrs) > 0 {
+		t.Errorf("console errors: %v", consoleErrs)
+	}
+}
+
+func TestUIBrowserProbeGateConfirmSavesAnyway(t *testing.T) {
+	t.Parallel()
+	page := uiPage(t, uiPeers())
+	probe := probeTCPRefused
+	stubProbe(t, page, &probe)
+	startAdd(t, page, "lab-nas", "10.0.0.9")
+	i := addCheck(t, page, "tcp")
+	fillRow(t, page, i, "port", "443")
+	save(t, page)
+
+	probeDialogWait(t, page)
+	listed, listErr := page.Locator("#probe-failures").TextContent()
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if !strings.Contains(listed, "tcp:443") || !strings.Contains(listed, "connection refused") {
+		t.Errorf("failures = %q", listed)
+	}
+	if got := savedChecks(t, page, "lab-nas"); got != nil {
+		t.Fatalf("an unconfirmed save created %v", got)
+	}
+	if err := page.Locator("#probe-confirm-yes").Click(); err != nil {
+		t.Fatal(err)
+	}
+	wantSaved(t, page, "lab-nas", "tcp:443")
+}
+
+func TestUIBrowserProbeGateDeclineKeepsForm(t *testing.T) {
+	t.Parallel()
+	page := uiPage(t, uiPeers())
+	probe := probeTCPRefused
+	stubProbe(t, page, &probe)
+	startAdd(t, page, "lab-nas", "10.0.0.9")
+	i := addCheck(t, page, "tcp")
+	fillRow(t, page, i, "port", "443")
+	save(t, page)
+
+	probeDialogWait(t, page)
+	if err := page.Locator("#probe-confirm-no").Click(); err != nil {
+		t.Fatal(err)
+	}
+	if n := countOf(t, page.Locator("#probe-confirm[open]")); n != 0 {
+		t.Fatal("the confirmation stayed open after declining")
+	}
+	wantField(t, page, "#f-name", "lab-nas")
+	wantField(t, page, "#f-addr", "10.0.0.9")
+	if got, _ := checkRowLoc(page, 0).Locator(".check-port").InputValue(); got != "443" {
+		t.Errorf("TCP port = %q, want 443", got)
+	}
+	if n := countOf(t, page.Locator(".check-row.invalid")); n != 1 {
+		t.Fatalf("%d rows marked invalid, want 1", n)
+	}
+	if msg, _ := checkRowLoc(
+		page,
+		0,
+	).Locator(".check-error").
+		TextContent(); !strings.Contains(
+		msg,
+		"connection refused",
+	) {
+		t.Errorf("row error = %q", msg)
+	}
+	if got := savedChecks(t, page, "lab-nas"); got != nil {
+		t.Fatalf("a declined save created %v", got)
+	}
+}
+
+func TestUIBrowserProbeGateEditIsGated(t *testing.T) {
+	t.Parallel()
+	page := uiPage(t, uiPeers())
+	probe := probeOK
+	stubProbe(t, page, &probe)
+	startAdd(t, page, "lab-nas", "10.0.0.9")
+	i := addCheck(t, page, "tcp")
+	fillRow(t, page, i, "port", "445")
+	save(t, page)
+	wantSaved(t, page, "lab-nas", "tcp:445")
+
+	if err := page.Locator(`button[aria-label="Edit lab-nas"]`).Click(); err != nil {
+		t.Fatal(err)
+	}
+	fillRow(t, page, 0, "port", "443")
+	probe = probeTCPRefused
+	save(t, page)
+
+	probeDialogWait(t, page)
+	if err := page.Locator("#probe-confirm-yes").Click(); err != nil {
+		t.Fatal(err)
+	}
+	wantSaved(t, page, "lab-nas", "tcp:443")
+}
+
+func TestUIBrowserCheckShowsProbeResults(t *testing.T) {
+	t.Parallel()
+	page := uiPage(t, uiPeers())
+	probe := `[{"check":"icmp","ok":true,"latency_ms":12},` +
+		`{"check":"tcp:443","ok":false,"latency_ms":3,"error":"connection refused"}]`
+	stubProbe(t, page, &probe)
+	startAdd(t, page, "lab-nas", "10.0.0.9")
+	addCheck(t, page, "icmp")
+	i := addCheck(t, page, "tcp")
+	fillRow(t, page, i, "port", "443")
+
+	if err := page.Locator("#check").Click(); err != nil {
+		t.Fatal(err)
+	}
+	result := page.Locator("#check-result")
+	if err := result.WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	text, err := result.TextContent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "icmp: ok (12 ms)") {
+		t.Errorf("passing check missing its latency: %q", text)
+	}
+	if !strings.Contains(text, "tcp:443: failed (connection refused)") {
+		t.Errorf("failing check missing its error: %q", text)
+	}
+	for line, want := range map[string]string{"icmp: ok": "ok", "tcp:443: failed": "failed"} {
+		loc := result.Locator("span", playwright.LocatorLocatorOptions{
+			Has: nil, HasNot: nil, HasNotText: nil, HasText: line,
+		})
+		if cls, _ := loc.GetAttribute("class"); cls != want {
+			t.Errorf("%q line class = %q, want %q", line, cls, want)
+		}
+	}
+	if got := savedChecks(t, page, "lab-nas"); got != nil {
+		t.Fatalf("the check control saved %v", got)
+	}
+}
+
+// recordTargetWrites counts the create and replace requests the page sends.
+func recordTargetWrites(page playwright.Page) *atomic.Int32 {
+	var n atomic.Int32
+	page.OnRequest(func(r playwright.Request) {
+		if strings.Contains(r.URL(), "/api/v1/targets") && r.Method() != http.MethodGet {
+			n.Add(1)
+		}
+	})
+	return &n
+}
+
+func TestUIBrowserProbeUnreachableSavesNothing(t *testing.T) {
+	t.Parallel()
+	page := uiPage(t, uiPeers())
+	if err := page.Route("**/api/v1/probe", func(r playwright.Route) { _ = r.Abort() }); err != nil {
+		t.Fatal(err)
+	}
+	writes := recordTargetWrites(page)
+	startAdd(t, page, "lab-nas", "10.0.0.9")
+	i := addCheck(t, page, "tcp")
+	fillRow(t, page, i, "port", "443")
+	save(t, page)
+
+	formError := page.Locator("#form-error")
+	if err := formError.WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	if msg, _ := formError.TextContent(); !strings.Contains(msg, "Could not reach the collector") {
+		t.Errorf("form error = %q", msg)
+	}
+	if n := countOf(t, page.Locator("#probe-confirm[open]")); n != 0 {
+		t.Error("the confirmation opened for a failed probe request")
+	}
+	if n := writes.Load(); n != 0 {
+		t.Errorf("%d target writes after a failed probe request, want 0", n)
+	}
+}
+
+// The probe is not stubbed: the real handler answers 422 before any check runs.
+func TestUIBrowserProbeInvalidShowsRowError(t *testing.T) {
+	t.Parallel()
+	page := uiPage(t, uiPeers())
+	writes := recordTargetWrites(page)
+	probed := make(chan int, 1)
+	page.OnResponse(func(r playwright.Response) {
+		if strings.HasSuffix(r.URL(), "/api/v1/probe") {
+			select {
+			case probed <- r.Status():
+			default:
+			}
+		}
+	})
+	startAdd(t, page, "lab-nas", "10.0.0.9")
+	i := addCheck(t, page, "tcp")
+	fillRow(t, page, i, "port", "70000")
+	save(t, page)
+
+	select {
+	case status := <-probed:
+		if status != http.StatusUnprocessableEntity {
+			t.Fatalf("probe status = %d, want 422", status)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no probe response")
+	}
+	row := checkRowLoc(page, i)
+	if err := row.Locator(".check-error").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	if msg, _ := row.Locator(".check-error").TextContent(); !strings.Contains(msg, "invalid TCP port") {
+		t.Errorf("row error = %q", msg)
+	}
+	if n := countOf(t, page.Locator("#probe-confirm[open]")); n != 0 {
+		t.Error("the confirmation opened for an invalid definition")
+	}
+	if n := writes.Load(); n != 0 {
+		t.Errorf("%d target writes after a 422 probe, want 0", n)
+	}
+}
+
+func TestUIBrowserProbeEscapeDeclines(t *testing.T) {
+	t.Parallel()
+	page := uiPage(t, uiPeers())
+	probe := probeTCPRefused
+	stubProbe(t, page, &probe)
+	startAdd(t, page, "lab-nas", "10.0.0.9")
+	i := addCheck(t, page, "tcp")
+	fillRow(t, page, i, "port", "443")
+	save(t, page)
+
+	probeDialogWait(t, page)
+	if err := page.Keyboard().Press("Escape"); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Locator(".check-row.invalid").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	if n := countOf(t, page.Locator("#probe-confirm[open]")); n != 0 {
+		t.Fatal("the confirmation stayed open after Escape")
+	}
+	msg, _ := checkRowLoc(page, i).Locator(".check-error").TextContent()
+	if !strings.Contains(msg, "connection refused") {
+		t.Errorf("row error = %q", msg)
+	}
+	if got := savedChecks(t, page, "lab-nas"); got != nil {
+		t.Fatalf("an escaped confirmation created %v", got)
 	}
 }

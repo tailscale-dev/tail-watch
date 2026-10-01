@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tstime"
 )
 
 // Result is one finished check. Generation is the runtime release
@@ -119,8 +120,15 @@ func (c *collectConsumer) snapshot() []Result {
 }
 
 func (a *app) runCheck(ctx context.Context, t *Target, chk check) Result {
-	start := a.clock.Now()
-	res, err := chk.Run(ctx, a.env, t)
+	return runCheckWith(ctx, a.env, a.clock, t, chk)
+}
+
+// runCheckWith runs chk once and normalizes the result the way the prober
+// reports it: the returned error folded into Err and a timeout prefixed. The
+// monitor API's probe calls it directly so its answers match runtime ones.
+func runCheckWith(ctx context.Context, env netEnv, clock tstime.Clock, t *Target, chk check) Result {
+	start := clock.Now()
+	res, err := chk.Run(ctx, env, t)
 	res.Target = t
 	res.Check = chk.String()
 	res.Kind = chk.Kind()

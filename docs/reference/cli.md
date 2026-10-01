@@ -147,7 +147,15 @@ Served on the listen address by the collector, not under `--once`.
 | `/api/v1/targets` | Monitor API: `GET` list, `POST` create. `404` unless the UI is on. |
 | `/api/v1/targets/{name}` | Monitor API: `PUT` replace, `DELETE` remove. |
 | `/api/v1/validate` | Monitor API: `POST` validate a monitor without saving it. |
+| `/api/v1/probe` | Monitor API: `POST` validate a monitor, then run each of its checks once without saving it. Authorized and audited like a write. |
 | `/api/v1/peers` | Monitor API: `GET` the tailnet peers the collector can currently see, for the address picker. `404` unless the UI is on. |
+
+`POST /api/v1/probe` takes the same body as `POST /api/v1/targets`. An invalid
+definition gets `422` with an `errors` list and runs no check. A valid one gets
+`200` with `{"results": [...]}`, one entry per check in definition order, each
+carrying `check`, `ok`, `latency_ms` and, for a failed check, `error`. A failing
+check is data, not an error of the call. Each check is bounded by the
+definition's `timeout`, and the whole call by 15 seconds.
 
 `GET /api/v1/peers` answers `{"seeded": bool, "peers": [...]}`. Each peer
 carries `name` (MagicDNS short name, else host name), `dns_name`,

@@ -28,6 +28,11 @@
   the classifier owns, so never call `UpdateParents` from elsewhere. `runtimeRegistry`
   calls it for dynamic targets. Re-adding an edited monitor overwrites the removed
   snapshot, so the manager closes the incident directly with `closeRemoved`.
+- `POST /api/v1/probe` holds the manager mutex only for validation, then runs each check
+  through `runCheckWith` (the prober's error normalization) after `bindChecks` gives
+  `tsping` the shared resolver. A failing probe never refuses a save server-side; the UI
+  gates Save on it with a confirm dialog. `guard` takes the audit `op` at registration;
+  an empty op means unaudited and unauthorized (validate only).
 - `presence.go` is the IPN bus view. `tsping` name resolution uses it and
   falls back to the 30s `Status()` cache only while that view is unseeded.
 - `alert.go` is one mutex-guarded state machine. Grace and flap timers hand work

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -8,6 +9,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
+
+	"tailscale.com/tstime"
 )
 
 const (
@@ -35,14 +39,19 @@ type peerSource interface {
 // their live registration. One mutex serializes every change, so a change is
 // persisted and then applied before the next one starts.
 type monitorManager struct {
-	cfg       *Config
-	dir       string
-	reg       targetRegistry
-	alerts    snapshotSource
-	peers     peerSource
-	log       *slog.Logger
-	authorize func(*http.Request) error
-	save      func(dir string, targets []dynamicTarget) error
+	cfg   *Config
+	dir   string
+	reg   targetRegistry
+	env   netEnv
+	clock tstime.Clock
+	// bindChecks gives a probed target's checks the app's shared resolver,
+	// as the prober's targets have.
+	bindChecks func(*Target)
+	alerts     snapshotSource
+	peers      peerSource
+	log        *slog.Logger
+	authorize  func(*http.Request) error
+	save       func(dir string, targets []dynamicTarget) error
 	// closeIncident closes name's open incident with reason removed. Re-adding
 	// an edited monitor overwrites the removed snapshot the notifier would
 	// otherwise close it from, so the manager closes it directly.
@@ -61,14 +70,18 @@ func newMonitorManager(cfg *Config, entries []dynamicTarget, reg targetRegistry,
 	log *slog.Logger,
 ) *monitorManager {
 	m := &monitorManager{
-		cfg:       cfg,
-		dir:       cfg.Collector.StateDir,
-		reg:       reg,
-		alerts:    alerts,
-		peers:     nil,
-		log:       log,
-		authorize: func(*http.Request) error { return nil },
-		save:      saveDynamic,
+		cfg:   cfg,
+		dir:   cfg.Collector.StateDir,
+		reg:   reg,
+		env:   nil,
+		clock: tstime.StdClock{},
+
+		bindChecks: func(*Target) {},
+		alerts:     alerts,
+		peers:      nil,
+		log:        log,
+		authorize:  func(*http.Request) error { return nil },
+		save:       saveDynamic,
 
 		closeIncident: func(string) {},
 		mu:            sync.Mutex{},
@@ -358,6 +371,66 @@ func (m *monitorManager) check(def dynamicTarget) (monitorView, *apiError) {
 	return viewOf(t), nil
 }
 
+// probeCallCap bounds the whole probe call, so one slow check cannot hold the
+// response even when the definition's timeout is longer.
+const probeCallCap = 15 * time.Second
+
+// probeResult is what one run of a check reported, exactly as the prober
+// would see it.
+type probeResult struct {
+	Check     string `json:"check"`
+	OK        bool   `json:"ok"`
+	LatencyMS int64  `json:"latency_ms"`
+	Error     string `json:"error,omitempty"`
+}
+
+// probeView is the body of POST /api/v1/probe.
+type probeView struct {
+	Results []probeResult `json:"results"`
+}
+
+// probe validates a definition like check does, then runs each of its checks
+// once against the app's netEnv, concurrently, and reports one result per
+// check in definition order. It persists and registers nothing. The mutex is
+// held only for validation; the checks run after it is released, so a slow
+// probe cannot stall a create or replace. A client disconnect cancels the
+// runs through ctx.
+func (m *monitorManager) probe(ctx context.Context, def dynamicTarget) ([]probeResult, *apiError) {
+	m.mu.Lock()
+	if m.isYAML(def.Name) {
+		m.mu.Unlock()
+		return nil, fail(http.StatusConflict, fmt.Sprintf("%q comes from the config file", def.Name))
+	}
+	t, aerr := m.validate(def, def.Name)
+	m.mu.Unlock()
+	if aerr != nil {
+		return nil, aerr
+	}
+	m.bindChecks(&t)
+	ctx, cancel := context.WithTimeout(ctx, probeCallCap)
+	defer cancel()
+	results := make([]probeResult, len(t.Checks))
+	var wg sync.WaitGroup
+	for i, c := range t.Checks {
+		wg.Go(func() {
+			runCtx, stop := context.WithTimeout(ctx, t.Timeout)
+			defer stop()
+			res := runCheckWith(runCtx, m.env, m.clock, &t, c)
+			latency := res.Latency
+			if latency <= 0 {
+				latency = m.clock.Since(res.Start)
+			}
+			r := probeResult{Check: res.Check, OK: res.Err == nil, LatencyMS: latency.Milliseconds(), Error: ""}
+			if res.Err != nil {
+				r.Error = res.Err.Error()
+			}
+			results[i] = r
+		})
+	}
+	wg.Wait()
+	return results, nil
+}
+
 func decodeMonitor(w http.ResponseWriter, r *http.Request) (dynamicTarget, *apiError) {
 	var def dynamicTarget
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMonitorBody))
@@ -440,6 +513,21 @@ func (m *monitorManager) handleValidate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+func (m *monitorManager) handleProbe(w http.ResponseWriter, r *http.Request) {
+	def, aerr := decodeMonitor(w, r)
+	if aerr != nil {
+		writeAPIError(w, aerr)
+		return
+	}
+	setAuditName(w, def.Name)
+	results, aerr := m.probe(r.Context(), def)
+	if aerr != nil {
+		writeAPIError(w, aerr)
+		return
+	}
+	writeJSON(w, http.StatusOK, probeView{Results: results})
 }
 
 type peerView struct {

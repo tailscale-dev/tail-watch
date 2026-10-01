@@ -95,13 +95,25 @@ Steps:
    you never type that syntax. A check in a stored monitor that no row can
    express, for example a hand-edited `targets.json` entry, appears as a
    **Custom** row holding the raw string, and is saved unchanged.
-3. Click **Check** to validate without saving, then **Save**. Errors appear
-   next to the field they belong to, and a rejected check is marked on its own
-   row. Saving with no checks is refused with a message under the list.
-   Nothing is created until the errors are fixed. They come from the same rules
-   the YAML loader uses.
+3. Click **Check** to run each check once without saving. The result lists
+   every check as `ok` with its latency or `failed` with its error.
+
+   ![The add monitor form after Check: icmp is ok with its latency, and tcp:445 failed with connection refused.](../images/monitor-ui-check-result.png)
+
+   Then click **Save**. Errors appear next to the field they belong to, and a
+   rejected check is marked on its own row. Saving with no checks is refused
+   with a message under the list. Nothing is created until the errors are
+   fixed. They come from the same rules the YAML loader uses.
 
    ![The add monitor form with an invalid TCP port reported on its check row.](../images/monitor-ui-form-error.png)
+
+   **Save** runs the checks once first. If they all pass, the monitor is saved.
+   If any fails, a **Some checks failed** dialog lists each failing check and
+   its error. **Save anyway** saves the monitor; a target that is down right
+   now is still worth monitoring. **No, let me edit** (or Escape) returns to the
+   form with every value kept and the failing rows marked.
+
+   ![The Some checks failed dialog listing tcp:445 with connection refused, with No, let me edit and Save anyway.](../images/monitor-ui-probe-confirm.png)
 
 4. The list shows every monitor. YAML monitors are read-only; only monitors
    created in the UI have **Edit** and **Delete**. Monitors behind a down
@@ -158,5 +170,6 @@ Behavior to expect when editing or deleting:
   the count.
 
 Every write is logged with the caller's address as a `monitor write` line
-with `op`, `target`, `status`, `outcome` and `remote`. To find writes, filter
+with `op`, `target`, `status`, `outcome` and `remote`. A probe from **Check**
+or **Save** is logged the same way with `op` set to `probe`. To find writes, filter
 the JSON log on that message.

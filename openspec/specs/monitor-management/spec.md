@@ -54,7 +54,9 @@ and SHALL remain in the file untouched.
 When the UI is on, the collector SHALL serve under `/api/v1/`:
 `GET /targets` returning every monitor, YAML and dynamic; `POST /targets` creating a
 dynamic monitor; `PUT /targets/{name}` replacing one; `DELETE /targets/{name}` removing
-one; and `POST /validate` checking a monitor definition without applying it. Each entry
+one; `POST /validate` checking a monitor definition without applying it; and
+`POST /probe` running a definition's checks once against the address without applying
+it. Each entry
 in the list SHALL carry `source` (`config` or `ui`), `readonly` (true for `config`), the
 resolved settings, and the current alert `state`. Request and response bodies SHALL be
 JSON. Successful creation SHALL return 201, replace 200, delete 204. A validation
@@ -104,6 +106,11 @@ from the path name on replace SHALL return 422.
 
 - **WHEN** `POST /api/v1/validate` sends a valid definition
 - **THEN** the response is 200 with the resolved settings and no monitor is created
+
+#### Scenario: Probe without applying
+
+- **WHEN** `POST /api/v1/probe` sends a valid definition
+- **THEN** the response is 200 with one result per check and no monitor is created
 
 ### Requirement: Validation parity with the config file
 
@@ -286,3 +293,69 @@ off, `/api/v1/peers` SHALL return 404 like the rest of `/api/v1/`.
 
 - **WHEN** the collector runs without the UI
 - **THEN** `GET /api/v1/peers` returns 404
+
+### Requirement: Live probe
+
+When the UI is on, the collector SHALL serve `POST /api/v1/probe`, accepting the same
+JSON body as `POST /api/v1/targets`. The collector SHALL first validate the definition
+exactly as `POST /api/v1/validate` does; a validation failure SHALL return 422 with the
+same `errors` shape and SHALL run no check. For a valid definition the collector SHALL
+run each of its checks once against the address and SHALL answer 200 with a `results`
+list holding one entry per check, in definition order, each carrying `check` (the check
+string), `ok`, `latency_ms`, and, when the check failed, `error` with the failure's
+text. A failing check SHALL NOT fail the response: the endpoint reports what the prober
+would report, so a non-200 HTTP status or a refused connection is data, not an error of
+the endpoint. Checks SHALL run concurrently, each bounded by the definition's `timeout`,
+with the whole call bounded so one slow check cannot hold the response; a client
+disconnect SHALL cancel the runs. The probe SHALL persist nothing, register no monitor,
+and SHALL NOT change alert state. Because it emits network traffic on demand toward the
+address the caller names, the probe SHALL be authorized by the same decision as a
+write, SHALL be audited like one, and SHALL apply the same `Content-Type` and `Origin`
+checks as a write.
+
+#### Scenario: All checks pass
+
+- **WHEN** `POST /api/v1/probe` sends a valid definition with checks `icmp` and
+  `tcp:443` and both succeed
+- **THEN** the response is 200 with two `results` entries, each `ok: true` with a
+  `latency_ms`, in definition order
+
+#### Scenario: Failing check is reported, not refused
+
+- **WHEN** a valid definition's `tcp:443` check gets a connection refused
+- **THEN** the response is 200, that entry has `ok: false` and an `error` naming the
+  refusal, and no monitor is created
+
+#### Scenario: Non-200 HTTP status fails the check
+
+- **WHEN** a definition's HTTP check is answered with a 404
+- **THEN** its entry has `ok: false` and an `error` naming the status, exactly as the
+  prober would report it
+
+#### Scenario: Invalid definition runs no check
+
+- **WHEN** `POST /api/v1/probe` sends `tcp:70000` as a check
+- **THEN** the response is 422, `errors` names the check problem, and no check runs
+
+#### Scenario: Slow check is bounded
+
+- **WHEN** one check of a valid definition does not answer within the definition's
+  `timeout`
+- **THEN** its entry has `ok: false` with a timeout error and the response still
+  returns
+
+#### Scenario: Denied probe runs nothing
+
+- **WHEN** the authorization decision denies a probe request
+- **THEN** the response is 403 and no check runs
+
+#### Scenario: Probe leaves no trace
+
+- **WHEN** a probe runs for a definition whose name is unused
+- **THEN** `GET /api/v1/targets` is unchanged, no incident or alert state appears, and
+  the audit log records the probe
+
+#### Scenario: Probe with the UI off
+
+- **WHEN** the collector runs without the UI
+- **THEN** `POST /api/v1/probe` returns 404 like the rest of `/api/v1/`
