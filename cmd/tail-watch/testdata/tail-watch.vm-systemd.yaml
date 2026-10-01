@@ -1,0 +1,42 @@
+# Config template for TestVMSystemd (vm_systemd_test.go). The test replaces
+# FIXTURE_ADDR with the fixture node's tailnet IP, renders the webhook sink's
+# URL and signing secret into the unit's EnvironmentFile on the guest, checks
+# the rendered config with `tail-watch check-config`, and installs it as
+# /etc/tail-watch/tail-watch.yaml. It is not a working config as-is.
+#
+# Every probe stays inside the grants in testdata/snippet.hujson: icmp and
+# tcp:22/8080/9000 to autogroup:member. The fixture is an untagged member node.
+collector:
+  listen: 127.0.0.1:9109
+  state_dir: /var/lib/tail-watch
+
+defaults:
+  interval: 3s
+  timeout: 2s
+  fail_threshold: 2
+  recover_threshold: 2
+
+targets:
+  - name: fx-icmp
+    addr: FIXTURE_ADDR
+    network: tailnet
+    checks: [icmp]
+
+  - name: fx-tsping
+    addr: FIXTURE_ADDR
+    network: tailnet
+    checks: [tsping]
+
+  - name: fx-tcp
+    addr: FIXTURE_ADDR
+    network: tailnet
+    checks: ["tcp:9000"]
+
+sinks:
+  - name: vm-webhook
+    type: webhook
+    url_env: OPS_WEBHOOK_URL
+    secret_env: OPS_WEBHOOK_SECRET
+    events: [target.down, target.recovered]
+    queue: disk
+    group_wait: 1s

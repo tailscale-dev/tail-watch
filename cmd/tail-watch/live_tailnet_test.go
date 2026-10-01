@@ -444,7 +444,7 @@ type liveStack struct {
 
 func newLiveStack(t *testing.T, runID, authKey string) *liveStack {
 	t.Helper()
-	root := filepath.Dir(filepath.Dir(packageDir(t)))
+	root := repoRoot(t)
 	s := &liveStack{
 		project:  runID,
 		files:    []string{filepath.Join(root, "examples", "compose.yaml")},

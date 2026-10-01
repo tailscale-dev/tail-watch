@@ -30,6 +30,7 @@ archives:
       - README.md
       - docs/**/*
       - examples/tail-watch.yaml
+      - examples/tail-watch.service
 
 checksum:
   name_template: checksums.txt

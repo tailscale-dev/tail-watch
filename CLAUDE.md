@@ -135,3 +135,14 @@
 - The Slack webhook is read from `SLACK_WEBHOOK_URL` or from the pulumi env named by
   `TAIL_WATCH_SLACK_PULUMI_ENV`; never write it to a file or log it (`redactSecrets`
   strips `hooks.slack.com` URLs).
+
+## VM systemd test
+
+- `TestVMSystemd` (`vm_systemd_test.go`, helpers in `vm_helpers_test.go`) is gated on
+  `TAIL_WATCH_VM_SYSTEMD=1`, boots an Ubuntu cloud image under QEMU/KVM, and runs the
+  fenced bash blocks under "Run under systemd" in `docs/how-to/deploy.md`, with
+  `sudoedit` swapped for an `install` of the rendered env file. Editing those blocks
+  changes the test (`docs/contributing/vm-systemd-test.md`).
+- `stageRelease` lays files out like an unpacked GoReleaser archive, which keeps the
+  `examples/` prefix; keep the staging, the docs and `.goreleaser.yaml` in step.
+- `github.com/pkg/sftp` and `golang.org/x/crypto/ssh` are direct deps only for this test.

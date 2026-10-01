@@ -35,7 +35,10 @@ without a dedicated host, or to receive your first alert, follow the
 The [documentation index](docs/README.md) lists every page. The main ones:
 
 - Learn: [Set up your first monitor](docs/tutorial/first-monitor.md)
-- Do: [Deploy](docs/how-to/deploy.md), [write the ACLs](docs/how-to/acls.md),
+- Do: [Deploy](docs/how-to/deploy.md) ([download a
+  release](docs/how-to/deploy.md#download-a-release), [run under
+  systemd](docs/how-to/deploy.md#run-under-systemd)), [write the
+  ACLs](docs/how-to/acls.md),
   [send alerts to Slack](docs/how-to/slack-sink.md),
   [manage monitors in the UI](docs/how-to/monitor-ui.md), and
   [troubleshoot](docs/how-to/troubleshoot.md)

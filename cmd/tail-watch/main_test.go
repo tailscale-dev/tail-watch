@@ -680,6 +680,11 @@ func packageDir(t *testing.T) string {
 	return filepath.Dir(file)
 }
 
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	return filepath.Dir(filepath.Dir(packageDir(t)))
+}
+
 func runBin(t *testing.T, bin string, extraEnv []string, args ...string) (string, string, int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

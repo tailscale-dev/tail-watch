@@ -1,0 +1,24 @@
+# systemd unit for tail-watch. See docs/how-to/deploy.md ("Run under
+# systemd") for installation and hardening notes.
+[Unit]
+Description=tail-watch tailnet reachability monitor
+After=tailscaled.service network-online.target
+Wants=tailscaled.service network-online.target
+
+[Service]
+User=tail-watch
+Group=tail-watch
+ExecStart=/usr/local/bin/tail-watch --config /etc/tail-watch/tail-watch.yaml
+EnvironmentFile=-/etc/tail-watch/tail-watch.env
+StateDirectory=tail-watch
+Restart=on-failure
+RestartSec=5
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

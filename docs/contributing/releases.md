@@ -15,8 +15,8 @@ or `feat!: ...` for breaking changes). After checks pass on `main`,
 release-please opens or updates a release PR containing the version and
 changelog. Merge that PR to create a GitHub release; GoReleaser then attaches
 the archives and `checksums.txt`. Each archive includes `tail-watch`, the license,
-the README, the `docs/` tree, and `examples/tail-watch.yaml`. The binary's
-`--version` reports the release version.
+the README, the `docs/` tree, `examples/tail-watch.yaml`, and
+`examples/tail-watch.service`. The binary's `--version` reports the release version.
 
 release-please owns `CHANGELOG.md`; do not edit it by hand. It lists `feat`, `fix`,
 `perf`, `revert` and `docs` commits, so a documentation change appears under

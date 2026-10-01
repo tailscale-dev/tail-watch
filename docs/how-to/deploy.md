@@ -1,10 +1,41 @@
 # Deploy tail-watch
 
-Run the collector as a binary, as a Docker container next to the host's
-`tailscaled`, or with Docker Compose when you have no dedicated host.
+Run the collector as a binary (download a release or build from source),
+under systemd, as a Docker container next to the host's `tailscaled`, or
+with Docker Compose when you have no dedicated host.
 
 tail-watch needs a kernel-mode `tailscaled`. It refuses to start against
 userspace networking. See [Troubleshoot](troubleshoot.md) if startup fails.
+
+## Download a release
+
+Releases ship static binaries (`CGO_ENABLED=0`) for Linux, macOS and Windows
+on amd64 and arm64, so no Go toolchain is needed. Archives are named
+`tail-watch_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows). The download
+URL uses the tag, which has a leading `v`; the archive name does not.
+
+```bash
+VERSION=0.1.0   # release version, without the leading v
+OS=linux        # linux, darwin or windows
+ARCH=amd64      # amd64 or arm64
+
+curl -fLO "https://github.com/tailscale-dev/tail-watch/releases/download/v${VERSION}/tail-watch_${VERSION}_${OS}_${ARCH}.tar.gz"
+curl -fLO "https://github.com/tailscale-dev/tail-watch/releases/download/v${VERSION}/checksums.txt"
+sha256sum -c --ignore-missing checksums.txt
+```
+
+`--ignore-missing` skips the checksum lines for the platforms you did not
+download. Then extract and install:
+
+```bash
+tar -xzf "tail-watch_${VERSION}_${OS}_${ARCH}.tar.gz"
+sudo install -m 0755 tail-watch /usr/local/bin/tail-watch
+tail-watch --version
+```
+
+The archive also carries `examples/tail-watch.yaml` and
+`examples/tail-watch.service`; the [systemd section](#run-under-systemd)
+uses both.
 
 ## Run the binary
 
@@ -50,6 +81,100 @@ To run every check once and exit non-zero on failure, use
 
 Flags, environment variables and defaults are in the
 [command-line reference](../reference/cli.md).
+
+## Run under systemd
+
+[`examples/tail-watch.service`](../../examples/tail-watch.service) runs the
+collector as a dedicated `tail-watch` user after `tailscaled.service`,
+restarts it on failure, and confines it to its state directory. The unit
+ships in the release archive, so the download above already has it.
+
+Prerequisites: the same host as above, with systemd.
+
+Steps:
+
+1. Create the service user:
+
+   ```bash
+   sudo useradd --system --shell /usr/sbin/nologin tail-watch
+   ```
+
+2. Install the binary, the config and the unit:
+
+   ```bash
+   sudo install -m 0755 tail-watch /usr/local/bin/tail-watch
+   sudo install -d -m 0755 /etc/tail-watch
+   sudo install -m 0644 examples/tail-watch.yaml /etc/tail-watch/tail-watch.yaml
+   sudo install -m 0644 examples/tail-watch.service /etc/systemd/system/tail-watch.service
+   sudo systemctl daemon-reload
+   ```
+
+   Run this from the unpacked release archive. From a checkout, the same
+   `examples/` paths apply; install `bin/tail-watch` from `mise run build`
+   as the binary.
+
+3. Put sink secrets in `/etc/tail-watch/tail-watch.env`, one `NAME=value`
+   per line:
+
+   ```bash
+   sudo install -m 0600 /dev/null /etc/tail-watch/tail-watch.env
+   sudoedit /etc/tail-watch/tail-watch.env
+   ```
+
+   The unit loads it with `EnvironmentFile=-`; the leading dash keeps it
+   optional, so hosts with no sinks can skip this step. Sinks read secrets
+   only from `*_env` or `*_file` keys, never from the config file.
+
+4. Enable and start:
+
+   ```bash
+   sudo systemctl enable --now tail-watch
+   ```
+
+Verify:
+
+```bash
+systemctl status tail-watch
+curl -s http://127.0.0.1:9109/healthz
+```
+
+`status` shows `active (running)` and `/healthz` answers `ok`. Stopping is a
+plain `sudo systemctl stop tail-watch`: the collector exits cleanly on
+`SIGTERM`.
+
+How the unit fits the collector:
+
+- `Wants=tailscaled.service` rather than `Requires=`: a `tailscaled` restart
+  does not stop the collector. If `tailscaled` is not reachable when the
+  collector starts, it logs `tailscaled is not reachable` and exits, and
+  `Restart=on-failure` starts it again.
+- `StateDirectory=tail-watch` creates `/var/lib/tail-watch` owned by the
+  service user, and `ProtectSystem=strict` keeps it writable while the rest
+  of the filesystem is read-only. This matches `collector.state_dir` in
+  `examples/tail-watch.yaml`.
+- `AmbientCapabilities=CAP_NET_RAW` lets the non-root user send ICMP checks.
+- `Restart=on-failure` with `RestartSec=5`: a corrupt notification state or
+  an unset secret stops startup on purpose, and the slow restart loop keeps
+  the failure visible in `journalctl -u tail-watch`.
+
+No `tailscale set --operator` step is needed. `tailscaled` creates its
+socket with mode 0666, and on the local socket every caller gets read
+access; write access needs root or the configured operator. tail-watch only
+calls `Status`, `WatchIPNBus`, `GetPrefs` and `Ping` on the LocalAPI, and
+all four work with read access, so the `tail-watch` user stays unprivileged.
+
+Variations, each as a drop-in from `sudo systemctl edit tail-watch`:
+
+- Secrets in `*_file` keys: instead of the environment file, use a systemd
+  credential. Add `LoadCredential=slack-url:/etc/tail-watch/slack-url` and
+  point the config at `url_file: /run/credentials/tail-watch.service/slack-url`.
+- A `state_dir` outside `/var/lib/tail-watch`: `ProtectSystem=strict` makes
+  only `StateDirectory` writable, so add `ReadWritePaths=/data/tail-watch`
+  (your path) for the directory in `collector.state_dir`.
+- No `icmp` checks configured: drop the capability by setting
+  `AmbientCapabilities=` and `CapabilityBoundingSet=` to empty. The sysctl
+  alternative, `net.ipv4.ping_group_range`, is in
+  [Troubleshoot](troubleshoot.md).
 
 ## Run in Docker
 

@@ -11,8 +11,8 @@ need to do.
 
 ## How-to guides
 
-- [Deploy tail-watch](how-to/deploy.md): binary, Docker, and Compose without a
-  dedicated host.
+- [Deploy tail-watch](how-to/deploy.md): release download, systemd, Docker,
+  and Compose without a dedicated host.
 - [Write the ACLs](how-to/acls.md): grants for `tag:monitor`.
 - [Monitor remote subnets and local LANs](how-to/remote-subnets.md)
 - [Manage monitors in the UI](how-to/monitor-ui.md)
@@ -39,5 +39,6 @@ need to do.
 ## Contributing
 
 - [Live notification test](contributing/live-notification-test.md)
+- [VM systemd test](contributing/vm-systemd-test.md)
 - [Monitor UI browser tests](contributing/ui-browser-test.md)
 - [Development and releases](contributing/releases.md)
