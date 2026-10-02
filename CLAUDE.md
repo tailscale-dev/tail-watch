@@ -35,6 +35,14 @@
   an empty op means unaudited and unauthorized (validate only).
 - `presence.go` is the IPN bus view. `tsping` name resolution uses it and
   falls back to the 30s `Status()` cache only while that view is unseeded.
+- `collector.local_only` runs the collector with no tailscaled (the ProxyGroup
+  sidecar placement): `config.go` defaults a network-less target to `local`
+  and rejects `network: tailnet`, `tsping` and the UI; `main.go` then skips
+  the LocalAPI preflight, presence view, resolver binding and dependency
+  learner, and takes the identity from `os.Hostname()`, so payloads carry
+  `collector.name` and omit `collector.tailscale_ip`. The classifier already
+  accepts a nil presence and classifies `network: local` failures from device
+  evidence alone.
 - `alert.go` is one mutex-guarded state machine. Grace and flap timers hand work
   to a goroutine from `AfterFunc`: `tstest.Clock.Advance` holds the clock
   lock while callbacks fire, so they cannot call back into the clock.
@@ -151,3 +159,33 @@
 - `stageRelease` lays files out like an unpacked GoReleaser archive, which keeps the
   `examples/` prefix; keep the staging, the docs and `.goreleaser.yaml` in step.
 - `github.com/pkg/sftp` and `golang.org/x/crypto/ssh` are direct deps only for this test.
+
+## kind ProxyGroup test
+
+- `TestKindProxyGroup` (`kind_proxygroup_test.go`) is gated on `TAIL_WATCH_KIND=1`,
+  skips when `kind`, `kubectl`, `helm` or `docker` is missing, and runs the fenced bash
+  blocks under each method heading in `docs/how-to/kubernetes-proxygroup.md`, so editing
+  those blocks changes the test. The sidecar contract the blocks produce: pods with both
+  `tailscale.com/parent-resource-type: proxygroup` and `tail-watch/inject: "true"` get a
+  local-only `tail-watch` container reading ConfigMap `tail-watch-<proxygroup>` (key
+  `tail-watch.yaml`, optional); sink secrets come from a same-named Secret via `envFrom`.
+  Every method builds that name from the pod's `tailscale.com/parent-resource` label;
+  never hard-code `ingress`.
+- `examples/kubernetes/sidecar.yaml` is the reference container. `TestSidecarCopiesAgree`
+  (not gated) fails when the Kyverno, MutatingAdmissionPolicy, freeze-and-patch or
+  how-to webhook copy drifts from it, so edit all five together.
+- `scripts/kind-stack.sh up|down` is the harness (cluster config
+  `cmd/tail-watch/testdata/kind-proxygroup.yaml`, fixtures in
+  `cmd/tail-watch/testdata/kind/`); the test runs `up` itself when the cluster or the
+  `ingress` ProxyGroup is missing. The operator chart is pinned to the newest chart at or
+  below the `tailscale.com` version in `go.mod`; the OAuth client comes from the
+  `tailscale-phase-2/tailscale` pulumi env as `tailscale:operatorClientId/Secret` and
+  reaches Helm through a mode-0600 values file, never the command line or a log.
+- The test's `sidecarConfig` is the documented ConfigMap with tighter timing; keep its
+  mechanics (local-only, `tcp:` check, webhook sink) in step with
+  `examples/kubernetes/configmap.yaml`. The receiver is `alert-receiver` in `testdata/kind/`:
+  it stores POST bodies and returns them on `GET /events`, and the test asserts new events
+  by offset because the receiver accumulates.
+- The test leaves the harness up. Teardown is `scripts/kind-stack.sh down`: it deletes the
+  cluster, the Tailscale Service `svc:tw-pg-web`, and every tailnet device with the `tw-pg`
+  hostname prefix.

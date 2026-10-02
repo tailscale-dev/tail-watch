@@ -327,10 +327,117 @@ func TestExampleConfig(t *testing.T) {
 	}
 }
 
+//nolint:gocognit // Local-only acceptance and rejection cases keep their inputs next to the assertions.
+func TestLocalOnlyConfig(t *testing.T) {
+	t.Parallel()
+	t.Run("targets default to local", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig([]byte(`
+collector: {local_only: true}
+targets:
+  - {name: web, addr: web.apps.svc.cluster.local, checks: ['tcp:443']}
+  - {name: api, addr: api.apps.svc.cluster.local, network: local, checks: ['tcp:80']}
+`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.Collector.LocalOnly {
+			t.Fatal("local_only not resolved")
+		}
+		for _, target := range cfg.Targets {
+			if target.Network != NetworkLocal {
+				t.Errorf("target %s network %s, want local", target.Name, target.Network)
+			}
+		}
+	})
+	t.Run("rejections", func(t *testing.T) {
+		t.Parallel()
+		tests := []struct {
+			name  string
+			src   string
+			wants []string
+		}{
+			{
+				name: "tailnet target",
+				src: `
+collector: {local_only: true}
+targets:
+  - {name: nas, addr: 100.64.0.1, network: tailnet, checks: [icmp]}
+`,
+				wants: []string{"targets[0].network", "nas", "tailnet", "local-only"},
+			},
+			{
+				name: "tsping check",
+				src: `
+collector: {local_only: true}
+targets:
+  - {name: nas, addr: 100.64.0.1, checks: [tsping]}
+`,
+				wants: []string{"targets[0].checks[0]", "nas", "tsping is not valid in local-only mode"},
+			},
+			{
+				name: "ui on",
+				src: `
+collector: {local_only: true, ui: true, state_dir: /var/lib/tail-watch}
+targets:
+  - {name: web, addr: 10.0.0.1, checks: ['tcp:443']}
+`,
+				wants: []string{"collector.ui", "unavailable in local-only mode"},
+			},
+			{
+				name: "several problems together",
+				src: `
+collector: {local_only: true, ui: true, state_dir: /var/lib/tail-watch}
+targets:
+  - {name: nas, addr: 100.64.0.1, network: tailnet, checks: [tsping]}
+  - {name: web, addr: 10.0.0.1, checks: ['tcp:443']}
+`,
+				wants: []string{
+					"collector.ui",
+					"targets[0].network",
+					"targets[0].checks[0]",
+					"tsping is not valid in local-only mode",
+				},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+				_, err := parseConfig([]byte(tt.src))
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				for _, want := range tt.wants {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q missing %q", err, want)
+					}
+				}
+			})
+		}
+	})
+	t.Run("local_only off keeps today", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig([]byte(`
+collector: {local_only: false}
+targets:
+  - {name: nas, addr: 100.64.0.1, checks: [tsping]}
+`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Collector.LocalOnly {
+			t.Fatal("local_only resolved on")
+		}
+		if cfg.Targets[0].Network != NetworkTailnet {
+			t.Fatalf("network %s, want tailnet", cfg.Targets[0].Network)
+		}
+	})
+}
+
 func TestListenFlagOverride(t *testing.T) {
 	t.Parallel()
 	cfg := &Config{
-		Collector:  CollectorConfig{Listen: "127.0.0.1:1", StateDir: "", UI: false},
+		Collector:  CollectorConfig{Listen: "127.0.0.1:1", StateDir: "", UI: false, LocalOnly: false},
 		Targets:    nil,
 		Sinks:      nil,
 		Heartbeat:  nil,

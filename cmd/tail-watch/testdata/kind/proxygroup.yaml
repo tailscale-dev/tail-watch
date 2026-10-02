@@ -1,0 +1,23 @@
+# ingress is the ProxyGroup the test injects the tail-watch sidecar into. It
+# has no proxyClass until a doc block from docs/how-to/kubernetes-proxygroup.md
+# opts it in. plain never gets the opt-in label and is the negative control:
+# its pods must stay exactly as the operator created them. Both use a hostname
+# prefix of tw-pg so scripts/kind-stack.sh down can find and delete their
+# tailnet devices.
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyGroup
+metadata:
+  name: ingress
+spec:
+  type: ingress
+  replicas: 2
+  hostnamePrefix: tw-pg-ingress
+---
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyGroup
+metadata:
+  name: plain
+spec:
+  type: ingress
+  replicas: 1
+  hostnamePrefix: tw-pg-plain

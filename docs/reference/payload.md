@@ -36,7 +36,7 @@ failing at startup produces one `target.down`.
 | `late` | boolean | any, when true | The first attempt happened more than one minute after `time`. The original `time` is kept. |
 | `collector` | object | all | The sending collector. |
 | `collector.name` | string | all | The node's hostname. |
-| `collector.tailscale_ip` | string | when known | The node's first Tailscale IPv4 address, or IPv6 when it has none. |
+| `collector.tailscale_ip` | string | when known; omitted in local-only mode | The node's first Tailscale IPv4 address, or IPv6 when it has none. |
 | `target` | object | target events | The affected target. |
 | `target.name` | string | target events | Target name. |
 | `target.addr` | string | target events | Target address. |

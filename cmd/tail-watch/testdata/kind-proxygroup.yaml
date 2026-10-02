@@ -1,0 +1,11 @@
+# kind cluster for TestKindProxyGroup (TAIL_WATCH_KIND=1). The
+# MutatingAdmissionPolicy API is v1beta1 and is not served by default on the
+# kindest/node v1.35.0 image, so the cluster turns on the feature gate and the
+# runtime config. kindnet on this image enforces NetworkPolicy, which the
+# hop-2 break in the test relies on; no alternate CNI is installed.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+featureGates:
+  MutatingAdmissionPolicy: true
+runtimeConfig:
+  admissionregistration.k8s.io/v1beta1: "true"

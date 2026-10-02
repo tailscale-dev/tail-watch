@@ -146,10 +146,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "%v\n", dynErr)
 		return 1
 	}
-	a.bindResolver()
-	if preflightErr := a.preflight(context.Background()); preflightErr != nil {
-		_, _ = fmt.Fprintf(stderr, "%v\n", preflightErr)
-		return 1
+	if cfg.Collector.LocalOnly {
+		a.localOnlyIdentity()
+	} else {
+		a.bindResolver()
+		if preflightErr := a.preflight(context.Background()); preflightErr != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", preflightErr)
+			return 1
+		}
 	}
 	if *onceFlag {
 		return a.runOnce()
@@ -177,11 +181,15 @@ func registerUIFlag(fs *flag.FlagSet) **bool {
 	return &value
 }
 
-// resolveUI decides whether the monitor UI is on. --once ignores it, and it
-// needs a state_dir to keep the monitors it creates.
+// resolveUI decides whether the monitor UI is on. --once ignores it, it is
+// unavailable in local-only mode, and it needs a state_dir to keep the
+// monitors it creates.
 func resolveUI(cfg *Config, flag *bool, once bool) (bool, error) {
 	if once || !cfg.UIEnabled(flag) {
 		return false, nil
+	}
+	if cfg.Collector.LocalOnly {
+		return false, errUILocalOnly
 	}
 	if cfg.Collector.StateDir == "" {
 		return false, errors.New("the UI needs collector.state_dir to store monitors")
@@ -309,11 +317,14 @@ func (a *app) schedule(ctx context.Context, p *prober.Prober) []func() error {
 }
 
 func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeRegistry {
-	a.presence = newPresence(a.log, a.clock, a.watchBus)
 	if a.ui {
 		a.cfg.mergeDynamic(a.dynamic, a.log)
 	}
-	a.bindResolver()
+	// presence stays nil in local-only mode; its methods are nil-safe.
+	if !a.cfg.Collector.LocalOnly {
+		a.presence = newPresence(a.log, a.clock, a.watchBus)
+		a.bindResolver()
+	}
 	targets := make([]*Target, len(a.cfg.Targets))
 	for i := range a.cfg.Targets {
 		targets[i] = &a.cfg.Targets[i]
@@ -352,7 +363,9 @@ func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeReg
 		a.notify.Start(ctx)
 	}
 	go a.presence.run(ctx)
-	go a.learner.run(ctx)
+	if !a.cfg.Collector.LocalOnly {
+		go a.learner.run(ctx)
+	}
 	for _, t := range targets {
 		if addErr := reg.AddTarget(t); addErr != nil && a.log != nil {
 			a.log.ErrorContext(ctx, "add target", "target", t.Name, "err", addErr)
@@ -498,6 +511,17 @@ func (a *app) mountMonitorUI(mux *http.ServeMux) {
 
 func (a *app) logf(format string, args ...any) {
 	a.log.Info(fmt.Sprintf(format, args...))
+}
+
+// localOnlyIdentity sets the payload identity from the hostname and logs it.
+// Local-only mode never contacts tailscaled, so there is no Tailscale IP.
+func (a *app) localOnlyIdentity() {
+	host, err := os.Hostname()
+	if err != nil {
+		a.log.Warn("hostname unavailable", "err", err)
+	}
+	a.collector = CollectorInfo{Name: host, TailscaleIP: ""}
+	a.log.Info("collector identity", "hostname", host, "local_only", true)
 }
 
 func (a *app) preflight(ctx context.Context) error {

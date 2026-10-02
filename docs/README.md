@@ -15,6 +15,8 @@ need to do.
   and Compose without a dedicated host.
 - [Write the ACLs](how-to/acls.md): grants for `tag:monitor`.
 - [Monitor remote subnets and local LANs](how-to/remote-subnets.md)
+- [Watch a Kubernetes ProxyGroup](how-to/kubernetes-proxygroup.md): an opt-in
+  sidecar in the operator's proxy pods.
 - [Manage monitors in the UI](how-to/monitor-ui.md)
 - [Send alerts to Slack](how-to/slack-sink.md)
 - [Send alerts to a webhook](how-to/webhook-sink.md): signing, batching, retries.
@@ -35,10 +37,13 @@ need to do.
 - [Alert state](explanation/alert-state.md)
 - [Incidents and queues](explanation/incidents-and-queues.md)
 - [Monitor UI risks](explanation/monitor-ui-risks.md)
+- [ProxyGroup sidecar](explanation/proxygroup-sidecar.md): why Kubernetes
+  misses a broken hop 2, and what the sidecar cannot see.
 
 ## Contributing
 
 - [Live notification test](contributing/live-notification-test.md)
+- [kind ProxyGroup test](contributing/kind-proxygroup-test.md)
 - [VM systemd test](contributing/vm-systemd-test.md)
 - [Monitor UI browser tests](contributing/ui-browser-test.md)
 - [Development and releases](contributing/releases.md)

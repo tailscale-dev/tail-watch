@@ -5,6 +5,17 @@
 {
 	"tagOwners": {
 		"tag:monitor": ["autogroup:admin"],
+		// The Kubernetes operator and the ProxyGroup devices it creates, for
+		// TestKindProxyGroup.
+		"tag:k8s-operator": ["autogroup:admin"],
+		"tag:k8s": ["tag:k8s-operator"],
+	},
+	"autoApprovers": {
+		// Let the operator's ProxyGroups advertise Tailscale Services without a
+		// manual approval per Service.
+		"services": {
+			"svc:*": ["tag:k8s"],
+		},
 	},
 	"grants": [
 		// The peer the test discovers is a member device. The grant also puts

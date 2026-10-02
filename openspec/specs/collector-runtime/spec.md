@@ -12,12 +12,18 @@ one-shot mode and shuts down.
 
 tail-watch SHALL connect to the local tailscaled over its LocalAPI socket, using the
 platform default path unless the `--socket` flag names another. It SHALL NOT
-embed its own Tailscale node.
+embed its own Tailscale node. When `collector.local_only` is `true`, tail-watch SHALL
+NOT connect to tailscaled at all and SHALL ignore `--socket`.
 
 #### Scenario: Custom socket
 
 - **WHEN** tail-watch runs with `--socket /run/ts/tailscaled.sock`
 - **THEN** all LocalAPI calls use that socket
+
+#### Scenario: Local-only makes no LocalAPI call
+
+- **WHEN** `collector.local_only: true` is set and no tailscaled runs on the host
+- **THEN** tail-watch makes no LocalAPI call and runs its checks
 
 ### Requirement: Startup preflight
 
@@ -33,6 +39,11 @@ tailscaled for this kernel-mode runtime. A route advertised in presence SHALL
 NOT be treated as proof of an installed host route. Deployment documentation
 SHALL require checking the effective route for each remote subnet and selecting
 `network: local` explicitly for locally monitored LANs.
+
+When `collector.local_only` is `true`, preflight SHALL skip every tailscaled check
+above, SHALL log the hostname and that it runs in local-only mode, and SHALL use the
+hostname as the collector identity, so notifications carry `collector.name` and omit
+`collector.tailscale_ip`.
 
 #### Scenario: Subnet routes not accepted
 
@@ -56,6 +67,18 @@ SHALL require checking the effective route for each remote subnet and selecting
 - **WHEN** the host has an active exit node
 - **THEN** tail-watch starts and logs a warning that notifications will route
   through the exit node
+
+#### Scenario: Local-only startup without tailscaled
+
+- **WHEN** `collector.local_only: true` is set and the LocalAPI socket does not exist
+- **THEN** tail-watch starts, logs its hostname and local-only mode, and schedules
+  its checks
+
+#### Scenario: Local-only collector identity
+
+- **WHEN** a local-only collector on host `pg-ingress-0` sends `collector.started`
+- **THEN** the payload has `collector.name` `pg-ingress-0` and no
+  `collector.tailscale_ip`
 
 ### Requirement: HTTP endpoints
 

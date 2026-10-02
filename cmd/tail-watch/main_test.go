@@ -10,18 +10,23 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tstime"
 	"tailscale.com/types/views"
 )
 
@@ -600,6 +605,230 @@ targets:
 		_ = cmd.Process.Kill()
 		t.Fatal("SIGTERM did not exit 0")
 	}
+}
+
+// countingLocalEnv counts LocalClient lookups so a local-only run can prove
+// it never reaches for the LocalAPI.
+type countingLocalEnv struct {
+	netEnv
+
+	calls *atomic.Int32
+}
+
+func (e countingLocalEnv) LocalClient() *local.Client {
+	e.calls.Add(1)
+	return e.netEnv.LocalClient()
+}
+
+//nolint:paralleltest // localOnlyIdentity reads the process hostname and runOnce installs signal handlers.
+func TestLocalOnlyRuntime(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok\n")
+	}))
+	t.Cleanup(srv.Close)
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	cfg, err := parseConfig([]byte(fmt.Sprintf(`
+collector: {local_only: true}
+targets:
+  - {name: web, addr: 127.0.0.1, interval: 1s, timeout: 500ms, checks: ['tcp:%d']}
+`, port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	missing := filepath.Join(t.TempDir(), "tailscaled.sock")
+	var stdout bytes.Buffer
+	a := &app{
+		cfg:    cfg,
+		env:    countingLocalEnv{netEnv: newKernelEnv(missing), calls: &calls},
+		log:    slog.New(slog.DiscardHandler),
+		clock:  tstime.StdClock{},
+		pub:    newPublisher(),
+		stdout: &stdout,
+		socket: missing,
+		listen: "127.0.0.1:0",
+		ui:     false,
+
+		dynamic:  nil,
+		registry: nil,
+		resolver: nil,
+		presence: nil,
+		class:    nil,
+		learner:  nil,
+		alerts:   nil,
+		notify:   nil,
+		metrics:  nil,
+		watch:    nil,
+		probeMu:  sync.Mutex{},
+		probes:   nil,
+
+		collector: CollectorInfo{Name: "", TailscaleIP: ""},
+	}
+	a.localOnlyIdentity()
+	host, hostErr := os.Hostname()
+	if hostErr != nil {
+		t.Fatal(hostErr)
+	}
+	if a.collector.Name != host || a.collector.TailscaleIP != "" {
+		t.Fatalf("identity %+v, want hostname %q and no Tailscale IP", a.collector, host)
+	}
+	if code := a.runOnce(); code != 0 {
+		t.Fatalf("runOnce code %d stdout %s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "web tcp:") || !strings.Contains(stdout.String(), " ok ") {
+		t.Fatalf("stdout %s", stdout.String())
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("LocalAPI client requested %d times in local-only mode", got)
+	}
+}
+
+//nolint:gocognit // Independent CLI scenarios keep their setup next to the assertions.
+func TestLocalOnlyCLI(t *testing.T) {
+	t.Parallel()
+	bin := buildTailWatch(t)
+	missing := filepath.Join(t.TempDir(), "tailscaled.sock")
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	openPort := ln.Addr().(*net.TCPAddr).Port
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedPort := closed.Addr().(*net.TCPAddr).Port
+	_ = closed.Close()
+
+	localCfg := func(port int) string {
+		return writeCfg(t, fmt.Sprintf(`
+collector: {local_only: true}
+targets:
+  - name: loop
+    addr: 127.0.0.1
+    interval: 200ms
+    timeout: 100ms
+    checks: ["tcp:%d"]
+`, port))
+	}
+
+	t.Run("check-config rejects tsping", func(t *testing.T) {
+		t.Parallel()
+		path := writeCfg(t, `
+collector: {local_only: true}
+targets:
+  - {name: nas, addr: 100.64.0.1, checks: [tsping]}
+`)
+		_, errOut, code := runBin(t, bin, nil, "check-config", "--config", path)
+		if code != 1 || !strings.Contains(errOut, "tsping is not valid in local-only mode") {
+			t.Fatalf("code %d stderr %s", code, errOut)
+		}
+	})
+	t.Run("ui flag rejected", func(t *testing.T) {
+		t.Parallel()
+		path := writeCfg(t, fmt.Sprintf(`
+collector: {local_only: true, state_dir: %s}
+targets:
+  - {name: loop, addr: 127.0.0.1, checks: ["tcp:%d"]}
+`, t.TempDir(), openPort))
+		_, errOut, code := runBin(t, bin, nil, "--config", path, "--ui")
+		if code != 1 || !strings.Contains(errOut, "the UI is unavailable in local-only mode") {
+			t.Fatalf("code %d stderr %s", code, errOut)
+		}
+	})
+	t.Run("once pass without tailscaled", func(t *testing.T) {
+		t.Parallel()
+		out, errOut, code := runBin(t, bin, nil, "--once", "--config", localCfg(openPort), "--socket", missing)
+		if code != 0 {
+			t.Fatalf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+		}
+		if !strings.Contains(out, "loop tcp:") || !strings.Contains(out, " ok ") {
+			t.Fatalf("stdout %s", out)
+		}
+	})
+	t.Run("once fail without tailscaled", func(t *testing.T) {
+		t.Parallel()
+		out, errOut, code := runBin(t, bin, nil, "--once", "--config", localCfg(closedPort), "--socket", missing)
+		if code != 1 {
+			t.Fatalf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+		}
+		if !strings.Contains(out, "fail") || !strings.Contains(out, "connection refused") {
+			t.Fatalf("stdout %s", out)
+		}
+	})
+	t.Run("server schedules checks without tailscaled", func(t *testing.T) {
+		t.Parallel()
+		listen := freePort(t)
+		cmd := exec.Command(bin, "--config", localCfg(openPort), "--socket", missing,
+			"--listen", fmt.Sprintf("127.0.0.1:%d", listen))
+		var stderr syncBuffer
+		cmd.Stderr = &stderr
+		if startErr := cmd.Start(); startErr != nil {
+			t.Fatal(startErr)
+		}
+		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+		metrics := fmt.Sprintf("http://127.0.0.1:%d/metrics", listen)
+		deadline := time.Now().Add(10 * time.Second)
+		for !strings.Contains(httpBody(metrics), `tailwatch_target_state{target="loop"} 1`) {
+			if time.Now().After(deadline) {
+				t.Fatalf("loop never reached up\nmetrics %s\nstderr %s", httpBody(metrics), stderr.String())
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		host, hostErr := os.Hostname()
+		if hostErr != nil {
+			t.Fatal(hostErr)
+		}
+		want := fmt.Sprintf(`"msg":"collector identity","hostname":%q,"local_only":true`, host)
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr lacks %s\n%s", want, stderr.String())
+		}
+		if signalErr := cmd.Process.Signal(syscall.SIGTERM); signalErr != nil {
+			t.Fatal(signalErr)
+		}
+		if waitErr := cmd.Wait(); waitErr != nil {
+			t.Fatalf("exit %v\nstderr %s", waitErr, stderr.String())
+		}
+	})
+}
+
+// syncBuffer is a [bytes.Buffer] safe to read while a child process writes it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func httpBody(url string) string {
+	resp, err := http.Get(url)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return string(b)
 }
 
 func runningStatus() *ipnstate.Status {

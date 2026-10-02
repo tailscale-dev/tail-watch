@@ -1,0 +1,134 @@
+# Inject the tail-watch sidecar with a MutatingAdmissionPolicy (CEL mutation
+# inside the API server, no external component).
+#
+# The version floor and the feature gate it may need are in
+# docs/how-to/kubernetes-proxygroup.md; on 1.32-1.33 use the apiVersion that
+# page names.
+#
+# failurePolicy: Ignore means a failed mutation admits the pod unchanged, so a
+# proxy pod can never be blocked by this policy; it starts without the
+# sidecar. The policy mutates Pod CREATE only and never touches the
+# operator-owned StatefulSet.
+apiVersion: admissionregistration.k8s.io/v1beta1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: tail-watch-sidecar
+spec:
+  failurePolicy: Ignore
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  matchConditions:
+    - name: is-proxygroup-pod
+      expression: >-
+        object.metadata.?labels["tailscale.com/parent-resource-type"].orValue("")
+        == "proxygroup"
+    - name: is-opted-in
+      expression: >-
+        object.metadata.?labels["tail-watch/inject"].orValue("") == "true"
+    - name: has-proxygroup-name
+      expression: >-
+        object.metadata.?labels["tailscale.com/parent-resource"].orValue("") != ""
+  reinvocationPolicy: Never
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        # The same container and volume as examples/kubernetes/sidecar.yaml.
+        # ConfigMap and Secret names are tail-watch-<proxygroup-name>, taken
+        # from the label the operator sets. The patch appends to spec.containers and
+        # spec.volumes without touching the pod's other settings. Apply
+        # configurations cannot set atomic lists such as args and envFrom,
+        # which is why this is a JSON patch.
+        expression: |
+          [
+            JSONPatch{
+              op: "add",
+              path: "/spec/containers/-",
+              value: Object.spec.containers{
+                name: "tail-watch",
+                image: "tail-watch:0.1.0",
+                imagePullPolicy: "IfNotPresent",
+                args: [
+                  "--config", "/etc/tail-watch/tail-watch.yaml",
+                  "--listen", "127.0.0.1:9109"
+                ],
+                envFrom: [
+                  Object.spec.containers.envFrom{
+                    secretRef: Object.spec.containers.envFrom.secretRef{
+                      name: "tail-watch-" + object.metadata.labels["tailscale.com/parent-resource"],
+                      optional: true
+                    }
+                  }
+                ],
+                volumeMounts: [
+                  Object.spec.containers.volumeMounts{
+                    name: "tail-watch-config",
+                    mountPath: "/etc/tail-watch",
+                    readOnly: true
+                  }
+                ],
+                resources: Object.spec.containers.resources{
+                  requests: {
+                    "cpu": "10m",
+                    "memory": "32Mi"
+                  },
+                  limits: {
+                    "cpu": "100m",
+                    "memory": "64Mi"
+                  }
+                },
+                securityContext: Object.spec.containers.securityContext{
+                  runAsUser: 65532,
+                  runAsGroup: 65532,
+                  readOnlyRootFilesystem: true,
+                  allowPrivilegeEscalation: false,
+                  capabilities: Object.spec.containers.securityContext.capabilities{
+                    drop: ["ALL"]
+                  }
+                }
+              }
+            }
+          ] + (has(object.spec.volumes) && size(object.spec.volumes) > 0
+            ? [
+                JSONPatch{
+                  op: "add",
+                  path: "/spec/volumes/-",
+                  value: Object.spec.volumes{
+                    name: "tail-watch-config",
+                    configMap: Object.spec.volumes.configMap{
+                      name: "tail-watch-" + object.metadata.labels["tailscale.com/parent-resource"],
+                      optional: true
+                    }
+                  }
+                }
+              ]
+            : [
+                JSONPatch{
+                  op: "add",
+                  path: "/spec/volumes",
+                  value: [
+                    Object.spec.volumes{
+                      name: "tail-watch-config",
+                      configMap: Object.spec.volumes.configMap{
+                        name: "tail-watch-" + object.metadata.labels["tailscale.com/parent-resource"],
+                        optional: true
+                      }
+                    }
+                  ]
+                }
+              ])
+---
+# A policy does nothing until a binding activates it. Empty matchResources
+# matches every namespace; the policy itself is already scoped to Pod CREATE
+# and its matchConditions limit mutation to opted-in ProxyGroup pods, so all
+# other pods are admitted unchanged.
+apiVersion: admissionregistration.k8s.io/v1beta1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: tail-watch-sidecar
+spec:
+  policyName: tail-watch-sidecar
+  matchResources: {}
