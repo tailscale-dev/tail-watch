@@ -1,0 +1,86 @@
+# Inject the tail-watch sidecar with a Kyverno ClusterPolicy.
+#
+# Version floor: any supported Kyverno v1 (kyverno.io/v1 ClusterPolicy).
+# Tested with chart kyverno-3.9.1, which warns that kyverno.io/v1
+# ClusterPolicy is deprecated in favour of the CEL-based policies.kyverno.io
+# MutatingPolicy; the rule below is accepted and enforced as-is.
+#
+# pod-policies.kyverno.io/autogen-controllers: "none" is required: autogen
+# would otherwise generate a rule for Pod controllers and mutate the
+# ProxyGroup's StatefulSet, which the operator overwrites on every reconcile.
+# Mutating Pod CREATE only keeps injection on the pods; the operator's
+# StatefulSet is never touched.
+#
+# failurePolicy: Ignore and background: false mean the rule runs only during
+# admission of new pods, and a Kyverno failure admits the pod unchanged, so a
+# proxy pod can never be blocked; it starts without the sidecar.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: tail-watch-sidecar
+  annotations:
+    pod-policies.kyverno.io/autogen-controllers: "none"
+spec:
+  failurePolicy: Ignore
+  background: false
+  rules:
+    - name: inject-tail-watch
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+              selector:
+                matchLabels:
+                  tailscale.com/parent-resource-type: proxygroup
+                  tail-watch/inject: "true"
+                matchExpressions:
+                  - key: tailscale.com/parent-resource
+                    operator: Exists
+      mutate:
+        # The same container and volume as examples/kubernetes/sidecar.yaml.
+        # ConfigMap and Secret names are tail-watch-<proxygroup-name>, taken
+        # from the label the operator sets. A strategic merge patch merges
+        # containers and volumes by name, so this appends without touching the
+        # pod's other settings.
+        patchStrategicMerge:
+          spec:
+            containers:
+              - name: tail-watch
+                image: tail-watch:0.1.0
+                imagePullPolicy: IfNotPresent
+                args:
+                  - --config
+                  - /etc/tail-watch/tail-watch.yaml
+                  - --listen
+                  - 127.0.0.1:9109
+                envFrom:
+                  - secretRef:
+                      name: 'tail-watch-{{ request.object.metadata.labels."tailscale.com/parent-resource" }}'
+                      optional: true
+                volumeMounts:
+                  - name: tail-watch-config
+                    mountPath: /etc/tail-watch
+                    readOnly: true
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 32Mi
+                  limits:
+                    cpu: 100m
+                    memory: 64Mi
+                securityContext:
+                  runAsUser: 65532
+                  runAsGroup: 65532
+                  readOnlyRootFilesystem: true
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+            volumes:
+              - name: tail-watch-config
+                configMap:
+                  name: 'tail-watch-{{ request.object.metadata.labels."tailscale.com/parent-resource" }}'
+                  optional: true

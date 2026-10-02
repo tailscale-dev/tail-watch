@@ -112,6 +112,13 @@ file.
 - Don't run the collector on the subnet router itself. A router-hosted collector reaches
   the LAN directly and never crosses the tunnel, so it can't see `tunnel`-layer failures,
   and it goes down with the thing it is supposed to report on.
+- In Kubernetes, break that rule deliberately for the operator's ProxyGroup proxy pods:
+  run the collector as a sidecar in the proxy pod. Its subject is hop 2, the path from
+  the proxy pod to the workload, which is only visible from the proxy's network
+  namespace. The don't-run-on-the-device rule is about tunnel visibility, and hop-2
+  checks never cross the tunnel, so running on the proxy costs nothing there. Hop 1
+  (tailnet client to proxy) stays with a regular tailnet collector probing the Service's
+  tailnet name. See `docs/how-to/kubernetes-proxygroup.md`.
 - Two collectors in different regions allow quorum. Only alert when both agree, which
   removes most false pages caused by the collector's own network.
 

@@ -229,6 +229,29 @@ func TestPayloadContract(t *testing.T) {
 	}
 }
 
+func TestStartedPayloadLocalOnlyIdentity(t *testing.T) {
+	t.Parallel()
+	ev := newStartedEvent(
+		"evt_L",
+		CollectorInfo{Name: "pg-ingress-0", TailscaleIP: ""},
+		goldenTransition().At,
+	)
+	var m map[string]any
+	if err := json.Unmarshal(marshalEvent(t, ev), &m); err != nil {
+		t.Fatal(err)
+	}
+	col, ok := m["collector"].(map[string]any)
+	if !ok {
+		t.Fatalf("collector %v", m["collector"])
+	}
+	if col["name"] != "pg-ingress-0" {
+		t.Fatalf("collector.name %v", col["name"])
+	}
+	if _, hasIP := col["tailscale_ip"]; hasIP {
+		t.Fatal("local-only payload must omit collector.tailscale_ip")
+	}
+}
+
 func TestMapTransition(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -1,0 +1,17 @@
+# Opt a ProxyGroup in to the tail-watch sidecar.
+# ProxyClass can set pod labels but not containers, so this label is the
+# opt-in signal: every injection method in docs/how-to/kubernetes-proxygroup.md
+# adds the sidecar only to pods carrying both this label and the operator's
+# own tailscale.com/parent-resource-type: proxygroup label.
+# Reference it from a ProxyGroup with:
+#   kubectl patch proxygroup <name> --type merge \
+#     -p '{"spec":{"proxyClass":"tail-watch"}}'
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyClass
+metadata:
+  name: tail-watch
+spec:
+  statefulSet:
+    pod:
+      labels:
+        tail-watch/inject: "true"

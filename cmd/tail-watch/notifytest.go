@@ -63,7 +63,13 @@ func runNotifyTestWith(args []string, stdout, stderr io.Writer, deps notifyTestD
 	if deps.env == nil {
 		deps.env = newKernelEnv(socketPath(*socketFlag))
 	}
-	if deps.identity == nil {
+	switch {
+	case deps.identity != nil:
+	case cfg.Collector.LocalOnly:
+		deps.identity = func(context.Context) (CollectorInfo, error) {
+			return CollectorInfo{}, errors.New("local-only mode has no tailscaled")
+		}
+	default:
 		deps.identity = func(ctx context.Context) (CollectorInfo, error) { return localIdentity(ctx, deps.env) }
 	}
 	col := collectorOrHostname(deps.identity)

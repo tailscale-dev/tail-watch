@@ -124,6 +124,7 @@ heartbeat:
 | `listen` | string | no | `127.0.0.1:9109` | HTTP listen address, `host:port`. `--listen` overrides it. |
 | `state_dir` | string | no | unset | Directory for durable state. Created with mode `0700` when missing. |
 | `ui` | bool | no | `false` | Serve the monitor UI and API. `--ui` overrides it, and `--ui=false` turns it off. |
+| `local_only` | bool | no | `false` | Run without tailscaled. See below. |
 
 `state_dir` holds:
 
@@ -135,6 +136,35 @@ heartbeat:
 
 `state_dir` is required when `ui` is on (startup exits with an error otherwise)
 and when any sink sets `queue: disk`. `--once` ignores `ui`.
+
+### Local-only mode
+
+With `local_only: true`, tail-watch runs without tailscaled: it makes no
+LocalAPI call, skips the startup preflight, and takes the collector identity
+from the hostname, so payloads carry `collector.name` and omit
+`collector.tailscale_ip`. This mode is for running next to something that is
+not a tailnet device, such as the ProxyGroup sidecar in
+[Watch a Kubernetes ProxyGroup](../how-to/kubernetes-proxygroup.md).
+
+Local-only mode changes what the loader accepts:
+
+- A target without `network` defaults to `local` instead of `tailnet`.
+- A target with `network: tailnet` is rejected.
+- A `tsping` check is rejected.
+- `ui: true` is rejected, and so is the `--ui` flag.
+
+Each problem is reported with its key path, and `check-config` applies the same
+rules. A minimal local-only config:
+
+```yaml
+collector:
+  local_only: true
+
+targets:
+  - name: web
+    addr: web.apps.svc.cluster.local
+    checks: [tcp:443]
+```
 
 ## `defaults`
 

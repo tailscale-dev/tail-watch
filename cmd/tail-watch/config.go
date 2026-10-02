@@ -63,6 +63,10 @@ type CollectorConfig struct {
 	Listen   string
 	StateDir string
 	UI       bool
+	// LocalOnly runs the collector without tailscaled: targets default to
+	// network local, and tailnet targets, tsping checks and the UI are
+	// rejected.
+	LocalOnly bool
 }
 
 // Target is one monitored device with its checks and resolved timings.
@@ -143,9 +147,10 @@ type rawConfig struct {
 }
 
 type rawCollector struct {
-	Listen   string `yaml:"listen"`
-	StateDir string `yaml:"state_dir"`
-	UI       *bool  `yaml:"ui"`
+	Listen    string `yaml:"listen"`
+	StateDir  string `yaml:"state_dir"`
+	UI        *bool  `yaml:"ui"`
+	LocalOnly *bool  `yaml:"local_only"`
 }
 
 type rawDefaults struct {
@@ -245,16 +250,30 @@ func builtinTiming() timing {
 	}
 }
 
+// errUILocalOnly is returned for collector.ui and for --ui in local-only mode.
+var errUILocalOnly = errors.New("the UI is unavailable in local-only mode")
+
+// targetRules is what every target in one config resolves against.
+type targetRules struct {
+	base      timing
+	localOnly bool
+}
+
 func resolveConfig(raw rawConfig) (*Config, []error) {
 	var errs []error
+	localOnly := raw.Collector.LocalOnly != nil && *raw.Collector.LocalOnly
+	if localOnly && raw.Collector.UI != nil && *raw.Collector.UI {
+		errs = append(errs, fmt.Errorf("collector.ui: %w", errUILocalOnly))
+	}
 	base := resolveDefaults(&errs, raw.Defaults)
-	targets, targetErrs := resolveTargets(raw.Targets, base)
+	targets, targetErrs := resolveTargets(raw.Targets, targetRules{base: base, localOnly: localOnly})
 	errs = append(errs, targetErrs...)
 	cfg := &Config{
 		Collector: CollectorConfig{
-			Listen:   raw.Collector.Listen,
-			StateDir: raw.Collector.StateDir,
-			UI:       raw.Collector.UI != nil && *raw.Collector.UI,
+			Listen:    raw.Collector.Listen,
+			StateDir:  raw.Collector.StateDir,
+			UI:        raw.Collector.UI != nil && *raw.Collector.UI,
+			LocalOnly: localOnly,
 		},
 		Targets:    targets,
 		Sinks:      nil,
@@ -280,13 +299,13 @@ func resolveDefaults(errs *[]error, d rawDefaults) timing {
 
 // resolveTargets validates a target list as a whole: each target, then the
 // parent references and parent cycles across the list.
-func resolveTargets(raw []rawTarget, base timing) ([]Target, []error) {
+func resolveTargets(raw []rawTarget, rules targetRules) ([]Target, []error) {
 	var errs []error
 	targets := make([]Target, len(raw))
 	seen := map[string]int{}
 	checksOK := make([]bool, len(raw))
 	for i, rt := range raw {
-		t, ok := resolveTarget(&errs, i, rt, base, seen)
+		t, ok := resolveTarget(&errs, i, rt, rules, seen)
 		targets[i] = t
 		checksOK[i] = ok
 	}
@@ -332,19 +351,19 @@ func resolveTargets(raw []rawTarget, base timing) ([]Target, []error) {
 	return targets, errs
 }
 
-func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[string]int) (Target, bool) {
+func resolveTarget(errs *[]error, i int, rt rawTarget, rules targetRules, seen map[string]int) (Target, bool) {
 	t := Target{
 		Name:             rt.Name,
 		Addr:             rt.Addr,
 		Site:             rt.Site,
 		Parent:           rt.Parent,
 		InsecureTLS:      rt.InsecureTLS,
-		Interval:         base.Interval,
-		Timeout:          base.Timeout,
-		FailThreshold:    base.FailThreshold,
-		RecoverThreshold: base.RecoverThreshold,
-		FlapLimit:        base.FlapLimit,
-		FlapWindow:       base.FlapWindow,
+		Interval:         rules.base.Interval,
+		Timeout:          rules.base.Timeout,
+		FailThreshold:    rules.base.FailThreshold,
+		RecoverThreshold: rules.base.RecoverThreshold,
+		FlapLimit:        rules.base.FlapLimit,
+		FlapWindow:       rules.base.FlapWindow,
 		Severity:         SeverityPage,
 		Network:          NetworkTailnet,
 
@@ -378,17 +397,7 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[str
 			fmt.Errorf("%s.severity: target %s: severity %q must be page or warn", loc, targetLabel(t), rt.Severity),
 		)
 	}
-	switch rt.Network {
-	case "", string(NetworkTailnet):
-		t.Network = NetworkTailnet
-	case string(NetworkLocal):
-		t.Network = NetworkLocal
-	default:
-		*errs = append(
-			*errs,
-			fmt.Errorf("%s.network: target %s: network %q must be tailnet or local", loc, targetLabel(t), rt.Network),
-		)
-	}
+	resolveNetwork(errs, loc, rt.Network, rules.localOnly, &t)
 
 	applyDur(errs, loc+".interval", rt.Interval, &t.Interval)
 	applyDur(errs, loc+".timeout", rt.Timeout, &t.Timeout)
@@ -427,11 +436,44 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, base timing, seen map[str
 		*errs = append(*errs, fmt.Errorf("%s.flap_limit: target %s: must be >= 1", loc, targetLabel(t)))
 	}
 
-	ok := resolveChecks(errs, loc, rt.Checks, &t)
+	ok := resolveChecks(errs, loc, rt.Checks, &t, rules.localOnly)
 	return t, ok
 }
 
-func resolveChecks(errs *[]error, loc string, rawChecks []string, t *Target) bool {
+// resolveNetwork sets t.Network. localOnly defaults an unset network to
+// local and rejects an explicit tailnet.
+func resolveNetwork(errs *[]error, loc, raw string, localOnly bool, t *Target) {
+	switch raw {
+	case "":
+		if localOnly {
+			t.Network = NetworkLocal
+		} else {
+			t.Network = NetworkTailnet
+		}
+	case string(NetworkTailnet):
+		if localOnly {
+			*errs = append(
+				*errs,
+				fmt.Errorf(
+					"%s.network: target %s: network %q is not valid in local-only mode",
+					loc,
+					targetLabel(*t),
+					raw,
+				),
+			)
+		}
+		t.Network = NetworkTailnet
+	case string(NetworkLocal):
+		t.Network = NetworkLocal
+	default:
+		*errs = append(
+			*errs,
+			fmt.Errorf("%s.network: target %s: network %q must be tailnet or local", loc, targetLabel(*t), raw),
+		)
+	}
+}
+
+func resolveChecks(errs *[]error, loc string, rawChecks []string, t *Target, localOnly bool) bool {
 	if len(rawChecks) == 0 {
 		*errs = append(*errs, fmt.Errorf("%s.checks: target %s: checks must not be empty", loc, targetLabel(*t)))
 		return false
@@ -455,10 +497,14 @@ func resolveChecks(errs *[]error, loc string, rawChecks []string, t *Target) boo
 			)
 		}
 		seenChk[c.String()] = struct{}{}
-		if t.Network == NetworkLocal && c.Kind() == checkTSPing {
+		if c.Kind() == checkTSPing && (t.Network == NetworkLocal || localOnly) {
+			msg := "tsping is not valid for network local"
+			if localOnly {
+				msg = "tsping is not valid in local-only mode"
+			}
 			*errs = append(
 				*errs,
-				fmt.Errorf("%s.checks[%d]: target %s: tsping is not valid for network local", loc, j, targetLabel(*t)),
+				fmt.Errorf("%s.checks[%d]: target %s: %s", loc, j, targetLabel(*t), msg),
 			)
 		}
 		if h, isHTTP := c.(httpCheck); isHTTP && t.Addr != "" && !sameHost(t.Addr, h.host) {
@@ -620,8 +666,9 @@ var (
 func (c *Config) validateCandidate(existing []rawTarget, candidate rawTarget) (Target, []error) {
 	all := append(slices.Clone(existing), candidate)
 	idx := len(existing)
-	targets, errs := resolveTargets(all, c.Base)
-	_, baseline := resolveTargets(existing, c.Base)
+	rules := targetRules{base: c.Base, localOnly: c.Collector.LocalOnly}
+	targets, errs := resolveTargets(all, rules)
+	_, baseline := resolveTargets(existing, rules)
 	known := make(map[string]bool, len(baseline))
 	for _, err := range baseline {
 		known[err.Error()] = true

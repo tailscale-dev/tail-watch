@@ -1,0 +1,33 @@
+# Sidecar config for ProxyGroup "ingress" in the tailscale namespace.
+# The name must be tail-watch-<proxygroup-name>; the injected container mounts
+# key tail-watch.yaml read-only at /etc/tail-watch. One ConfigMap per opted-in
+# ProxyGroup.
+#
+# Validate the embedded config before applying:
+#   tail-watch check-config --config <(kubectl get configmap tail-watch-ingress \
+#     -n tailscale -o jsonpath='{.data.tail-watch\.yaml}')
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tail-watch-ingress
+  namespace: tailscale
+data:
+  tail-watch.yaml: |
+    # local_only runs with no tailscaled. Targets default to network: local,
+    # checks use the pod's own network namespace, and identity is the pod
+    # hostname. Do not add icmp checks: the container has no NET_RAW.
+    collector:
+      local_only: true
+
+    targets:
+      - name: web
+        addr: web.apps.svc.cluster.local
+        site: apps
+        checks: [tcp:80]
+
+    # Secrets come from the Secret mounted by envFrom, never from this file.
+    sinks:
+      - name: ops-webhook
+        type: webhook
+        url_env: OPS_WEBHOOK_URL
+        secret_env: OPS_WEBHOOK_SECRET

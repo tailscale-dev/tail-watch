@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -131,6 +133,34 @@ func TestNotifyTestWorksWithoutTailscaled(t *testing.T) {
 	body := string(rc.request(0).Body)
 	if !strings.Contains(body, `"collector":{"name":"`) || strings.Contains(body, "tailscale_ip") {
 		t.Fatalf("hostname fallback expected, body %s", body)
+	}
+}
+
+func TestNotifyTestLocalOnlySkipsLocalAPI(t *testing.T) {
+	rc := newReceiver(t)
+	t.Setenv("TW_NT_A", rc.srv.URL)
+	path := writeCfg(
+		t,
+		"collector:\n  local_only: true\ntargets:\n  - name: nas\n    addr: 10.0.0.1\n    checks: [icmp]\n"+
+			"sinks:\n  - {name: hook, type: webhook, url_env: TW_NT_A}\n",
+	)
+	var calls atomic.Int32
+	env := countingLocalEnv{netEnv: newKernelEnv(filepath.Join(t.TempDir(), "missing.sock")), calls: &calls}
+	var out, errOut strings.Builder
+	if code := runNotifyTestWith(
+		[]string{"--config", path},
+		&out,
+		&errOut,
+		notifyTestDeps{identity: nil, env: env, clock: nil},
+	); code != 0 {
+		t.Fatalf("exit %d %s", code, errOut.String())
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("local-only notify-test reached the LocalAPI %d times", n)
+	}
+	body := string(rc.request(0).Body)
+	if !strings.Contains(body, `"collector":{"name":"`) || strings.Contains(body, "tailscale_ip") {
+		t.Fatalf("hostname identity expected, body %s", body)
 	}
 }
 

@@ -82,6 +82,14 @@ no handling node to consult. Presence, routes and disco do not apply, and the
 only layers available are `service` (the device answered in some way) and
 `lan` (it did not).
 
+Local checks can also run where there is no tailscaled at all. With
+`collector.local_only`, tail-watch skips the LocalAPI and the Kubernetes
+ProxyGroup sidecar uses this to probe workload Services from the proxy pod's
+network namespace. Those failures are always `service` or `lan` — the pod has
+no tailnet layers to blame — which is exactly the claim the sidecar makes:
+the path from proxy to workload is broken. See
+[Watch a Kubernetes ProxyGroup](../how-to/kubernetes-proxygroup.md).
+
 ## What the classifier knows, and what it does not
 
 The classifier uses the tailnet's own view of itself. That view comes from

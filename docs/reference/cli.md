@@ -14,7 +14,7 @@ Without a subcommand, tail-watch runs the collector.
 | --- | --- | --- | --- |
 | `-config` | string | see below | Config file path. Overrides `TAIL_WATCH_CONFIG`. |
 | `-listen` | string | `collector.listen`, else `127.0.0.1:9109` | HTTP listen address. |
-| `-socket` | string | platform default | tailscaled LocalAPI socket. |
+| `-socket` | string | platform default | tailscaled LocalAPI socket. Ignored when `collector.local_only` is `true`. |
 | `-log-level` | string | `info` | `debug`, `info`, `warn`, or `error`. Overrides `TAIL_WATCH_LOG_LEVEL`. |
 | `-once` | bool | `false` | Run every check once, print one line each, and exit. |
 | `-ui` | bool | `collector.ui`, else `false` | Serve the monitor UI and API. `--ui=false` turns off a config that enables it. |
@@ -61,13 +61,18 @@ no secrets, sends no heartbeat, and ignores the UI.
 Before serving, the collector fails with exit code 1 when:
 
 - the config file cannot be read or is invalid;
-- the UI is on and `collector.state_dir` is unset;
+- the UI is on and `collector.state_dir` is unset, or the UI is on with
+  `collector.local_only: true`;
 - tailscaled is unreachable, or its state is not `Running`;
 - tailscaled uses userspace networking (kernel mode is required);
 - a target is a remote subnet address on Linux and the host has not accepted
   routes (`tailscale set --accept-routes`);
 - a sink or heartbeat secret cannot be read or is empty (server mode only);
 - the notification state file cannot be decoded (server mode only).
+
+With `collector.local_only: true`, every tailscaled check above is skipped: the
+collector makes no LocalAPI call, logs its hostname and local-only mode, and
+schedules its checks.
 
 It logs a warning, and continues, when the node lacks `tag:monitor`, when an exit
 node is active, when a webhook sink has no secret, and when the UI is reachable
@@ -112,7 +117,7 @@ omitted.
 | `-config` | string | see [Precedence](#precedence) | Config file path. |
 | `-sink` | string | every sink | Send only to the sink with this name. |
 | `-timeout` | duration | `30s` | Give up on a sink after this long, including retries. |
-| `-socket` | string | platform default | tailscaled LocalAPI socket, used to read the collector identity. |
+| `-socket` | string | platform default | tailscaled LocalAPI socket, used to read the collector identity. Ignored when `collector.local_only` is `true`. |
 
 Sinks are tried in parallel. One line is printed per sink, in config order:
 

@@ -1,0 +1,54 @@
+# The tail-watch sidecar, exactly as every injection method in
+# docs/how-to/kubernetes-proxygroup.md produces it. This file is the single
+# copy shown for reference; each method's manifest (MutatingAdmissionPolicy,
+# Kyverno ClusterPolicy, the webhook's JSON patch, freeze-and-patch) embeds
+# the same container and volumes; TestSidecarCopiesAgree fails when one
+# drifts. Do not apply this file directly; it is a fragment, not a resource.
+#
+# The ConfigMap and Secret names are tail-watch-<proxygroup-name>: each method
+# builds them from the pod's tailscale.com/parent-resource label, which the
+# operator sets. They are shown for a ProxyGroup named "ingress". Both
+# references are optional, so
+# a missing ConfigMap or Secret never blocks the proxy pod: the tailscale
+# container starts and tail-watch exits with "config not found".
+containers:
+  - name: tail-watch
+    # The project does not publish to a registry yet. Build at the release
+    # tag (docker build -t tail-watch:0.1.0 .) and push it somewhere the
+    # cluster can pull, or kind load it for a local test.
+    image: tail-watch:0.1.0
+    imagePullPolicy: IfNotPresent
+    args:
+      - --config
+      - /etc/tail-watch/tail-watch.yaml
+      # Metrics and the status page stay inside the pod.
+      - --listen
+      - 127.0.0.1:9109
+    envFrom:
+      - secretRef:
+          name: tail-watch-ingress
+          optional: true
+    volumeMounts:
+      - name: tail-watch-config
+        mountPath: /etc/tail-watch
+        readOnly: true
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+    securityContext:
+      runAsUser: 65532
+      runAsGroup: 65532
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+volumes:
+  - name: tail-watch-config
+    configMap:
+      name: tail-watch-ingress
+      optional: true

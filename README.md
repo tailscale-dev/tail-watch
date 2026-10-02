@@ -40,7 +40,8 @@ The [documentation index](docs/README.md) lists every page. The main ones:
   systemd](docs/how-to/deploy.md#run-under-systemd)), [write the
   ACLs](docs/how-to/acls.md),
   [send alerts to Slack](docs/how-to/slack-sink.md),
-  [manage monitors in the UI](docs/how-to/monitor-ui.md), and
+  [manage monitors in the UI](docs/how-to/monitor-ui.md),
+  [watch a Kubernetes ProxyGroup](docs/how-to/kubernetes-proxygroup.md), and
   [troubleshoot](docs/how-to/troubleshoot.md)
 - Look up: [configuration](docs/reference/config.md),
   [command line](docs/reference/cli.md), [metrics](docs/reference/metrics.md), and

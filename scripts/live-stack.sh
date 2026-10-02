@@ -23,7 +23,7 @@ t=json.load(sys.stdin)["tailscale"]
 print(t["apiKey"]); print(t["tailnet"])'
 }
 
-api() { curl -fsS -u "$APIKEY:" -H 'Content-Type: application/json' "$@"; }
+api() { curl -fsS -K <(printf 'user = "%s:"\n' "$APIKEY") -H 'Content-Type: application/json' "$@"; }
 
 mint_key() {
   api -X POST "https://api.tailscale.com/api/v2/tailnet/$TAILNET/keys" \
