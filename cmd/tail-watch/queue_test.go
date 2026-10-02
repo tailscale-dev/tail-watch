@@ -42,6 +42,7 @@ func TestMemQueueOrderAndOverflow(t *testing.T) {
 				IncidentID: "",
 				Attempted:  false,
 				UnitID:     "",
+				Mention:    "",
 			},
 		)
 	}
@@ -73,6 +74,7 @@ func TestOverflowSparesInFlight(t *testing.T) {
 		IncidentID: "",
 		Attempted:  false,
 		UnitID:     "",
+		Mention:    "",
 	}
 	second := &queued{
 		Seq:        b.seq(),
@@ -80,6 +82,7 @@ func TestOverflowSparesInFlight(t *testing.T) {
 		IncidentID: "",
 		Attempted:  false,
 		UnitID:     "",
+		Mention:    "",
 	}
 	b.push("a", first)
 	b.push("a", second)
@@ -92,6 +95,7 @@ func TestOverflowSparesInFlight(t *testing.T) {
 			IncidentID: "",
 			Attempted:  false,
 			UnitID:     "",
+			Mention:    "",
 		},
 	)
 	ids := []string{}
@@ -131,6 +135,7 @@ func TestNeverAttemptedDownDropTakesRecovery(t *testing.T) {
 		},
 		testNow(),
 		[]string{"a"},
+		"",
 	)
 	b.closeIncident(inc, recFor(b))
 	q := b.queues["a"]
@@ -169,6 +174,7 @@ func TestAttemptedDownKeepsRecoveryEligible(t *testing.T) {
 			},
 			testNow(),
 			[]string{"a"},
+			"",
 		)
 		down := b.queues["a"].Peek(1)[0]
 		u := b.beginUnit("a", down.Event.ID, []*queued{down}, []byte("body"))
@@ -201,6 +207,7 @@ func TestRecoveryAfterDropStillEligibleWhenAttempted(t *testing.T) {
 		},
 		testNow(),
 		[]string{"a"},
+		"",
 	)
 	down := b.queues["a"].Peek(1)[0]
 	u := b.beginUnit("a", down.Event.ID, []*queued{down}, []byte("body"))
@@ -228,6 +235,7 @@ func TestRecoveryIneligibleAfterUnattemptedDrop(t *testing.T) {
 		},
 		testNow(),
 		[]string{"a"},
+		"",
 	)
 	down := b.queues["a"].Peek(1)[0]
 	b.queues["a"].Remove(down.Seq)
@@ -255,6 +263,7 @@ func TestFilteredSinkNeverGetsRecovery(t *testing.T) {
 		},
 		testNow(),
 		[]string{"a"},
+		"",
 	)
 	b.closeIncident(inc, recFor(b))
 	if b.queues["b"].Len() != 0 {
@@ -282,6 +291,7 @@ func TestRecoveryBypassesFiltersAndSkipsRemovedSink(t *testing.T) {
 		},
 		testNow(),
 		[]string{"a", "gone"},
+		"",
 	)
 	b.closeIncident(inc, recFor(b))
 	if got := b.incidents["evt_D1"].Sinks["gone"].Rec; got != phaseDropped {
@@ -309,6 +319,7 @@ func TestAckReleasesClosingIncident(t *testing.T) {
 		},
 		testNow(),
 		[]string{"a"},
+		"",
 	)
 	b.closeIncident(inc, recFor(b))
 	items := b.queues["a"].Peek(2)
@@ -343,6 +354,7 @@ func TestNewOutageOpensWhileRecoveryPending(t *testing.T) {
 		},
 		testNow(),
 		[]string{"a"},
+		"",
 	)
 	b.closeIncident(first, recFor(b))
 	second := b.openIncident(
@@ -359,6 +371,7 @@ func TestNewOutageOpensWhileRecoveryPending(t *testing.T) {
 		},
 		testNow(),
 		[]string{"a"},
+		"",
 	)
 	if second.ID == first.ID || b.openIncidentFor("nas") != second {
 		t.Fatal("a fresh outage needs its own incident")
@@ -601,7 +614,7 @@ func TestExpiredMemberDropsWholeAttemptedBatch(t *testing.T) {
 	old := testNow().Add(-2 * time.Hour)
 	for i, at := range []time.Time{testNow(), old, testNow()} {
 		b.push("a", &queued{
-			Seq: b.seq(), IncidentID: "", Attempted: false, UnitID: "",
+			Seq: b.seq(), IncidentID: "", Attempted: false, UnitID: "", Mention: "",
 			Event: plainEvent("evt_"+string(rune('A'+i)), at),
 		})
 	}
@@ -615,5 +628,35 @@ func TestExpiredMemberDropsWholeAttemptedBatch(t *testing.T) {
 	}
 	if b.queues["a"].Len() != 0 || len(b.units) != 0 {
 		t.Fatal("the batch and its members must be gone")
+	}
+}
+
+func TestOldStateWithoutMentionLoads(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	raw := []byte(`{
+		"version": 1,
+		"next_seq": 2,
+		"queues": {
+			"a": [{
+				"seq": 1,
+				"event": {
+					"version": 1,
+					"id": "evt_old",
+					"type": "target.down",
+					"severity": "page",
+					"time": "2026-04-02T14:02:11Z",
+					"collector": {"name": "monitor-nyc"}
+				}
+			}]
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(dir, stateFileName), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := newDiskNotifier(t, dir, testSink("a"))
+	got := h.n.b.queues["a"].items
+	if len(got) != 1 || got[0].Mention != "" || got[0].Event.ID != "evt_old" {
+		t.Fatalf("%+v", got)
 	}
 }

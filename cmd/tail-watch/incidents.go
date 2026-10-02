@@ -71,7 +71,7 @@ func (d targetDef) implicitTarget() *Target {
 		FailThreshold: base.FailThreshold, RecoverThreshold: base.RecoverThreshold,
 		FlapLimit: base.FlapLimit, FlapWindow: base.FlapWindow, Network: NetworkTailnet,
 		Checks:   []check{tspingCheck{resolver: nil}},
-		Implicit: true, StableID: tailcfg.StableNodeID(d.StableID), NodeID: tailcfg.NodeID(d.NodeID),
+		Implicit: true, StableID: tailcfg.StableNodeID(d.StableID), NodeID: tailcfg.NodeID(d.NodeID), Route: "",
 	}
 }
 
@@ -94,6 +94,9 @@ type queued struct {
 	Event      Event  `json:"event"`
 	Attempted  bool   `json:"attempted,omitempty"`
 	UnitID     string `json:"unit_id,omitempty"`
+	// Mention is the route mention for a page-severity down. It is not part of
+	// the event payload. An empty value falls back to the sink's mention.
+	Mention string `json:"mention,omitempty"`
 }
 
 // unit is one request: a single event, a webhook batch or a Slack group.
@@ -196,7 +199,7 @@ func (b *book) push(sink string, it *queued) {
 }
 
 // openIncident records a new outage and queues its down event for sinks.
-func (b *book) openIncident(ev Event, def targetDef, downSince time.Time, sinks []string) *incident {
+func (b *book) openIncident(ev Event, def targetDef, downSince time.Time, sinks []string, mention string) *incident {
 	inc := &incident{
 		ID: ev.ID, Status: incidentOpen, Target: def, Down: ev, DownSince: downSince,
 		Recovery: nil, Sinks: map[string]*sinkDelivery{},
@@ -207,7 +210,9 @@ func (b *book) openIncident(ev Event, def targetDef, downSince time.Time, sinks 
 		inc.Sinks[name] = &sinkDelivery{Down: phasePending, DownTried: false, Rec: phaseNone, RecTried: false}
 	}
 	for _, name := range sinks {
-		b.push(name, &queued{Seq: b.seq(), IncidentID: inc.ID, Event: ev, Attempted: false, UnitID: ""})
+		b.push(name, &queued{
+			Seq: b.seq(), IncidentID: inc.ID, Event: ev, Attempted: false, UnitID: "", Mention: mention,
+		})
 	}
 	return inc
 }
@@ -230,7 +235,9 @@ func (b *book) closeIncident(inc *incident, rec Event) {
 			continue
 		}
 		d.Rec = phasePending
-		b.push(name, &queued{Seq: b.seq(), IncidentID: inc.ID, Event: rec, Attempted: false, UnitID: ""})
+		b.push(name, &queued{
+			Seq: b.seq(), IncidentID: inc.ID, Event: rec, Attempted: false, UnitID: "", Mention: "",
+		})
 	}
 	b.gc(inc)
 }

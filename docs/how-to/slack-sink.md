@@ -59,7 +59,10 @@ outside the config. Never put it in the YAML.
    ```
 
    - `mention_on_page` is prepended only to a `target.down` of severity
-     `page`, never to recoveries, flapping notices or warnings.
+     `page`, never to recoveries, flapping notices or warnings. A route's
+     `mention` replaces it for a page-severity down on that route. An empty
+     route mention falls back to `mention_on_page`. A group prints each
+     distinct page-down mention once, in queue order.
    - `status_url` turns each target line into a link to
      `<status_url>/#<target>`.
    - `group_wait` batches events that arrive together into one message.

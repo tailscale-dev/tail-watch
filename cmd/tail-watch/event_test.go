@@ -141,7 +141,7 @@ func TestPayloadGolden(t *testing.T) {
 		Dynamic: false,
 		Name:    "nyc-router", Addr: "100.64.0.9", Site: "nyc", Severity: SeverityPage, Implicit: true,
 		Parent: "", InsecureTLS: false, Interval: 0, Timeout: 0, FailThreshold: 0, RecoverThreshold: 0,
-		FlapLimit: 0, FlapWindow: 0, Network: "", Checks: nil, StableID: "", NodeID: 0,
+		FlapLimit: 0, FlapWindow: 0, Network: "", Checks: nil, StableID: "", NodeID: 0, Route: "",
 	}
 	implicit.Layer = layerUnrouted
 	implicit.Dependents = []string{"nyc-nas", "nyc-cam"}
@@ -296,7 +296,7 @@ func TestMapTransition(t *testing.T) {
 				Checks:           nil,
 				Implicit:         false,
 				StableID:         "",
-				NodeID:           0,
+				NodeID:           0, Route: "",
 			},
 			From:       tt.from,
 			To:         tt.to,
@@ -425,6 +425,62 @@ func TestSinkAccepts(t *testing.T) {
 	for _, tt := range tests {
 		if got := tt.sink.accepts(tt.ev, tt.tags); got != tt.want {
 			t.Errorf("%s: got %v want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestExplainReasons(t *testing.T) {
+	t.Parallel()
+	tr := goldenTransition()
+	down := newDownEvent("evt_A", goldenCollector(), tr)
+	flap := newFlappingEvent("evt_B", goldenCollector(), tr)
+	base := testSink("s")
+	with := func(mut func(*SinkConfig)) SinkConfig {
+		s := base
+		mut(&s)
+		return s
+	}
+	tests := []struct {
+		name   string
+		sink   SinkConfig
+		ev     Event
+		tags   []string
+		ok     bool
+		reason string
+	}{
+		{"accepts", base, down, nil, true, ""},
+		{"events", with(func(s *SinkConfig) { s.Events = []EventType{EventRecovered} }), down, nil, false, "events"},
+		{"events before severity", with(func(s *SinkConfig) {
+			s.Events = []EventType{EventRecovered}
+			s.MinSeverity = SeverityPage
+		}), flap, nil, false, "events"},
+		{"min_severity", with(func(s *SinkConfig) { s.MinSeverity = SeverityPage }), flap, nil, false, "min_severity"},
+		{"match.sites", with(func(s *SinkConfig) { s.Match.Sites = []string{"sfo"} }), down, nil, false, "match.sites"},
+		{
+			"match.targets",
+			with(func(s *SinkConfig) { s.Match.Targets = []string{"sfo-*"} }),
+			down,
+			nil,
+			false,
+			"match.targets",
+		},
+		{
+			"match.tags",
+			with(func(s *SinkConfig) { s.Match.Tags = []string{"tag:nas"} }),
+			down,
+			nil,
+			false,
+			"match.tags",
+		},
+		{"test bypasses", with(func(s *SinkConfig) {
+			s.Events = []EventType{EventDown}
+			s.MinSeverity = SeverityPage
+		}), newTestEvent("evt_T", goldenCollector(), tr.At), nil, true, ""},
+	}
+	for _, tt := range tests {
+		ok, reason := tt.sink.explain(tt.ev, tt.tags)
+		if ok != tt.ok || reason != tt.reason {
+			t.Errorf("%s: got %v %q want %v %q", tt.name, ok, reason, tt.ok, tt.reason)
 		}
 	}
 }

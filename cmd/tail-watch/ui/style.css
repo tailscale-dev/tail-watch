@@ -73,7 +73,15 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monosp
 }
 .brand { display: flex; align-items: baseline; gap: 12px; }
 .brand h1 { font-size: 20px; letter-spacing: -0.01em; }
-.sub { color: var(--muted); font-size: 15px; }
+.views { display: flex; gap: 14px; }
+.views a { color: var(--muted); text-decoration: none; font-size: 15px; }
+.views a[aria-current="page"] { color: var(--text); font-weight: 600; }
+#view-routes { display: grid; gap: 10px; }
+#view-routes h2 { font-size: 16px; margin: 12px 0 0; }
+#r-sinks { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.sink-choice { display: inline-flex; align-items: center; gap: 6px; }
+code.missing { color: var(--down); border-color: var(--down); }
+#route-table code { max-width: none; }
 
 main { max-width: 1120px; margin: 0 auto; padding: 0 16px 48px; }
 
@@ -215,6 +223,20 @@ input:not([type="checkbox"]), select, textarea {
 textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
 input[readonly] { color: var(--muted); background: var(--surface-2); }
 .hint { color: var(--muted); font-size: 12.5px; }
+#routing-explain { max-width: 68em; }
+#route-preview { display: grid; gap: 2px; }
+#route-preview h3 {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.preview-row { display: flex; gap: 6px; align-items: baseline; }
+.preview-row.sent { color: var(--up); }
+.preview-row.dropped { color: var(--down); }
+.preview-row.unknown { color: var(--quiet); }
 .error { color: var(--down); font-size: 12.5px; white-space: pre-line; }
 .error:empty { display: none; }
 .field.invalid > input, .field.invalid > select, .field.invalid > textarea { border-color: var(--down); }
@@ -269,6 +291,11 @@ details .grid { margin-top: 10px; }
 .check-result .failed { color: var(--down); }
 #probe-failures { margin: 0; padding-left: 30px; }
 #probe-failures code { font-weight: 600; }
+
+@media (max-width: 720px) {
+  .brand { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .brand h1 { white-space: nowrap; }
+}
 
 @media (max-width: 940px) {
   .bar { padding-top: 16px; }

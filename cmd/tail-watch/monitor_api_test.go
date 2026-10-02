@@ -59,12 +59,17 @@ func (f *flakyRegistry) AddTarget(t *Target) error {
 
 func newAPIEnv(t *testing.T) *apiEnv {
 	t.Helper()
-	cfg, err := parseConfig([]byte(`
+	return newAPIEnvFrom(t, `
 collector: {state_dir: /unused, ui: true}
 targets:
   - {name: nyc-router, addr: 10.0.0.1, checks: [icmp]}
   - {name: nyc-nas, addr: 10.0.0.2, checks: [icmp, 'tcp:445']}
-`))
+`)
+}
+
+func newAPIEnvFrom(t *testing.T, src string) *apiEnv {
+	t.Helper()
+	cfg, err := parseConfig([]byte(src))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -979,6 +984,9 @@ func TestMountMonitorUI(t *testing.T) {
 		for _, r := range []struct{ method, path string }{
 			{"GET", "/ui/"}, {"GET", "/api/v1/targets"}, {"POST", "/api/v1/targets"},
 			{"POST", "/api/v1/probe"}, {"GET", "/api/v1/peers"}, {"GET", "/ui/app.js"},
+			{"GET", "/api/v1/routes"}, {"POST", "/api/v1/routes"},
+			{"PUT", "/api/v1/routes/db-team"}, {"DELETE", "/api/v1/routes/db-team"},
+			{"GET", "/api/v1/sinks"}, {"POST", "/api/v1/route-preview"},
 		} {
 			if code, _ := get(t, mux, r.method, r.path); code != http.StatusNotFound {
 				t.Errorf("%s %s: %d", r.method, r.path, code)

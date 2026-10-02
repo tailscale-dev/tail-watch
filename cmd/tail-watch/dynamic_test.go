@@ -163,3 +163,120 @@ func TestCorruptStoreStopsStartupWhenUIOn(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+func TestOnceReadsNeitherStore(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, routesFileName), []byte("nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, dynamicFileName), []byte("nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := appWithState(dir, slog.New(slog.DiscardHandler), true)
+	if err := a.loadRouteFile(true); err != nil || a.uiRoutes != nil {
+		t.Fatalf("routes %v %v", err, a.uiRoutes)
+	}
+	if err := a.loadDynamicTargets(true); err != nil || a.dynamic != nil {
+		t.Fatalf("targets %v %v", err, a.dynamic)
+	}
+}
+
+func TestDynamicMonitorOnUIRouteReloads(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := saveRoutes(
+		dir,
+		[]dynamicRoute{{Name: "db-team", Severity: "warn", Sinks: []string{"hook"}, Mention: ""}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	mon := dynWith(dynT("pg", "10.0.0.9", "icmp"), func(d *dynamicTarget) { d.Route = "db-team" })
+	if err := saveDynamic(dir, []dynamicTarget{mon}); err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.DiscardHandler)
+	reload := func() *Config {
+		t.Helper()
+		fresh, parseErr := parseConfig([]byte(`
+sinks:
+  - {name: hook, type: webhook, url_env: U}
+targets:
+  - {name: nyc, addr: 10.0.0.1, checks: [icmp]}
+`))
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		fresh.Collector.StateDir = dir
+		a := appWithState(dir, log, true)
+		a.cfg = fresh
+		if loadErr := a.loadRouteFile(false); loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if loadErr := a.loadDynamicTargets(false); loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		a.cfg.mergeRoutes(a.uiRoutes, log)
+		a.cfg.mergeDynamic(a.dynamic, log)
+		return a.cfg
+	}
+	first := reload()
+	pg := targetByName(t, first, "pg")
+	if pg.Route != "db-team" || pg.Severity != SeverityWarn {
+		t.Fatalf("route %q severity %q", pg.Route, pg.Severity)
+	}
+	second := reload()
+	pg = targetByName(t, second, "pg")
+	if pg.Route != "db-team" || pg.Severity != SeverityWarn {
+		t.Fatalf("after reload route %q severity %q", pg.Route, pg.Severity)
+	}
+}
+
+func TestDynamicMissingRouteSkippedAndKept(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mon := dynWith(dynT("pg", "10.0.0.9", "icmp"), func(d *dynamicTarget) { d.Route = "nope" })
+	if err := saveDynamic(dir, []dynamicTarget{mon}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, dynamicFileName)
+	before, _ := os.ReadFile(path)
+	cfg, err := parseConfig([]byte(`
+sinks:
+  - {name: hook, type: webhook, url_env: U}
+targets:
+  - {name: nyc, addr: 10.0.0.1, checks: [icmp]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := loadDynamic(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	cfg.mergeDynamic(entries, slog.New(slog.NewJSONHandler(&logs, nil)))
+	for _, tgt := range cfg.Targets {
+		if tgt.Name == "pg" {
+			t.Fatal("monitor naming a missing route was loaded")
+		}
+	}
+	if !strings.Contains(logs.String(), "nope") {
+		t.Fatalf("log %s", logs.String())
+	}
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Fatal("targets.json was rewritten")
+	}
+}
+
+func targetByName(t *testing.T, cfg *Config, name string) Target {
+	t.Helper()
+	for _, tgt := range cfg.Targets {
+		if tgt.Name == name {
+			return tgt
+		}
+	}
+	t.Fatalf("no target %s", name)
+	return Target{}
+}

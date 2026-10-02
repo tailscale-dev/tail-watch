@@ -311,14 +311,21 @@ func (b *book) loseMemoryIntents() {
 			if inc.Recovery != nil && (d.Rec == phasePending || d.Rec == phaseAttempted) {
 				b.dropItem(
 					name,
-					&queued{Seq: 0, IncidentID: inc.ID, Event: *inc.Recovery, Attempted: false, UnitID: ""},
+					&queued{
+						Seq:        0,
+						IncidentID: inc.ID,
+						Event:      *inc.Recovery,
+						Attempted:  false,
+						UnitID:     "",
+						Mention:    "",
+					},
 					reasonRestart,
 				)
 			}
 			if d.Down == phasePending || d.Down == phaseAttempted {
 				b.dropItem(
 					name,
-					&queued{Seq: 0, IncidentID: inc.ID, Event: inc.Down, Attempted: false, UnitID: ""},
+					&queued{Seq: 0, IncidentID: inc.ID, Event: inc.Down, Attempted: false, UnitID: "", Mention: ""},
 					reasonRestart,
 				)
 			}

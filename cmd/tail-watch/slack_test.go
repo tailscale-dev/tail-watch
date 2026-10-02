@@ -21,7 +21,12 @@ func slackSinkCfg(mut func(*SinkConfig)) SinkConfig {
 
 func renderJSON(t *testing.T, evs []Event, cfg SinkConfig) []byte {
 	t.Helper()
-	b, err := marshalJSON(renderSlack(evs, cfg, goldenCollector()))
+	return renderMentions(t, evs, cfg, nil)
+}
+
+func renderMentions(t *testing.T, evs []Event, cfg SinkConfig, mentions []string) []byte {
+	t.Helper()
+	b, err := marshalJSON(renderSlack(evs, cfg, goldenCollector(), mentions))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +82,7 @@ func TestSlackGolden(t *testing.T) {
 		Network:          NetworkTailnet,
 		Checks:           nil,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	router.Layer = layerUnrouted
 	for i := range 14 {
@@ -93,12 +98,13 @@ func TestSlackGolden(t *testing.T) {
 	linked := slackSinkCfg(func(sc *SinkConfig) { sc.StatusURL = "https://monitor-nyc.example.ts.net:9109" })
 
 	cases := map[string][]byte{
-		"down":              renderJSON(t, []Event{down}, slackSinkCfg(nil)),
-		"down-mention":      renderJSON(t, []Event{down}, mention),
-		"recovered":         renderJSON(t, []Event{rec}, mention),
-		"router-14-deps":    renderJSON(t, []Event{routerDown}, slackSinkCfg(nil)),
-		"warn-with-mention": renderJSON(t, []Event{warnDown}, mention),
-		"down-status-link":  renderJSON(t, []Event{down}, linked),
+		"down":               renderJSON(t, []Event{down}, slackSinkCfg(nil)),
+		"down-mention":       renderJSON(t, []Event{down}, mention),
+		"recovered":          renderJSON(t, []Event{rec}, mention),
+		"router-14-deps":     renderJSON(t, []Event{routerDown}, slackSinkCfg(nil)),
+		"warn-with-mention":  renderJSON(t, []Event{warnDown}, mention),
+		"down-status-link":   renderJSON(t, []Event{down}, linked),
+		"down-route-mention": renderMentions(t, []Event{down, warnDown}, mention, []string{"<!subteam^S0DB>", ""}),
 		"recovered-removed": renderJSON(
 			t,
 			[]Event{
@@ -140,7 +146,7 @@ func TestSlackMessageContent(t *testing.T) {
 	t.Parallel()
 	tr := goldenTransition()
 	down := newDownEvent("evt_D1", goldenCollector(), tr)
-	msg := renderSlack([]Event{down}, slackSinkCfg(nil), goldenCollector())
+	msg := renderSlack([]Event{down}, slackSinkCfg(nil), goldenCollector(), nil)
 	if !strings.HasPrefix(msg.Text, ":red_circle: DOWN  nyc-nas  tcp:445  (service)") {
 		t.Fatalf("text starts %q", msg.Text)
 	}
@@ -176,7 +182,7 @@ func TestSlackMessageContent(t *testing.T) {
 		nil,
 		"",
 	)
-	got := renderSlack([]Event{rec}, slackSinkCfg(nil), goldenCollector()).Text
+	got := renderSlack([]Event{rec}, slackSinkCfg(nil), goldenCollector(), nil).Text
 	want := ":large_green_circle: RECOVERED nyc-nas tcp:445 after 14m"
 	if got != want {
 		t.Fatalf("recovered %q want %q", got, want)
@@ -190,6 +196,7 @@ func TestSlackMessageContent(t *testing.T) {
 		[]Event{newDownEvent("evt_D2", goldenCollector(), routerTr)},
 		slackSinkCfg(nil),
 		goldenCollector(),
+		nil,
 	).Text
 	if !strings.Contains(text, "and 14 targets behind it") || !strings.Contains(text, "dep-09") ||
 		strings.Contains(text, "dep-10") {
@@ -202,6 +209,7 @@ func TestSlackMessageContent(t *testing.T) {
 		[]Event{newDownEvent("evt_D3", goldenCollector(), implicit)},
 		slackSinkCfg(nil),
 		goldenCollector(),
+		nil,
 	).Text
 	if !strings.Contains(text, "nyc-nas (learned)") {
 		t.Fatalf("implicit target not marked: %q", text)
@@ -245,15 +253,15 @@ func TestSlackMentionsOnlyPageDowns(t *testing.T) {
 	flap := newFlappingEvent("evt_F1", goldenCollector(), tr)
 	started := newStartedEvent("evt_S1", goldenCollector(), tr.At)
 	for name, ev := range map[string]Event{"warn": warnDown, "recovery": rec, "flapping": flap, "info": started} {
-		if strings.Contains(renderSlack([]Event{ev}, cfg, goldenCollector()).Text, mention) {
+		if strings.Contains(renderSlack([]Event{ev}, cfg, goldenCollector(), nil).Text, mention) {
 			t.Fatalf("%s must not carry the mention", name)
 		}
 	}
-	msg := renderSlack([]Event{pageDown}, cfg, goldenCollector())
+	msg := renderSlack([]Event{pageDown}, cfg, goldenCollector(), nil)
 	if !strings.HasPrefix(msg.Text, mention+"\n") {
 		t.Fatalf("page down must start with the mention: %q", msg.Text)
 	}
-	mixed := renderSlack([]Event{warnDown, pageDown}, cfg, goldenCollector())
+	mixed := renderSlack([]Event{warnDown, pageDown}, cfg, goldenCollector(), nil)
 	if !strings.HasPrefix(mixed.Text, mention) {
 		t.Fatal("a group holding any page down starts with the mention")
 	}
@@ -266,6 +274,7 @@ func TestSlackStatusLinks(t *testing.T) {
 		[]Event{newDownEvent("evt_D1", goldenCollector(), goldenTransition())},
 		cfg,
 		goldenCollector(),
+		nil,
 	).Blocks
 	if !strings.Contains(blocks[0].Text.Text, "<https://monitor-nyc.example.ts.net:9109/#nyc-nas|nyc-nas>") {
 		t.Fatalf("no status link: %q", blocks[0].Text.Text)
@@ -280,6 +289,7 @@ func TestSlackEscapesUserText(t *testing.T) {
 		[]Event{newDownEvent("evt_D1", goldenCollector(), tr)},
 		slackSinkCfg(nil),
 		goldenCollector(),
+		nil,
 	).Text
 	if strings.Contains(text, "<@U123>") || strings.Contains(text, "<!channel>") {
 		t.Fatalf("unescaped control syntax: %q", text)
@@ -384,7 +394,7 @@ func TestSlackURLCheckIsNotAutoLinked(t *testing.T) {
 	tr := goldenTransition()
 	tr.Check = check
 	down := newDownEvent("evt_D1", goldenCollector(), tr)
-	msg := renderSlack([]Event{down}, slackSinkCfg(nil), goldenCollector())
+	msg := renderSlack([]Event{down}, slackSinkCfg(nil), goldenCollector(), nil)
 	rich := msg.Blocks[0].Text.Text
 	if !strings.Contains(rich, "`"+check+"`") {
 		t.Fatalf("a URL check must be a code span so Slack does not encode the pipe: %q", rich)
@@ -399,7 +409,7 @@ func TestSlackURLCheckIsNotAutoLinked(t *testing.T) {
 		},
 		Down: down, DownSince: time.Time{}, Recovery: nil, Sinks: nil,
 	}, tr.At.Add(time.Minute), nil, "")
-	if got := renderSlack([]Event{rec}, slackSinkCfg(nil), goldenCollector()).Blocks[0].Text.Text; !strings.Contains(
+	if got := renderSlack([]Event{rec}, slackSinkCfg(nil), goldenCollector(), nil).Blocks[0].Text.Text; !strings.Contains(
 		got,
 		"`"+check+"`",
 	) {
@@ -409,8 +419,48 @@ func TestSlackURLCheckIsNotAutoLinked(t *testing.T) {
 		[]Event{newDownEvent("evt_D2", goldenCollector(), goldenTransition())},
 		slackSinkCfg(nil),
 		goldenCollector(),
+		nil,
 	)
 	if strings.Contains(plain.Blocks[0].Text.Text, "`") {
 		t.Fatalf("a non-URL check must stay plain: %q", plain.Blocks[0].Text.Text)
+	}
+}
+
+func TestSlackRouteMentions(t *testing.T) {
+	t.Parallel()
+	cfg := slackSinkCfg(func(sc *SinkConfig) { sc.MentionOnPage = "<!here>" })
+	col := goldenCollector()
+	tr := goldenTransition()
+	page := newDownEvent("evt_D1", col, tr)
+	warnTr := goldenTransition()
+	warnTr.Target.Severity = SeverityWarn
+	warn := newDownEvent("evt_D2", col, warnTr)
+	rec := newRecoveredEvent("evt_R1", col, &incident{
+		ID: "", Status: incidentOpen, Target: targetDef{
+			Name: "", Addr: "", Site: "", Parent: "", Severity: SeverityPage, Implicit: false, StableID: "", NodeID: 0,
+		},
+		Down: page, DownSince: time.Time{}, Recovery: nil, Sinks: nil,
+	}, tr.At.Add(time.Minute), nil, "")
+	flap := newFlappingEvent("evt_F1", col, tr)
+
+	replaced := renderSlack([]Event{page}, cfg, col, []string{"<!subteam^S0DB>"}).Text
+	if !strings.HasPrefix(replaced, "<!subteam^S0DB>\n") || strings.Contains(replaced, "<!here>") {
+		t.Fatalf("route mention should replace the sink mention: %q", replaced)
+	}
+	fallback := renderSlack([]Event{page}, cfg, col, []string{""}).Text
+	if !strings.HasPrefix(fallback, "<!here>\n") {
+		t.Fatalf("empty route mention should fall back: %q", fallback)
+	}
+	for name, ev := range map[string]Event{"warn": warn, "recovery": rec, "flapping": flap} {
+		text := renderSlack([]Event{ev}, cfg, col, []string{"<!subteam^S0DB>"}).Text
+		if strings.Contains(text, "<!subteam^S0DB>") || strings.Contains(text, "<!here>") {
+			t.Fatalf("%s carried a mention: %q", name, text)
+		}
+	}
+	page2 := newDownEvent("evt_D3", col, tr)
+	group := renderSlack([]Event{page, warn, page2, page}, cfg, col, []string{"<!a>", "<!a>", "<!b>", "<!a>"}).Text
+	if !strings.HasPrefix(group, "<!a>\n<!b>\n") || strings.Count(group, "<!a>") != 1 ||
+		strings.Count(group, "<!b>") != 1 {
+		t.Fatalf("group mentions %q", group)
 	}
 }

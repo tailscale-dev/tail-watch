@@ -58,7 +58,7 @@ func TestTCPOpenAndRefused(t *testing.T) {
 			Checks:           nil,
 			Implicit:         false,
 			StableID:         "",
-			NodeID:           0,
+			NodeID:           0, Route: "",
 		},
 	)
 	if err != nil {
@@ -94,7 +94,7 @@ func TestTCPOpenAndRefused(t *testing.T) {
 			Checks:           nil,
 			Implicit:         false,
 			StableID:         "",
-			NodeID:           0,
+			NodeID:           0, Route: "",
 		},
 	)
 	if err == nil || !strings.Contains(err.Error(), "connection refused") {
@@ -143,7 +143,7 @@ func TestHTTPChecks(t *testing.T) {
 			Checks:           nil,
 			Implicit:         false,
 			StableID:         "",
-			NodeID:           0,
+			NodeID:           0, Route: "",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func TestHTTPChecks(t *testing.T) {
 			Checks:           nil,
 			Implicit:         false,
 			StableID:         "",
-			NodeID:           0,
+			NodeID:           0, Route: "",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -193,7 +193,7 @@ func TestHTTPChecks(t *testing.T) {
 			Checks:           nil,
 			Implicit:         false,
 			StableID:         "",
-			NodeID:           0,
+			NodeID:           0, Route: "",
 		})
 		if err == nil || !strings.Contains(err.Error(), "500") {
 			t.Fatal(err)
@@ -217,7 +217,7 @@ func TestHTTPChecks(t *testing.T) {
 			Checks:           nil,
 			Implicit:         false,
 			StableID:         "",
-			NodeID:           0,
+			NodeID:           0, Route: "",
 		})
 		if err == nil || !strings.Contains(err.Error(), "DSM") ||
 			!strings.Contains(err.Error(), strings.Repeat("a", 300)) {
@@ -249,7 +249,7 @@ func TestHTTPChecks(t *testing.T) {
 			Checks:           nil,
 			Implicit:         false,
 			StableID:         "",
-			NodeID:           0,
+			NodeID:           0, Route: "",
 		})
 		if err == nil {
 			t.Fatal("expected tls error")
@@ -272,7 +272,7 @@ func TestHTTPChecks(t *testing.T) {
 			Checks:           nil,
 			Implicit:         false,
 			StableID:         "",
-			NodeID:           0,
+			NodeID:           0, Route: "",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -298,7 +298,7 @@ func TestICMPPermissionAndFamily(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	})
 	if err == nil || !strings.Contains(err.Error(), "net.ipv4.ping_group_range") ||
 		!strings.Contains(err.Error(), "CAP_NET_RAW") {
@@ -324,7 +324,7 @@ func TestICMPPermissionAndFamily(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	})
 	if env6.lastListen != "ip6:icmp" {
 		t.Fatalf("listen network %s", env6.lastListen)
@@ -354,7 +354,7 @@ func TestICMPLoopback(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "net.ipv4.ping_group_range") {
@@ -396,6 +396,7 @@ func TestRunCheckRecordsTimeout(t *testing.T) {
 		listen:   "",
 		ui:       false,
 		dynamic:  nil,
+		uiRoutes: nil,
 		registry: nil,
 		resolver: nil,
 		presence: nil,
@@ -425,7 +426,7 @@ func TestRunCheckRecordsTimeout(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}, tcpCheck{port: 9})
 	if time.Since(start) > time.Second {
 		t.Fatalf("took %s", time.Since(start))

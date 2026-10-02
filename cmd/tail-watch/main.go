@@ -51,6 +51,8 @@ type app struct {
 	ui     bool
 	// dynamic holds the entries read from targets.json when the UI is on.
 	dynamic []dynamicTarget
+	// uiRoutes holds the entries read from routes.json when the UI is on.
+	uiRoutes []dynamicRoute
 	// registry is the live target registry built by startCollectors.
 	registry *runtimeRegistry
 	resolver *tsResolver
@@ -127,6 +129,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		ui:     ui,
 
 		dynamic:  nil,
+		uiRoutes: nil,
 		registry: nil,
 		resolver: nil,
 		presence: nil,
@@ -142,8 +145,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		collector: CollectorInfo{Name: "", TailscaleIP: ""},
 	}
 	a.pub.add(debugConsumer{log: log})
-	if dynErr := a.loadDynamicTargets(*onceFlag); dynErr != nil {
-		_, _ = fmt.Fprintf(stderr, "%v\n", dynErr)
+	if !a.loadStores(*onceFlag, stderr) {
 		return 1
 	}
 	if cfg.Collector.LocalOnly {
@@ -163,6 +165,24 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return a.runServer()
+}
+
+// loadStores reads the UI files and merges them when the UI is on. A false
+// return means startup must stop; the error is already on stderr.
+func (a *app) loadStores(once bool, stderr io.Writer) bool {
+	if routeErr := a.loadRouteFile(once); routeErr != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", routeErr)
+		return false
+	}
+	if dynErr := a.loadDynamicTargets(once); dynErr != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", dynErr)
+		return false
+	}
+	if a.ui {
+		a.cfg.mergeRoutes(a.uiRoutes, a.log)
+		a.cfg.mergeDynamic(a.dynamic, a.log)
+	}
+	return true
 }
 
 // registerUIFlag adds the tri-state --ui flag. The returned pointer stays nil
@@ -219,6 +239,7 @@ func (a *app) buildNotifier() error {
 	if err != nil {
 		return err
 	}
+	n.routes.Store(newRouteTable(a.cfg.Routes))
 	a.notify = n
 	return nil
 }
@@ -239,9 +260,13 @@ func runCheckConfig(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
+	for _, r := range cfg.Routes {
+		_, _ = fmt.Fprintln(stdout, describeRoute(r))
+	}
 	for _, t := range cfg.Targets {
-		_, _ = fmt.Fprintf(stdout, "%s interval=%s timeout=%s network=%s checks=%s\n",
-			t.Name, t.Interval, t.Timeout, t.Network, formatChecks(t.Checks))
+		_, _ = fmt.Fprintf(stdout, "%s interval=%s timeout=%s network=%s checks=%s %s\n",
+			t.Name, t.Interval, t.Timeout, t.Network, formatChecks(t.Checks),
+			targetRouteLine(t, cfg.Routes, cfg.Sinks))
 	}
 	for _, s := range cfg.Sinks {
 		_, _ = fmt.Fprintln(stdout, describeSink(s))
@@ -317,9 +342,7 @@ func (a *app) schedule(ctx context.Context, p *prober.Prober) []func() error {
 }
 
 func (a *app) startCollectors(ctx context.Context, p *prober.Prober) *runtimeRegistry {
-	if a.ui {
-		a.cfg.mergeDynamic(a.dynamic, a.log)
-	}
+	// Routes and dynamic monitors are merged in run, before the notifier.
 	// presence stays nil in local-only mode; its methods are nil-safe.
 	if !a.cfg.Collector.LocalOnly {
 		a.presence = newPresence(a.log, a.clock, a.watchBus)
@@ -497,8 +520,10 @@ func (a *app) mountMonitorUI(mux *http.ServeMux) {
 	mgr.clock = a.clock
 	mgr.bindChecks = a.bindChecks
 	mgr.peers = a.presence
+	mgr.routeEntries = slices.Clone(a.uiRoutes)
 	if a.notify != nil {
 		mgr.closeIncident = a.notify.closeRemoved
+		mgr.published = &a.notify.routes
 	}
 	mgr.routes(mux)
 	mux.Handle("/ui/", uiHandler())

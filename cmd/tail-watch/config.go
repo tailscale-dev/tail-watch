@@ -50,6 +50,7 @@ const (
 type Config struct {
 	Collector CollectorConfig
 	Targets   []Target
+	Routes    []Route
 	Sinks     []SinkConfig
 	Heartbeat *HeartbeatConfig
 	// RawTargets and Base are the YAML targets and resolved defaults, kept so
@@ -71,10 +72,13 @@ type CollectorConfig struct {
 
 // Target is one monitored device with its checks and resolved timings.
 type Target struct {
-	Name             string
-	Addr             string
-	Site             string
-	Severity         Severity
+	Name     string
+	Addr     string
+	Site     string
+	Severity Severity
+	// Route names a route whose severity and sinks apply to this target.
+	// It is mutually exclusive with an explicit severity.
+	Route            string
 	Parent           string
 	InsecureTLS      bool
 	Interval         time.Duration
@@ -142,6 +146,7 @@ type rawConfig struct {
 	Collector rawCollector  `yaml:"collector"`
 	Defaults  rawDefaults   `yaml:"defaults"`
 	Targets   []rawTarget   `yaml:"targets"`
+	Routes    []rawRoute    `yaml:"routes"`
 	Sinks     []rawSink     `yaml:"sinks"`
 	Heartbeat *rawHeartbeat `yaml:"heartbeat"`
 }
@@ -167,6 +172,7 @@ type rawTarget struct {
 	Addr             string       `yaml:"addr"`
 	Site             string       `yaml:"site"`
 	Severity         string       `yaml:"severity"`
+	Route            string       `yaml:"route"`
 	Parent           string       `yaml:"parent"`
 	InsecureTLS      bool         `yaml:"insecure_tls"`
 	Interval         yamlDuration `yaml:"interval"`
@@ -266,8 +272,6 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 		errs = append(errs, fmt.Errorf("collector.ui: %w", errUILocalOnly))
 	}
 	base := resolveDefaults(&errs, raw.Defaults)
-	targets, targetErrs := resolveTargets(raw.Targets, targetRules{base: base, localOnly: localOnly})
-	errs = append(errs, targetErrs...)
 	cfg := &Config{
 		Collector: CollectorConfig{
 			Listen:    raw.Collector.Listen,
@@ -275,13 +279,18 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 			UI:        raw.Collector.UI != nil && *raw.Collector.UI,
 			LocalOnly: localOnly,
 		},
-		Targets:    targets,
+		Targets:    nil,
+		Routes:     nil,
 		Sinks:      nil,
 		Heartbeat:  nil,
 		RawTargets: raw.Targets,
 		Base:       base,
 	}
 	cfg.Sinks = resolveSinks(&errs, raw.Sinks, raw.Collector.StateDir)
+	cfg.Routes = resolveRoutes(&errs, raw.Routes, cfg.Sinks)
+	targets, targetErrs := resolveTargets(raw.Targets, targetRules{base: base, localOnly: localOnly}, cfg.Routes)
+	errs = append(errs, targetErrs...)
+	cfg.Targets = targets
 	cfg.Heartbeat = resolveHeartbeat(&errs, raw.Heartbeat)
 	return cfg, errs
 }
@@ -299,13 +308,13 @@ func resolveDefaults(errs *[]error, d rawDefaults) timing {
 
 // resolveTargets validates a target list as a whole: each target, then the
 // parent references and parent cycles across the list.
-func resolveTargets(raw []rawTarget, rules targetRules) ([]Target, []error) {
+func resolveTargets(raw []rawTarget, rules targetRules, routes []Route) ([]Target, []error) {
 	var errs []error
 	targets := make([]Target, len(raw))
 	seen := map[string]int{}
 	checksOK := make([]bool, len(raw))
 	for i, rt := range raw {
-		t, ok := resolveTarget(&errs, i, rt, rules, seen)
+		t, ok := resolveTarget(&errs, i, rt, rules, seen, routes)
 		targets[i] = t
 		checksOK[i] = ok
 	}
@@ -351,7 +360,9 @@ func resolveTargets(raw []rawTarget, rules targetRules) ([]Target, []error) {
 	return targets, errs
 }
 
-func resolveTarget(errs *[]error, i int, rt rawTarget, rules targetRules, seen map[string]int) (Target, bool) {
+func resolveTarget(
+	errs *[]error, i int, rt rawTarget, rules targetRules, seen map[string]int, routes []Route,
+) (Target, bool) {
 	t := Target{
 		Name:             rt.Name,
 		Addr:             rt.Addr,
@@ -365,6 +376,7 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, rules targetRules, seen m
 		FlapLimit:        rules.base.FlapLimit,
 		FlapWindow:       rules.base.FlapWindow,
 		Severity:         SeverityPage,
+		Route:            "",
 		Network:          NetworkTailnet,
 
 		Checks:   nil,
@@ -397,6 +409,7 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, rules targetRules, seen m
 			fmt.Errorf("%s.severity: target %s: severity %q must be page or warn", loc, targetLabel(t), rt.Severity),
 		)
 	}
+	applyRoute(errs, loc, rt, routes, &t)
 	resolveNetwork(errs, loc, rt.Network, rules.localOnly, &t)
 
 	applyDur(errs, loc+".interval", rt.Interval, &t.Interval)
@@ -438,6 +451,30 @@ func resolveTarget(errs *[]error, i int, rt rawTarget, rules targetRules, seen m
 
 	ok := resolveChecks(errs, loc, rt.Checks, &t, rules.localOnly)
 	return t, ok
+}
+
+// applyRoute rejects a target that sets both keys, and one whose route is not
+// in routes. A known route supplies the target's severity.
+func applyRoute(errs *[]error, loc string, rt rawTarget, routes []Route, t *Target) {
+	if rt.Route == "" {
+		return
+	}
+	t.Route = rt.Route
+	if rt.Severity != "" {
+		*errs = append(*errs, fmt.Errorf(
+			"%s.route: target %s: route and severity are mutually exclusive", loc, targetLabel(*t),
+		))
+	}
+	for _, r := range routes {
+		if r.Name != rt.Route {
+			continue
+		}
+		t.Severity = r.Severity
+		return
+	}
+	*errs = append(*errs, fmt.Errorf(
+		"%s.route: target %s: unknown route %q", loc, targetLabel(*t), rt.Route,
+	))
 }
 
 // resolveNetwork sets t.Network. localOnly defaults an unset network to
@@ -598,7 +635,7 @@ func targetLabel(t Target) string {
 	if t.Name != "" {
 		return t.Name
 	}
-	return "(unnamed)"
+	return unnamedLabel
 }
 
 var targetNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -663,12 +700,12 @@ var (
 // prefixed with its field, such as checks[1]. A problem the candidate causes
 // elsewhere, such as an invalid parent for a dependent or a parent cycle, has
 // no field prefix.
-func (c *Config) validateCandidate(existing []rawTarget, candidate rawTarget) (Target, []error) {
+func (c *Config) validateCandidate(existing []rawTarget, candidate rawTarget, routes []Route) (Target, []error) {
 	all := append(slices.Clone(existing), candidate)
 	idx := len(existing)
 	rules := targetRules{base: c.Base, localOnly: c.Collector.LocalOnly}
-	targets, errs := resolveTargets(all, rules)
-	_, baseline := resolveTargets(existing, rules)
+	targets, errs := resolveTargets(all, rules, routes)
+	_, baseline := resolveTargets(existing, rules, routes)
 	known := make(map[string]bool, len(baseline))
 	for _, err := range baseline {
 		known[err.Error()] = true

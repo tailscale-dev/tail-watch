@@ -35,7 +35,7 @@ func TestTCPTimeoutNonAcceptingListener(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	})
 	if time.Since(start) > time.Second {
 		t.Fatalf("took %s", time.Since(start))

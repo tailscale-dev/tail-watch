@@ -170,7 +170,19 @@ func baseEvent(id string, typ EventType, sev Severity, at time.Time, col Collect
 }
 
 func newDownEvent(id string, col CollectorInfo, tr Transition) Event {
+	return newDownEventIn(id, col, tr, nil)
+}
+
+// newDownEventIn resolves severity from the live route table when the target
+// names a route that is present. A nil table, or a route the table does not
+// hold, keeps the severity already stored on the target.
+func newDownEventIn(id string, col CollectorInfo, tr Transition, routes *routeTable) Event {
 	sev := tr.Target.Severity
+	if tr.Target.Route != "" {
+		if r, ok := routes.get(tr.Target.Route); ok && r.Severity != "" {
+			sev = r.Severity
+		}
+	}
 	if sev == "" {
 		sev = SeverityPage
 	}
@@ -261,33 +273,41 @@ func mapTransition(tr Transition, open bool) mapKind {
 	}
 }
 
-// accepts reports whether the sink's routing filters pass ev. tags are the
-// tailnet tags of the node the event's target resolves to.
-func (s SinkConfig) accepts(ev Event, tags []string) bool {
+// explain reports whether the sink's filters pass ev and, when they do not,
+// the first reason in the order events, min_severity, match.sites,
+// match.targets, match.tags. tags are the tailnet tags of the node the
+// event's target resolves to. A passing event has an empty reason.
+func (s SinkConfig) explain(ev Event, tags []string) (bool, string) {
 	if ev.Type == EventTest {
-		return true
+		return true, ""
 	}
 	if len(s.Events) > 0 && !slices.Contains(s.Events, ev.Type) {
-		return false
+		return false, "events"
 	}
 	if ev.Severity.rank() < s.MinSeverity.rank() {
-		return false
+		return false, "min_severity"
 	}
 	if ev.Target == nil {
-		return true
+		return true, ""
 	}
 	m := s.Match
 	if len(m.Sites) > 0 && !slices.Contains(m.Sites, ev.Target.Site) {
-		return false
+		return false, "match.sites"
 	}
 	if len(m.Targets) > 0 && !slices.ContainsFunc(m.Targets, func(g string) bool {
 		ok, err := path.Match(g, ev.Target.Name)
 		return err == nil && ok
 	}) {
-		return false
+		return false, "match.targets"
 	}
 	if len(m.Tags) > 0 && !slices.ContainsFunc(m.Tags, func(t string) bool { return slices.Contains(tags, t) }) {
-		return false
+		return false, "match.tags"
 	}
-	return true
+	return true, ""
+}
+
+// accepts reports whether the sink's routing filters pass ev.
+func (s SinkConfig) accepts(ev Event, tags []string) bool {
+	ok, _ := s.explain(ev, tags)
+	return ok
 }

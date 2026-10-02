@@ -10,7 +10,7 @@ func rawT(name, addr string, checks ...string) rawTarget {
 		Name: name, Addr: addr, Site: "", Severity: "", Parent: "", InsecureTLS: false,
 		Interval: yamlDuration{set: false, d: 0, err: nil}, Timeout: yamlDuration{set: false, d: 0, err: nil},
 		FailThreshold: nil, RecoverThreshold: nil, FlapLimit: nil,
-		FlapWindow: yamlDuration{set: false, d: 0, err: nil}, Network: "", Checks: checks,
+		FlapWindow: yamlDuration{set: false, d: 0, err: nil}, Network: "", Checks: checks, Route: "",
 	}
 }
 
@@ -25,7 +25,7 @@ func dynT(name, addr string, checks ...string) dynamicTarget {
 	return dynamicTarget{
 		Name: name, Addr: addr, Site: "", Severity: "", Parent: "", InsecureTLS: false, Interval: "",
 		Timeout: "", FailThreshold: nil, RecoverThreshold: nil, FlapLimit: nil, FlapWindow: "",
-		Network: "", Checks: checks,
+		Network: "", Checks: checks, Route: "",
 	}
 }
 

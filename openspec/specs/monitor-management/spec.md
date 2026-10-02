@@ -11,16 +11,16 @@ API, keeps those monitors across restarts, and leaves YAML-defined targets untou
 
 When the UI is on, the collector SHALL persist monitors created through the API
 ("dynamic monitors") in `targets.json` inside `collector.state_dir`, using the same
-field names as a YAML target (`name`, `addr`, `site`, `severity`, `parent`,
+field names as a YAML target (`name`, `addr`, `site`, `severity`, `route`, `parent`,
 `insecure_tls`, `interval`, `timeout`, `fail_threshold`, `recover_threshold`,
 `flap_limit`, `flap_window`, `network`, `checks`). The file SHALL be replaced
 atomically on every change and SHALL NOT be readable by group or others. At startup the
-collector SHALL register dynamic monitors after the YAML targets, applying the YAML
-file's `defaults`. A missing file SHALL mean no dynamic monitors. When the UI is off, the collector SHALL
+collector SHALL register dynamic monitors after the YAML targets and the UI routes,
+applying the YAML file's `defaults`. A missing file SHALL mean no dynamic monitors. When the UI is off, the collector SHALL
 NOT run or modify dynamic monitors and SHALL log a warning if `targets.json` exists. A file that cannot be
 parsed SHALL stop startup with an error naming the file. An individual entry that fails
-validation, or whose name matches a YAML target, SHALL be skipped with a logged warning
-and SHALL remain in the file untouched.
+validation, whose name matches a YAML target, or whose `route` names no loaded route,
+SHALL be skipped with a logged warning and SHALL remain in the file untouched.
 
 #### Scenario: Dynamic monitors survive a restart
 
@@ -48,6 +48,12 @@ and SHALL remain in the file untouched.
 
 - **WHEN** `targets.json` is not valid JSON
 - **THEN** startup fails with an error naming `targets.json`
+
+#### Scenario: Monitor on a UI route survives a restart
+
+- **WHEN** dynamic monitor `pg-primary` names UI route `db-team` and the collector
+  restarts
+- **THEN** `pg-primary` is registered again with route `db-team`
 
 ### Requirement: Monitor API
 
@@ -118,7 +124,9 @@ A monitor definition SHALL be accepted only if the config loader would accept th
 target in the YAML file alongside the existing targets: the same check syntax, name
 characters, interval, timeout and threshold rules, and the same `parent` rules (the
 parent names another target, has exactly one `icmp` or one `tsping` check, and creates
-no cycle). Per-monitor values SHALL override the YAML file's `defaults`.
+no cycle). Per-monitor values SHALL override the YAML file's `defaults`. A monitor's
+`route` SHALL name a YAML route or a UI route, and a monitor SHALL NOT set both `route`
+and `severity`.
 
 #### Scenario: Parent must be a reachability target
 
@@ -131,6 +139,11 @@ no cycle). Per-monitor values SHALL override the YAML file's `defaults`.
 - **WHEN** a monitor names another dynamic monitor with a single `icmp` check as
   parent
 - **THEN** the response is 201 and dependency suppression applies as for YAML targets
+
+#### Scenario: Unknown route
+
+- **WHEN** a create request sets `route: db-tem` and no such route exists
+- **THEN** the response is 422 with an error at `route` naming `db-tem`
 
 ### Requirement: Live application
 

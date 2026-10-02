@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tailscale.com/tstime"
@@ -52,15 +53,21 @@ type monitorManager struct {
 	log        *slog.Logger
 	authorize  func(*http.Request) error
 	save       func(dir string, targets []dynamicTarget) error
+	saveRoutes func(dir string, routes []dynamicRoute) error
 	// closeIncident closes name's open incident with reason removed. Re-adding
 	// an edited monitor overwrites the removed snapshot the notifier would
 	// otherwise close it from, so the manager closes it directly.
 	closeIncident func(name string)
+	// published is the route snapshot readers load. When a notifier exists it
+	// is the notifier's pointer, so a route write is what the next down reads.
+	published *atomic.Pointer[routeTable]
 
-	mu      sync.Mutex
-	yaml    []Target
-	entries []dynamicTarget
-	live    map[string]Target
+	mu           sync.Mutex
+	yaml         []Target
+	entries      []dynamicTarget
+	live         map[string]Target
+	yamlRoutes   []Route
+	routeEntries []dynamicRoute
 }
 
 // newMonitorManager takes the YAML targets and the dynamic entries the
@@ -82,12 +89,16 @@ func newMonitorManager(cfg *Config, entries []dynamicTarget, reg targetRegistry,
 		log:        log,
 		authorize:  func(*http.Request) error { return nil },
 		save:       saveDynamic,
+		saveRoutes: saveRoutes,
 
 		closeIncident: func(string) {},
+		published:     new(atomic.Pointer[routeTable]),
 		mu:            sync.Mutex{},
 		yaml:          nil,
 		entries:       slices.Clone(entries),
 		live:          map[string]Target{},
+		yamlRoutes:    yamlRoutesOf(cfg),
+		routeEntries:  nil,
 	}
 	for _, t := range cfg.Targets {
 		if t.Dynamic {
@@ -96,6 +107,7 @@ func newMonitorManager(cfg *Config, entries []dynamicTarget, reg targetRegistry,
 			m.yaml = append(m.yaml, copyTarget(&t))
 		}
 	}
+	m.published.Store(newRouteTable(cfg.Routes))
 	return m
 }
 
@@ -105,6 +117,7 @@ type monitorView struct {
 	Addr             string   `json:"addr"`
 	Site             string   `json:"site"`
 	Severity         string   `json:"severity"`
+	Route            string   `json:"route,omitempty"`
 	Parent           string   `json:"parent"`
 	InsecureTLS      bool     `json:"insecure_tls"`
 	Interval         string   `json:"interval"`
@@ -134,7 +147,7 @@ func viewOf(t Target) monitorView {
 		checks[i] = c.String()
 	}
 	return monitorView{
-		Name: t.Name, Addr: t.Addr, Site: t.Site, Severity: string(t.Severity), Parent: t.Parent,
+		Name: t.Name, Addr: t.Addr, Site: t.Site, Severity: string(t.Severity), Route: t.Route, Parent: t.Parent,
 		InsecureTLS: t.InsecureTLS, Interval: t.Interval.String(), Timeout: t.Timeout.String(),
 		FailThreshold: t.FailThreshold, RecoverThreshold: t.RecoverThreshold, FlapLimit: t.FlapLimit,
 		FlapWindow: t.FlapWindow.String(), Network: string(t.Network), Checks: checks,
@@ -151,6 +164,14 @@ func (m *monitorManager) targets() []Target {
 		}
 	}
 	return out
+}
+
+// routeSet is the route list a new monitor is validated against.
+func (m *monitorManager) routeSet() []Route {
+	if m == nil || m.cfg == nil {
+		return nil
+	}
+	return m.cfg.Routes
 }
 
 func (m *monitorManager) isYAML(name string) bool {
@@ -177,9 +198,16 @@ func (m *monitorManager) list() []monitorView {
 		}
 	}
 	all := m.targets()
+	table := (*routeTable)(nil)
+	if m.published != nil {
+		table = m.published.Load()
+	}
 	out := make([]monitorView, len(all))
 	for i, t := range all {
 		v := viewOf(t)
+		if r, ok := table.get(t.Route); ok && r.Severity != "" {
+			v.Severity = string(r.Severity)
+		}
 		v.State = states[t.Name]
 		v.Dependents = m.dependents(t.Name)
 		v.Definition = m.definitionOf(t)
@@ -215,14 +243,21 @@ func (m *monitorManager) existingRaw(skip string) []rawTarget {
 type apiError struct {
 	status int
 	errs   []string
+	usedBy []string
 }
 
 func (e *apiError) Error() string { return fmt.Sprint(e.errs) }
 
-func fail(status int, msgs ...string) *apiError { return &apiError{status: status, errs: msgs} }
+func fail(status int, msgs ...string) *apiError {
+	return &apiError{status: status, errs: msgs, usedBy: nil}
+}
+
+func failUsed(status int, usedBy []string, msgs ...string) *apiError {
+	return &apiError{status: status, errs: msgs, usedBy: usedBy}
+}
 
 func (m *monitorManager) validate(def dynamicTarget, replacing string) (Target, *apiError) {
-	t, errs := m.cfg.validateCandidate(m.existingRaw(replacing), def.raw())
+	t, errs := m.cfg.validateCandidate(m.existingRaw(replacing), def.raw(), m.routeSet())
 	if len(errs) == 0 {
 		return t, nil
 	}
@@ -450,7 +485,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeAPIError(w http.ResponseWriter, e *apiError) {
-	writeJSON(w, e.status, map[string][]string{"errors": e.errs})
+	body := map[string]any{"errors": e.errs}
+	if len(e.usedBy) > 0 {
+		body["used_by"] = e.usedBy
+	}
+	writeJSON(w, e.status, body)
 }
 
 func (m *monitorManager) handleList(w http.ResponseWriter, _ *http.Request) {

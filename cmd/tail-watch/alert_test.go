@@ -967,6 +967,7 @@ func TestAlerterWiring(t *testing.T) {
 		listen:   "",
 		ui:       false,
 		dynamic:  nil,
+		uiRoutes: nil,
 		registry: nil,
 		resolver: nil,
 		presence: nil,
@@ -1139,7 +1140,14 @@ func alertTarget(name string, checks ...string) *Target {
 		FlapWindow:       15 * time.Minute,
 		Network:          NetworkTailnet,
 		Severity:         SeverityPage,
-		Site:             "", Parent: "", InsecureTLS: false, Checks: nil, Implicit: false, StableID: "", NodeID: 0,
+		Site:             "",
+		Parent:           "",
+		InsecureTLS:      false,
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+		Route:            "",
 	}
 	for _, raw := range checks {
 		chk, err := parseCheck(raw)

@@ -13,7 +13,7 @@ not know. Fields that do not apply are omitted, never sent as `null`.
 
 | `type` | `severity` | Sent when |
 | --- | --- | --- |
-| `target.down` | The target's `severity`: `page` or `warn` | A target goes `DOWN` and has no open incident. |
+| `target.down` | The route's `severity` when the target sets `route`, otherwise the target's `severity`: `page` or `warn` | A target goes `DOWN` and has no open incident. |
 | `target.recovered` | The severity of the down it resolves | A target with an open incident returns to `UP`, or the target is removed. |
 | `target.flapping` | `warn` | A target crosses `flap_limit` state changes within `flap_window`. |
 | `collector.started` | `info` | Once, after every target and check has a first result. |
@@ -23,6 +23,12 @@ not know. Fields that do not apply are omitted, never sent as `null`.
 Severity ranks `info` < `warn` < `page`. A sink's `min_severity` compares against it.
 A start with every target `UP` sends only `collector.started`. A target already
 failing at startup produces one `target.down`.
+
+A target that names a route takes that route's severity for `target.down`.
+`target.flapping` stays `warn`. `target.recovered` keeps the severity recorded
+on its down, so a route edit during the incident does not change the recovery.
+`collector.started` and `test` ignore routes. The route name is not a payload
+field.
 
 ## Fields
 

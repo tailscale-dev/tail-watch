@@ -15,7 +15,11 @@ import (
 // browser is not installed; see docs/contributing/ui-browser-test.md.
 func uiPage(t *testing.T, peers peerSource) playwright.Page {
 	t.Helper()
-	e := newAPIEnv(t)
+	return uiPageOn(t, newAPIEnv(t), peers)
+}
+
+func uiPageOn(t *testing.T, e *apiEnv, peers peerSource) playwright.Page {
+	t.Helper()
 	e.mgr.peers = peers
 	mux := http.NewServeMux()
 	e.mgr.routes(mux)

@@ -175,6 +175,14 @@ loopback until needed, scope the grant to the smallest set of admins, watch the
 startup warning and the audit log, and remember that the guard is a defense
 against browsers, not against people who can reach the port.
 
+## Rolling back
+
+An older binary rejects a YAML file that contains `routes:` or a target
+`route:` key, because unknown keys are an error. Remove both before
+downgrading. A `targets.json` entry that sets `route` loads on that binary
+as an unrouted `page` monitor: the field is ignored. `routes.json` is
+ignored. A queued `mention` in `notification-state.json` is ignored.
+
 ## Related pages
 
 - [Manage monitors in the UI](../how-to/monitor-ui.md)

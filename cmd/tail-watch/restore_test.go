@@ -188,7 +188,7 @@ func TestImplicitIncidentSurvivesFailedDiscovery(t *testing.T) {
 		FlapLimit:        0,
 		FlapWindow:       0,
 		Network:          NetworkTailnet,
-		Checks:           nil,
+		Checks:           nil, Route: "",
 	}
 	seedOpenIncident(t, dir, tr)
 
@@ -293,7 +293,7 @@ func TestRestoredImplicitIncidentClosesWhenRemoved(t *testing.T) {
 		Name:    "nyc-router", Addr: "100.64.0.9", Site: "nyc", Severity: SeverityPage, Implicit: true,
 		StableID: tailcfg.StableNodeID("nSTABLE1"), NodeID: 42, Parent: "", InsecureTLS: false, Interval: 0,
 		Timeout: 0, FailThreshold: 0, RecoverThreshold: 0, FlapLimit: 0, FlapWindow: 0,
-		Network: NetworkTailnet, Checks: nil,
+		Network: NetworkTailnet, Checks: nil, Route: "",
 	}
 	seedOpenIncident(t, dir, tr)
 	var origID string

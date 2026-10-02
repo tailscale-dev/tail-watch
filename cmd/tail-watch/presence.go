@@ -220,6 +220,26 @@ func (p *presence) ByName(name string) (peerInfo, bool) {
 	return chosen[0].clone(), true
 }
 
+// Lookup finds the peer an address names: MagicDNS or hostname, a Tailscale
+// IP, or the peer that routes a LAN address. The caller decides whether an
+// unseeded view is trustworthy.
+func (p *presence) Lookup(addr string) (peerInfo, bool) {
+	if p == nil {
+		return peerInfo{}, false
+	}
+	if info, ok := p.ByName(addr); ok {
+		return info, true
+	}
+	ip, err := netip.ParseAddr(strings.TrimSpace(addr))
+	if err != nil {
+		return peerInfo{}, false
+	}
+	if info, ok := p.ByIP(ip); ok {
+		return info, true
+	}
+	return p.Route(ip)
+}
+
 func namePriority(peer peerInfo, want string) (int, bool) {
 	switch {
 	case peer.DNSName != "" && strings.EqualFold(peer.DNSName, want):

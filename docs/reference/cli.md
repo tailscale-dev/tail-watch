@@ -86,15 +86,25 @@ tail-watch check-config [--config <file>]
 
 Loads and validates the config. It does not contact tailscaled and does not
 resolve secrets, so it needs no environment variables. On success it prints one
-line per target, one per sink, and one for the heartbeat if configured, then
-exits 0.
+line per route, one per target, one per sink, and one for the heartbeat if
+configured, then exits 0. A route line is `route <name> severity=<page|warn>
+sinks=<names>`. Each target line ends with `route=<name|none>` and
+`sinks=<candidates>`. An unrouted target lists every configured sink. `none`
+means the target or the route has no candidate sink.
 
 ```text
-nyc-router interval=15s timeout=5s network=tailnet checks=tsping
-nyc-nas interval=30s timeout=5s network=tailnet checks=icmp,tcp:445,http:https://10.20.0.50:5001/|DSM
+nyc-router interval=15s timeout=5s network=tailnet checks=tsping route=none sinks=ops-webhook,ops-slack
+nyc-nas interval=30s timeout=5s network=tailnet checks=icmp,tcp:445,http:https://10.20.0.50:5001/|DSM route=none sinks=ops-webhook,ops-slack
 sink ops-webhook type=webhook min_severity=page events=target.down,target.recovered queue=disk match=sites:nyc targets:nyc-* tags:tag:router
 sink ops-slack type=slack min_severity=warn events=all queue=memory
 heartbeat interval=1m0s
+```
+
+A target that names a route prints that route and only its sinks:
+
+```text
+route db-team severity=page sinks=db-hook
+pg-primary interval=30s timeout=5s network=tailnet checks=icmp route=db-team sinks=db-hook
 ```
 
 On failure it prints every problem to stderr and exits 1. The only flag is

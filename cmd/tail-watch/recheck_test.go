@@ -64,6 +64,7 @@ func TestInFlightTimeoutUsesStartGeneration(t *testing.T) {
 	app := &app{
 		ui:       false,
 		dynamic:  nil,
+		uiRoutes: nil,
 		registry: nil,
 		alerts:   al,
 		pub:      newPublisher(),

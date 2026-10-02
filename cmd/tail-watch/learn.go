@@ -400,7 +400,7 @@ func (c *classifier) newImplicit(peer peerInfo, deps []*Target) *Target {
 		NodeID:   peer.NodeID,
 
 		Parent:      "",
-		InsecureTLS: false,
+		InsecureTLS: false, Route: "",
 	}
 	st := &implicitState{target: t,
 		restored:    false,

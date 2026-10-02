@@ -1,7 +1,8 @@
 const POLL_MS = 5000;
 const REACHABILITY = ["icmp", "tsping"];
+const PREVIEW_MS = 300;
 const FIELDS = [
-  "name", "addr", "site", "severity", "parent", "network", "insecure_tls", "checks",
+  "name", "addr", "site", "parent", "network", "insecure_tls", "checks",
   "interval", "timeout", "fail_threshold", "recover_threshold", "flap_limit", "flap_window",
 ];
 const INT_FIELDS = new Set(["fail_threshold", "recover_threshold", "flap_limit"]);
@@ -9,7 +10,11 @@ const INT_FIELDS = new Set(["fail_threshold", "recover_threshold", "flap_limit"]
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
-const app = { monitors: [], signature: "", editing: null, deleting: null, probeSave: null, lastOk: true, peers: [], pickedName: "", checks: [] };
+const app = {
+  monitors: [], routes: [], sinks: [], signature: "", editing: null, deleting: null, probeSave: null,
+  lastOk: true, peers: [], pickedName: "", checks: [], routingGen: 0, routingTouched: false,
+  previewGen: 0, previewTimer: 0, routeEditing: null, routeDeleting: null,
+};
 
 async function api(method, path, body) {
   const res = await fetch(path, {
@@ -51,6 +56,8 @@ async function refresh() {
     const res = await api("GET", "/api/v1/targets");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     app.monitors = res.data ?? [];
+    const routes = await api("GET", "/api/v1/routes").catch(() => null);
+    if (routes && routes.ok) app.routes = routes.data ?? [];
     if (!app.lastOk) showBanner("");
     app.lastOk = true;
     render();
@@ -61,7 +68,7 @@ async function refresh() {
 }
 
 function render() {
-  const signature = JSON.stringify(app.monitors);
+  const signature = JSON.stringify([app.monitors, app.routes]);
   if (signature === app.signature) return;
   app.signature = signature;
   const rows = $("#rows");
@@ -102,46 +109,50 @@ function rowFor(m) {
     cell("Monitor", name),
     cell("Address", el("span", { class: "mono", text: m.addr })),
     cell("Site", document.createTextNode(m.site || "")),
-    cell("Severity", document.createTextNode(m.severity)),
+    cell("Routing", document.createTextNode(routingText(m, app.routes))),
     cell("Checks", checks),
     cell("Source", source),
     actions,
   );
 }
 
-function fieldBox(name) {
-  return $(`.field[data-field="${name}"]`);
+function fieldBox(name, root = document) {
+  return $(`.field[data-field="${name}"]`, root) ?? $(`.field[data-field-alias="${name}"]`, root);
 }
 
 function control(name) {
   return $(`#f-${name}`);
 }
 
-function clearErrors() {
-  for (const box of document.querySelectorAll("#form .field")) {
+function clearErrors(root = $("#form")) {
+  for (const box of root.querySelectorAll(".field")) {
     box.classList.remove("invalid");
     $(":scope > .error", box).textContent = "";
     $("input, select, textarea", box)?.removeAttribute("aria-invalid");
   }
-  for (const row of document.querySelectorAll("#form .check-row")) {
+  for (const row of root.querySelectorAll(".check-row")) {
     row.classList.remove("invalid");
     $(".check-error", row).textContent = "";
     for (const input of row.querySelectorAll("input, select")) input.removeAttribute("aria-invalid");
   }
-  const formError = $("#form-error");
-  formError.hidden = true;
-  formError.textContent = "";
-  const result = $("#check-result");
-  result.hidden = true;
-  result.textContent = "";
+  const formError = $(".form-error", root);
+  if (formError) {
+    formError.hidden = true;
+    formError.textContent = "";
+  }
+  const result = $("#check-result", root);
+  if (result) {
+    result.hidden = true;
+    result.textContent = "";
+  }
 }
 
-function showErrors(errors) {
+function showErrors(errors, root = $("#form")) {
   const general = [];
   for (const message of errors) {
     const match = /^([a-z_]+)(?:\[(\d+)\])?: (.*)$/s.exec(message);
     const row = match && match[1] === "checks" && match[2] !== undefined
-      ? document.querySelectorAll("#form .check-row")[Number(match[2])]
+      ? root.querySelectorAll(".check-row")[Number(match[2])]
       : undefined;
     if (row) {
       const target = $(".check-error", row);
@@ -151,7 +162,7 @@ function showErrors(errors) {
       for (const input of row.querySelectorAll("input, select")) input.setAttribute("aria-invalid", "true");
       continue;
     }
-    const box = match && fieldBox(match[1]);
+    const box = match && fieldBox(match[1], root);
     if (!box) {
       general.push(message);
       continue;
@@ -164,11 +175,13 @@ function showErrors(errors) {
     $("input, select, textarea", box)?.setAttribute("aria-invalid", "true");
   }
   if (general.length > 0) {
-    const formError = $("#form-error");
-    formError.textContent = general.join("\n");
-    formError.hidden = false;
+    const formError = $(".form-error", root);
+    if (formError) {
+      formError.textContent = general.join("\n");
+      formError.hidden = false;
+    }
   }
-  const first = document.querySelector("#form .check-row.invalid input, #form .check-row.invalid select, #form .field.invalid input, #form .field.invalid select, #form .field.invalid textarea");
+  const first = root.querySelector(".check-row.invalid input, .check-row.invalid select, .field.invalid input, .field.invalid select, .field.invalid textarea");
   if (first) first.focus();
 }
 
@@ -375,6 +388,179 @@ function checkFromString(s, addr) {
 
 // --- end check conversion ---
 
+// --- route form: pure, no DOM; ui_routes_test.go runs this block ---
+
+// routeOptionLabel is the text of one Routes option: name, severity, sinks.
+function routeOptionLabel(route) {
+  const sinks = Array.isArray(route.sinks) ? route.sinks.join(", ") : "";
+  return [route.name, route.severity, sinks].filter((part) => part).join(" · ");
+}
+
+// reasonWords is the phrase shown for a preview drop or an unknown row.
+function reasonWords(reason) {
+  switch (reason) {
+    case "not_in_route":
+      return "not in route";
+    case "events":
+      return "filtered by event";
+    case "min_severity":
+      return "below this sink's minimum severity";
+    case "match.sites":
+      return "filtered by site";
+    case "match.targets":
+      return "filtered by target";
+    case "match.tags":
+      return "filtered by tag";
+    case "missing_sink":
+      return "missing from the config";
+    default:
+      return reason || "";
+  }
+}
+
+// previewWords is one sink's fate in the preview.
+function previewWords(row) {
+  if (row.outcome === "sent") return "sent";
+  const words = reasonWords(row.reason);
+  if (row.outcome === "unknown") return words ? `unknown, ${words}` : "unknown";
+  return words || "dropped";
+}
+
+// downNotifiesNoOne is true when no sink would receive target.down, including
+// a route that names no sinks. An unknown row is not a drop.
+function downNotifiesNoOne(sinks) {
+  const list = Array.isArray(sinks) ? sinks : [];
+  return list.every((row) => row.outcome === "dropped");
+}
+
+// routingChoice is the select value for a stored monitor. A new monitor, and
+// one with neither key, is unrouted page.
+function routingChoice(def) {
+  if (def && def.route) return `route:${def.route}`;
+  const severity = def && def.severity ? def.severity : "page";
+  return `severity:${severity}`;
+}
+
+// routingPayload is the definition fragment for a select value. A route sends
+// no severity, and an unrouted choice sends no route.
+function routingPayload(value) {
+  if (typeof value === "string" && value.startsWith("route:")) {
+    return { route: value.slice("route:".length) };
+  }
+  const severity = typeof value === "string" && value.startsWith("severity:")
+    ? value.slice("severity:".length)
+    : "page";
+  return { severity: severity === "" ? "page" : severity };
+}
+
+// routingText is the Routing column: the route and its current severity, or
+// the monitor's own severity when it is not on a route.
+function routingText(monitor, routes) {
+  const route = monitor && monitor.route ? monitor.route : "";
+  if (!route) return `${(monitor && monitor.severity) || "page"} · all sinks`;
+  const found = (Array.isArray(routes) ? routes : []).find((item) => item.name === route);
+  const severity = (found && found.severity) || (monitor && monitor.severity) || "";
+  return severity ? `${route} · ${severity}` : route;
+}
+
+// --- end route form ---
+
+function fillRouteOptions(routes) {
+  const group = $("#route-options");
+  group.replaceChildren(...(routes ?? []).map((route) => el("option", {
+    value: `route:${route.name}`,
+    text: routeOptionLabel(route),
+  })));
+}
+
+// loadFormRoutes fills the picker from GET /routes. A failed fetch leaves the
+// unrouted choices, and keeps a stored route so an edit does not drop it.
+async function loadFormRoutes() {
+  const gen = ++app.routingGen;
+  const want = routingChoice(app.editing ? app.editing.definition : null);
+  let routes = [];
+  let ok = false;
+  try {
+    const res = await api("GET", "/api/v1/routes");
+    ok = Boolean(res.ok);
+    if (ok) routes = res.data ?? [];
+  } catch {
+    ok = false;
+  }
+  if (gen !== app.routingGen) return;
+  const select = control("route");
+  // Rebuilding the options drops the selected one, so an operator's pick made
+  // while the fetch was in flight is read first and put back.
+  const target = app.routingTouched ? select.value : want;
+  fillRouteOptions(ok ? routes : []);
+  if (ok) app.routes = routes;
+  const group = $("#route-options");
+  if (want.startsWith("route:") && !group.querySelector(`option[value="${CSS.escape(want)}"]`)) {
+    group.append(el("option", { value: want, text: want.slice("route:".length) }));
+  }
+  select.value = target;
+  if (select.value !== target) select.value = "severity:page";
+  schedulePreview();
+}
+
+function schedulePreview() {
+  clearTimeout(app.previewTimer);
+  app.previewTimer = setTimeout(runPreview, PREVIEW_MS);
+}
+
+async function runPreview() {
+  const gen = ++app.previewGen;
+  const def = collect();
+  const box = $("#route-preview");
+  if (!def.name || !def.addr) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  let res = null;
+  try {
+    res = await api("POST", "/api/v1/route-preview", def);
+  } catch {
+    res = null;
+  }
+  if (gen !== app.previewGen) return;
+  if (!res || !res.ok || !res.data) {
+    box.hidden = false;
+    box.replaceChildren(el("p", { class: "hint", id: "preview-status", text: "Preview unavailable." }));
+    return;
+  }
+  renderPreview(res.data);
+}
+
+function previewLine(row) {
+  return el(
+    "p",
+    { class: `preview-row ${row.outcome}`, "data-sink": row.sink, "data-outcome": row.outcome },
+    el("span", { class: "mono", text: row.sink }),
+    document.createTextNode(`: ${previewWords(row)}`),
+  );
+}
+
+function renderPreview(view) {
+  const box = $("#route-preview");
+  const warn = el("p", {
+    id: "preview-warn",
+    class: "notice warn",
+    text: "This monitor's outage would notify no one.",
+  });
+  warn.hidden = !downNotifiesNoOne(view.down && view.down.sinks);
+  const down = view.down ?? { severity: "", sinks: [] };
+  const flapping = view.flapping ?? { severity: "", sinks: [] };
+  box.replaceChildren(
+    warn,
+    el("h3", { text: `Down · ${down.severity}` }),
+    el("div", { id: "preview-down" }, ...(down.sinks ?? []).map(previewLine)),
+    el("h3", { text: `Flapping · ${flapping.severity}` }),
+    el("div", { id: "preview-flapping" }, ...(flapping.sinks ?? []).map(previewLine)),
+  );
+  box.hidden = false;
+}
+
 const CHECK_TYPE_LABELS = [
   ["icmp", "Ping (ICMP)"],
   ["tsping", "Tailscale ping"],
@@ -451,8 +637,14 @@ function notesFor(m) {
 function openEditor(m) {
   app.editing = m ?? null;
   app.pickedName = "";
+  app.routingTouched = false;
+  clearTimeout(app.previewTimer);
+  app.previewGen += 1;
   clearErrors();
   $("#form").reset();
+  const preview = $("#route-preview");
+  preview.hidden = true;
+  preview.replaceChildren();
   const def = m ? m.definition ?? {} : {};
   $("#editor-title").textContent = m ? `Edit ${m.name}` : "Add monitor";
   $("#editor-notes").replaceChildren(...notesFor(m));
@@ -469,6 +661,7 @@ function openEditor(m) {
   $("#editor details").open = ["interval", "timeout", "fail_threshold", "recover_threshold", "flap_limit", "flap_window"]
     .some((name) => def[name] !== undefined);
   $("#editor").showModal();
+  loadFormRoutes();
   loadPeers();
   (m ? control("addr") : control("name")).focus();
 }
@@ -488,6 +681,7 @@ function collect() {
       def[name] = INT_FIELDS.has(name) && /^-?\d+$/.test(value) ? Number(value) : value;
     }
   }
+  Object.assign(def, routingPayload(control("route").value));
   return def;
 }
 
@@ -637,6 +831,207 @@ async function confirmDelete() {
   }
 }
 
+function setCurrent(id, on) {
+  const link = $(id);
+  if (on) link.setAttribute("aria-current", "page");
+  else link.removeAttribute("aria-current");
+}
+
+function showView() {
+  const routes = location.hash === "#routes";
+  $("#view-routes").hidden = !routes;
+  $("#view-monitors").hidden = routes;
+  $("#add").hidden = routes;
+  $("#add-route").hidden = !routes;
+  setCurrent("#nav-routes", routes);
+  setCurrent("#nav-monitors", !routes);
+  if (routes) loadRoutePage();
+}
+
+function sinkFilterText(match) {
+  const parts = [];
+  const add = (label, values) => {
+    if (values && values.length > 0) parts.push(`${label}: ${values.join(", ")}`);
+  };
+  add("sites", match && match.sites);
+  add("targets", match && match.targets);
+  add("tags", match && match.tags);
+  return parts.length > 0 ? parts.join("; ") : "all monitors";
+}
+
+function sinkRow(sink) {
+  return el(
+    "tr",
+    { "data-sink": sink.name },
+    cell("Name", el("strong", { text: sink.name })),
+    cell("Type", document.createTextNode(sink.type || "")),
+    cell("Events", document.createTextNode(
+      (sink.events ?? []).length > 0 ? sink.events.join(", ") : "all events",
+    )),
+    cell("Minimum severity", document.createTextNode(sink.min_severity || "info")),
+    cell("Filters", document.createTextNode(sinkFilterText(sink.match))),
+    cell("Mention", document.createTextNode(sink.mention_on_page || "")),
+  );
+}
+
+function routeSinkChips(route) {
+  const missing = new Set(route.missing_sinks ?? []);
+  const chips = (route.sinks ?? []).map((name) => el("code", {
+    class: missing.has(name) ? "missing" : "",
+    text: missing.has(name) ? `${name} (missing)` : name,
+  }));
+  return el("div", { class: "checks" }, ...chips);
+}
+
+function routeRow(route) {
+  const source = el("span", {
+    class: `badge source-${route.source}`,
+    text: route.source === "config" ? "Config file" : "UI",
+  });
+  const actions = el("td", { class: "row-actions" });
+  if (!route.readonly) {
+    const edit = el("button", { type: "button", text: "Edit", "aria-label": `Edit route ${route.name}` });
+    edit.addEventListener("click", () => openRouteEditor(route));
+    const del = el("button", {
+      type: "button", class: "quiet-danger", text: "Delete", "aria-label": `Delete route ${route.name}`,
+    });
+    del.addEventListener("click", () => openRouteConfirm(route));
+    actions.append(edit, del);
+  }
+  return el(
+    "tr",
+    { "data-route": route.name },
+    cell("Route", el("strong", { text: route.name })),
+    cell("Severity", document.createTextNode(route.severity || "")),
+    cell("Sinks", routeSinkChips(route)),
+    cell("Mention", document.createTextNode(route.mention || "")),
+    cell("Used by", document.createTextNode((route.used_by ?? []).join(", "))),
+    cell("Source", source),
+    actions,
+  );
+}
+
+async function loadRoutePage() {
+  try {
+    const [routes, sinks] = await Promise.all([
+      api("GET", "/api/v1/routes"),
+      api("GET", "/api/v1/sinks"),
+    ]);
+    if (!routes.ok || !sinks.ok) throw new Error("HTTP");
+    app.routes = routes.data ?? [];
+    app.sinks = sinks.data ?? [];
+  } catch {
+    showBanner("Could not load routes.", "error");
+    return;
+  }
+  $("#sink-rows").replaceChildren(...app.sinks.map(sinkRow));
+  $("#sinks-wrap").hidden = app.sinks.length === 0;
+  $("#sinks-empty").hidden = app.sinks.length > 0;
+  $("#route-rows").replaceChildren(...app.routes.map(routeRow));
+  $("#routes-wrap").hidden = app.routes.length === 0;
+  $("#routes-empty").hidden = app.routes.length > 0;
+}
+
+function renderSinkChoices(selected) {
+  const chosen = new Set(selected ?? []);
+  $("#r-sinks").replaceChildren(...app.sinks.map((sink) => {
+    const id = `r-sink-${sink.name}`;
+    const input = el("input", { type: "checkbox", id, value: sink.name });
+    input.checked = chosen.has(sink.name);
+    const label = el("label", { class: "sink-choice", for: id }, input, document.createTextNode(` ${sink.name}`));
+    return label;
+  }));
+}
+
+function openRouteEditor(route) {
+  app.routeEditing = route ?? null;
+  clearErrors($("#route-form"));
+  $("#route-form").reset();
+  $("#route-editor-title").textContent = route ? `Edit ${route.name}` : "Add route";
+  $("#r-name").value = route ? route.name : "";
+  $("#r-name").readOnly = Boolean(route);
+  $("#r-severity").value = route && route.severity ? route.severity : "page";
+  $("#r-mention").value = route && route.mention ? route.mention : "";
+  renderSinkChoices(route ? route.sinks : []);
+  $("#route-editor").showModal();
+  (route ? $("#r-severity") : $("#r-name")).focus();
+}
+
+function collectRoute() {
+  const body = {
+    name: $("#r-name").value.trim(),
+    severity: $("#r-severity").value,
+    sinks: [...$("#r-sinks").querySelectorAll("input:checked")].map((input) => input.value),
+  };
+  const mention = $("#r-mention").value.trim();
+  if (mention !== "") body.mention = mention;
+  return body;
+}
+
+async function saveRoute(event) {
+  event.preventDefault();
+  clearErrors($("#route-form"));
+  const body = collectRoute();
+  const save = $("#route-save");
+  save.disabled = true;
+  try {
+    const editing = app.routeEditing;
+    const res = editing
+      ? await api("PUT", `/api/v1/routes/${encodeURIComponent(editing.name)}`, body)
+      : await api("POST", "/api/v1/routes", body);
+    if (res.ok) {
+      $("#route-editor").close();
+      showBanner(`Saved route ${body.name}.`, "ok");
+      await loadRoutePage();
+      return;
+    }
+    showErrors(res.data?.errors ?? [`Request failed (HTTP ${res.status}).`], $("#route-form"));
+  } catch {
+    showErrors(["Could not reach the collector."], $("#route-form"));
+  } finally {
+    save.disabled = false;
+  }
+}
+
+function openRouteConfirm(route) {
+  app.routeDeleting = route;
+  $("#route-confirm-title").textContent = `Delete ${route.name}?`;
+  const used = route.used_by ?? [];
+  $("#route-confirm-text").textContent = used.length > 0
+    ? `It is used by ${used.join(", ")}.`
+    : "Monitors can no longer select it.";
+  const warning = $("#route-confirm-warning");
+  warning.hidden = true;
+  warning.textContent = "";
+  $("#route-confirm-ok").disabled = false;
+  $("#route-confirm").showModal();
+  $("#route-confirm-cancel").focus();
+}
+
+async function confirmRouteDelete() {
+  const route = app.routeDeleting;
+  if (!route) return;
+  $("#route-confirm-ok").disabled = true;
+  try {
+    const res = await api("DELETE", `/api/v1/routes/${encodeURIComponent(route.name)}`);
+    if (res.ok) {
+      $("#route-confirm").close();
+      showBanner(`Deleted route ${route.name}.`, "ok");
+      await loadRoutePage();
+      return;
+    }
+    const warning = $("#route-confirm-warning");
+    warning.textContent = (res.data?.errors ?? [`Delete failed (HTTP ${res.status}).`]).join(" ");
+    warning.hidden = false;
+  } catch {
+    const warning = $("#route-confirm-warning");
+    warning.textContent = "Could not reach the collector.";
+    warning.hidden = false;
+  } finally {
+    $("#route-confirm-ok").disabled = false;
+  }
+}
+
 $("#add").addEventListener("click", () => openEditor(null));
 $("#add-check").addEventListener("click", () => {
   app.checks.push(blankCheck("icmp"));
@@ -645,9 +1040,16 @@ $("#add-check").addEventListener("click", () => {
 $("#form").addEventListener("submit", submit);
 $("#check").addEventListener("click", check);
 $("#cancel").addEventListener("click", () => $("#editor").close());
+$("#f-route").addEventListener("change", () => {
+  app.routingTouched = true;
+  schedulePreview();
+});
+$("#f-name").addEventListener("input", schedulePreview);
+$("#f-site").addEventListener("input", schedulePreview);
 $("#f-addr").addEventListener("input", () => {
   fillNameFromPeer();
   updateRouteHint();
+  schedulePreview();
 });
 $("#confirm-cancel").addEventListener("click", () => $("#confirm").close());
 $("#confirm-ok").addEventListener("click", confirmDelete);
@@ -657,10 +1059,19 @@ $("#probe-confirm").addEventListener("cancel", (event) => {
   event.preventDefault();
   declineProbe();
 });
+$("#nav-monitors").addEventListener("click", () => { location.hash = "#monitors"; });
+$("#nav-routes").addEventListener("click", () => { location.hash = "#routes"; });
+$("#add-route").addEventListener("click", () => openRouteEditor(null));
+$("#route-form").addEventListener("submit", saveRoute);
+$("#route-cancel").addEventListener("click", () => $("#route-editor").close());
+$("#route-confirm-cancel").addEventListener("click", () => $("#route-confirm").close());
+$("#route-confirm-ok").addEventListener("click", confirmRouteDelete);
+window.addEventListener("hashchange", showView);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
 });
 
+showView();
 refresh();
 setInterval(() => {
   if (!document.hidden) refresh();

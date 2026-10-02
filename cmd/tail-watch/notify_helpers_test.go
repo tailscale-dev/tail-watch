@@ -287,7 +287,7 @@ func nasTarget() Target {
 		Dynamic: false,
 		Name:    "nyc-nas", Addr: "10.20.0.50", Site: "nyc", Severity: SeverityPage, Parent: "nyc-router",
 		InsecureTLS: false, Interval: 0, Timeout: 0, FailThreshold: 0, RecoverThreshold: 0,
-		FlapLimit: 0, FlapWindow: 0, Network: "", Checks: nil, Implicit: false, StableID: "", NodeID: 0,
+		FlapLimit: 0, FlapWindow: 0, Network: "", Checks: nil, Implicit: false, StableID: "", NodeID: 0, Route: "",
 	}
 }
 

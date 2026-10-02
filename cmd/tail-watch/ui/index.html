@@ -11,14 +11,19 @@
 <header class="bar">
   <div class="brand">
     <h1>tail-watch</h1>
-    <p class="sub">Monitors</p>
+    <nav class="views">
+      <a href="#monitors" id="nav-monitors" aria-current="page">Monitors</a>
+      <a href="#routes" id="nav-routes">Routes</a>
+    </nav>
   </div>
   <button type="button" id="add" class="primary">Add monitor</button>
+  <button type="button" id="add-route" class="primary" hidden>Add route</button>
 </header>
 
 <main>
   <p id="banner" class="banner" role="status" hidden></p>
 
+  <section id="view-monitors">
   <div class="table-wrap" hidden>
     <table id="monitors">
       <thead>
@@ -27,7 +32,7 @@
           <th scope="col">Monitor</th>
           <th scope="col">Address</th>
           <th scope="col">Site</th>
-          <th scope="col">Severity</th>
+          <th scope="col">Routing</th>
           <th scope="col">Checks</th>
           <th scope="col">Source</th>
           <th scope="col"><span class="visually-hidden">Actions</span></th>
@@ -37,6 +42,47 @@
     </table>
   </div>
   <p id="empty" class="empty" hidden>No monitors yet. Add one to start checking a device.</p>
+  </section>
+
+  <section id="view-routes" hidden>
+    <h2>Sinks</h2>
+    <p class="hint">Sinks are defined in the config file. This page cannot change them.</p>
+    <div class="table-wrap" id="sinks-wrap" hidden>
+      <table id="sinks">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Events</th>
+            <th scope="col">Minimum severity</th>
+            <th scope="col">Filters</th>
+            <th scope="col">Mention</th>
+          </tr>
+        </thead>
+        <tbody id="sink-rows"></tbody>
+      </table>
+    </div>
+    <p id="sinks-empty" class="empty" hidden>No sinks are configured.</p>
+
+    <h2>Routes</h2>
+    <div class="table-wrap" id="routes-wrap" hidden>
+      <table id="route-table">
+        <thead>
+          <tr>
+            <th scope="col">Route</th>
+            <th scope="col">Severity</th>
+            <th scope="col">Sinks</th>
+            <th scope="col">Mention</th>
+            <th scope="col">Used by</th>
+            <th scope="col">Source</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="route-rows"></tbody>
+      </table>
+    </div>
+    <p id="routes-empty" class="empty" hidden>No routes yet. Add one to send a monitor to a chosen set of sinks.</p>
+  </section>
 </main>
 
 <dialog id="editor" aria-labelledby="editor-title">
@@ -64,13 +110,17 @@
         <input id="f-site" name="site" autocomplete="off" placeholder="lab">
         <p class="error"></p>
       </div>
-      <div class="field" data-field="severity">
-        <label for="f-severity">Severity</label>
-        <select id="f-severity" name="severity">
-          <option value="">page (default)</option>
-          <option value="page">page</option>
-          <option value="warn">warn</option>
+      <div class="field wide" data-field="route" data-field-alias="severity">
+        <label for="f-route">Routing</label>
+        <select id="f-route" name="route">
+          <optgroup label="All sinks">
+            <option value="severity:page">page</option>
+            <option value="severity:warn">warn</option>
+          </optgroup>
+          <optgroup label="Routes" id="route-options"></optgroup>
         </select>
+        <p class="hint" id="routing-explain">page is for a failure someone must act on now. It reaches sinks that accept page events, and it carries a Slack mention when one is configured. warn is for a failure that should be seen but should never wake anyone; a sink whose minimum severity is page drops it. Flapping is always sent as warn. A recovery goes wherever its down went.</p>
+        <div id="route-preview" aria-live="polite" hidden></div>
         <p class="error"></p>
       </div>
       <div class="field wide" data-field="checks">
@@ -158,6 +208,57 @@
     <div class="actions">
       <button type="button" id="confirm-cancel">Cancel</button>
       <button type="button" id="confirm-ok" class="danger">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="route-editor" aria-labelledby="route-editor-title">
+  <form id="route-form" novalidate>
+    <h2 id="route-editor-title">Add route</h2>
+    <p id="route-form-error" class="form-error" role="alert" hidden></p>
+    <div class="grid">
+      <div class="field" data-field="name">
+        <label for="r-name">Name</label>
+        <input id="r-name" name="name" autocomplete="off" spellcheck="false" placeholder="db-team">
+        <p class="hint">Letters, digits, dot, dash and underscore. Cannot change after saving.</p>
+        <p class="error"></p>
+      </div>
+      <div class="field" data-field="severity">
+        <label for="r-severity">Severity</label>
+        <select id="r-severity" name="severity">
+          <option value="page">page</option>
+          <option value="warn">warn</option>
+        </select>
+        <p class="error"></p>
+      </div>
+      <div class="field wide" data-field="sinks">
+        <span class="label" id="sinks-label">Sinks</span>
+        <div id="r-sinks" role="group" aria-labelledby="sinks-label"></div>
+        <p class="hint">Choose the sinks that should hear monitors on this route.</p>
+        <p class="error"></p>
+      </div>
+      <div class="field wide" data-field="mention">
+        <label for="r-mention">Mention</label>
+        <input id="r-mention" name="mention" autocomplete="off" spellcheck="false" placeholder="<!subteam^S0123>">
+        <p class="hint">Sent with a page-severity down, in place of the sink's own mention.</p>
+        <p class="error"></p>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" id="route-cancel">Cancel</button>
+      <button type="submit" id="route-save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="route-confirm" aria-labelledby="route-confirm-title">
+  <form method="dialog">
+    <h2 id="route-confirm-title">Delete route</h2>
+    <p id="route-confirm-text"></p>
+    <p id="route-confirm-warning" class="notice warn" hidden></p>
+    <div class="actions">
+      <button type="button" id="route-confirm-cancel">Cancel</button>
+      <button type="button" id="route-confirm-ok" class="danger">Delete</button>
     </div>
   </form>
 </dialog>

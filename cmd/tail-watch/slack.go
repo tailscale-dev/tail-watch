@@ -54,17 +54,23 @@ type slackMessage struct {
 	Blocks []slackBlock `json:"blocks"`
 }
 
-// Render is a pure function of the events and the sink's options.
-func (s *slackSink) Render(evs []Event, _ string) ([]byte, error) {
-	return marshalJSON(renderSlack(evs, s.cfg, s.col))
+// Render builds the body from the events and the sink's own mention.
+func (s *slackSink) Render(evs []Event, unitID string) ([]byte, error) {
+	return s.RenderWithMentions(evs, unitID, nil)
 }
 
-func renderSlack(evs []Event, cfg SinkConfig, col CollectorInfo) slackMessage {
+// RenderWithMentions uses mentions, parallel to evs, for page-severity downs.
+// An empty entry falls back to the sink's mention_on_page.
+func (s *slackSink) RenderWithMentions(evs []Event, _ string, mentions []string) ([]byte, error) {
+	return marshalJSON(renderSlack(evs, s.cfg, s.col, mentions))
+}
+
+func renderSlack(evs []Event, cfg SinkConfig, col CollectorInfo, mentions []string) slackMessage {
 	var blocks []slackBlock
 	var plain []string
-	if cfg.MentionOnPage != "" && hasPageDown(evs) {
-		blocks = append(blocks, mrkdwnBlock(cfg.MentionOnPage))
-		plain = append(plain, cfg.MentionOnPage)
+	for _, text := range pageMentions(evs, cfg, mentions) {
+		blocks = append(blocks, mrkdwnBlock(text))
+		plain = append(plain, text)
 	}
 	shown := evs
 	if len(shown) > slackMaxLines {
@@ -95,13 +101,32 @@ func renderSlack(evs []Event, cfg SinkConfig, col CollectorInfo) slackMessage {
 	return slackMessage{Text: strings.Join(plain, "\n"), Blocks: blocks}
 }
 
-func hasPageDown(evs []Event) bool {
-	for _, ev := range evs {
-		if ev.Type == EventDown && ev.Severity == SeverityPage {
-			return true
+// pageMentions returns the distinct page-down mentions in queue order. A down
+// with an empty route mention uses the sink's mention_on_page.
+func pageMentions(evs []Event, cfg SinkConfig, mentions []string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	for i, ev := range evs {
+		if ev.Type != EventDown || ev.Severity != SeverityPage {
+			continue
 		}
+		text := ""
+		if i < len(mentions) {
+			text = mentions[i]
+		}
+		if text == "" {
+			text = cfg.MentionOnPage
+		}
+		if text == "" {
+			continue
+		}
+		if _, ok := seen[text]; ok {
+			continue
+		}
+		seen[text] = struct{}{}
+		out = append(out, text)
 	}
-	return false
+	return out
 }
 
 func mrkdwnBlock(text string) slackBlock {

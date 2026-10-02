@@ -654,7 +654,7 @@ func (c *classifier) ping(
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	})
 	if err != nil {
 		return res.Ping, err
@@ -689,7 +689,7 @@ func (c *classifier) probeICMP(ctx context.Context, ip netip.Addr, timeout time.
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	})
 	return err == nil
 }

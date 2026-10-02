@@ -42,7 +42,9 @@ func setAuditName(w http.ResponseWriter, name string) {
 // outcome, require JSON (415), reject a foreign Origin (403), then ask
 // authorize (403). Nothing changes unless all of them pass. op is the audit
 // operation. The dry-run validation call passes an empty op: it changes
-// nothing, so it is neither audited nor authorized. The probe passes "probe"
+// nothing, so it is neither audited nor authorized. The routing preview passes
+// an empty op for the same reason. Plain GETs, like the list of targets, routes
+// and sinks, are not wrapped at all. The probe passes "probe"
 // even though it persists nothing: it emits network traffic toward an address
 // the caller names, so it is authorized and audited like a write.
 func (m *monitorManager) guard(next http.HandlerFunc, op string) http.HandlerFunc {
@@ -53,9 +55,13 @@ func (m *monitorManager) guard(next http.HandlerFunc, op string) http.HandlerFun
 			if !write {
 				return
 			}
-			m.log.LogAttrs(r.Context(), slog.LevelInfo, "monitor write",
+			msg, nameKey := "monitor write", "target"
+			if strings.HasPrefix(op, "route.") {
+				msg, nameKey = "route write", "route"
+			}
+			m.log.LogAttrs(r.Context(), slog.LevelInfo, msg,
 				slog.String("op", op),
-				slog.String("target", w.name),
+				slog.String(nameKey, w.name),
 				slog.Int("status", w.status),
 				slog.String("outcome", outcomeOf(w.status)),
 				slog.String("remote", r.RemoteAddr))
@@ -114,6 +120,12 @@ func (m *monitorManager) routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/targets/{name}", m.guard(m.handleDelete, "delete"))
 	mux.HandleFunc("POST /api/v1/validate", m.guard(m.handleValidate, ""))
 	mux.HandleFunc("POST /api/v1/probe", m.guard(m.handleProbe, "probe"))
+	mux.HandleFunc("GET /api/v1/routes", m.handleListRoutes)
+	mux.HandleFunc("POST /api/v1/routes", m.guard(m.handleCreateRoute, "route.create"))
+	mux.HandleFunc("PUT /api/v1/routes/{name}", m.guard(m.handleReplaceRoute, "route.replace"))
+	mux.HandleFunc("DELETE /api/v1/routes/{name}", m.guard(m.handleDeleteRoute, "route.delete"))
+	mux.HandleFunc("GET /api/v1/sinks", m.handleListSinks)
+	mux.HandleFunc("POST /api/v1/route-preview", m.guard(m.handleRoutePreview, ""))
 	mux.HandleFunc("/api/v1/", notFoundJSON)
 }
 

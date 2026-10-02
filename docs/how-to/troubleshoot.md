@@ -24,6 +24,7 @@ print to stderr and exit 1; log lines are JSON on stderr.
 | `"msg":"collector identity","hostname":"<host>","local_only":true` (informational) | `collector.local_only: true` is set, so tail-watch starts without tailscaled and identifies itself by hostname | Nothing. Payloads carry `collector.name` and omit `collector.tailscale_ip`. See [Payload](../reference/payload.md) |
 | `queue: disk requires collector.state_dir` | A sink uses the disk queue with no `state_dir` | Set `collector.state_dir` or use `queue: memory` |
 | `dynamic monitors are inactive: the UI is off` (a warning) | `targets.json` has monitors but the UI is off, so they do not run | Turn the UI on, or ignore it |
+| `routes.json is present but the UI is off; leaving it unread` (a warning) | `routes.json` exists and the UI is off, so UI routes are not loaded and the file is not modified | Turn the UI on, or leave the file for a later upgrade. YAML `routes:` still apply |
 | `webhook sink is unsigned: no secret_env or secret_file` (a warning) | A webhook sink has no HMAC key | Add `secret_env`. See [Webhook](webhook-sink.md) |
 
 ## Check failures
@@ -32,6 +33,22 @@ print to stderr and exit 1; log lines are JSON on stderr.
 | --- | --- | --- |
 | `no peer handles <addr>; check grants to tag:monitor` | No peer owns or routes the address for this collector: a missing grant, an unapproved or unaccepted route, or the wrong address | Add the grant from `tag:monitor` and approve the route. See [ACLs](acls.md) and [Remote subnets](remote-subnets.md). tail-watch logs it once per target, again only if the grant returns and is lost |
 | TCP check ends with `i/o timeout` | The grant does not allow that port, so packets are dropped | Add `tcp:<port>` to the grant |
+
+## A sink did not get an event
+
+A sink receives an event only when it is a candidate and its own filters
+accept the event. `check-config` prints each target's candidate sinks. The
+monitor form's preview names the reason for each sink.
+
+| What you see | Why |
+| --- | --- |
+| The sink is not a candidate | The target names a route, and this sink is not in that route (`not_in_route`). An unrouted target is a candidate for every sink. |
+| `events` | The sink's `events` list does not include this event type. |
+| `min_severity` | The event is below the sink's `min_severity`. `target.flapping` is `warn`, so a sink set to `page` drops it. A route's `warn` severity does the same for `target.down`. |
+| `match.sites`, `match.targets`, or `match.tags` | The target's site, name, or tailnet tags do not match. A target with no tags never matches a `match.tags` filter. |
+| `missing_sink` | The route names a sink the config no longer defines. The remaining sinks still receive the event. |
+| The recovery went to a different sink | A recovery goes to the sinks that received its down. Editing the route during the incident changes the next down, not this recovery. |
+| `collector.started` or `notify-test` ignored the route | Those events are not routed. `test` also bypasses sink filters. |
 
 ## Validate before you restart
 

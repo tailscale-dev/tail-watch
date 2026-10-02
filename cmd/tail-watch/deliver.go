@@ -61,6 +61,19 @@ type sink interface {
 	MinInterval() time.Duration
 }
 
+// mentionRenderer is implemented by a sink that prints mentions resolved when
+// each event was queued. Sinks that do not implement it keep Render.
+type mentionRenderer interface {
+	RenderWithMentions(evs []Event, unitID string, mentions []string) ([]byte, error)
+}
+
+func renderBody(s sink, evs []Event, id string, mentions []string) ([]byte, error) {
+	if mr, ok := s.(mentionRenderer); ok {
+		return mr.RenderWithMentions(evs, id, mentions)
+	}
+	return s.Render(evs, id)
+}
+
 // retryDelay is min(2^(attempt-1) s, 5m) scaled by 0.5-1.5x jitter, raised to
 // retryAfter, and capped at 5m.
 func retryDelay(attempt int, jitter float64, retryAfter time.Duration) time.Duration {

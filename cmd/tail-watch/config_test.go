@@ -434,6 +434,59 @@ targets:
 	})
 }
 
+func TestRoutedTarget(t *testing.T) {
+	t.Parallel()
+	cfg, err := parseConfig([]byte(`
+sinks:
+  - {name: db-hook, type: webhook, url_env: U}
+routes:
+  - {name: db-team, severity: warn, sinks: [db-hook]}
+targets:
+  - {name: pg-primary, addr: 10.0.0.1, checks: [icmp], route: db-team}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Targets[0]
+	if got.Route != "db-team" || got.Severity != SeverityWarn {
+		t.Fatalf("route %q severity %q", got.Route, got.Severity)
+	}
+}
+
+func TestTargetRouteRejected(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			"both keys",
+			"targets:\n  - {name: a, addr: 10.0.0.1, checks: [icmp], route: db-team, severity: warn}\n" +
+				"routes:\n  - {name: db-team, sinks: [db-hook]}",
+			"mutually exclusive",
+		},
+		{
+			"unknown route",
+			"targets:\n  - {name: a, addr: 10.0.0.1, checks: [icmp], route: db-tem}",
+			`unknown route "db-tem"`,
+		},
+	}
+	const sinks = "sinks:\n  - {name: db-hook, type: webhook, url_env: U}\n"
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := parseConfig([]byte(sinks + tt.yaml))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("want %q, got %v", tt.want, err)
+			}
+			if tt.name == "both keys" && !strings.Contains(err.Error(), "targets[0].route") {
+				t.Fatalf("error %v", err)
+			}
+		})
+	}
+}
+
 func TestListenFlagOverride(t *testing.T) {
 	t.Parallel()
 	cfg := &Config{
@@ -442,7 +495,7 @@ func TestListenFlagOverride(t *testing.T) {
 		Sinks:      nil,
 		Heartbeat:  nil,
 		RawTargets: nil,
-		Base:       builtinTiming(),
+		Base:       builtinTiming(), Routes: nil,
 	}
 	if got := cfg.ListenAddr("127.0.0.1:2"); got != "127.0.0.1:2" {
 		t.Fatal(got)
@@ -524,7 +577,7 @@ targets:
 			if tt.name == "breaks a dependent's parent" {
 				existing = cfg.RawTargets[1:]
 			}
-			got, errs := cfg.validateCandidate(existing, tt.candidate)
+			got, errs := cfg.validateCandidate(existing, tt.candidate, cfg.Routes)
 			if len(tt.wants) == 0 {
 				requireValidCandidate(t, got, errs)
 				return

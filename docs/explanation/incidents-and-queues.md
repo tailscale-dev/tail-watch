@@ -104,9 +104,12 @@ page.
 
 With `collector.state_dir`, tail-watch keeps one file,
 `notification-state.json`. It holds open incidents, the delivery state of every
-incident on every sink, and the pending events of disk sinks. It deliberately
-does not hold URLs, secrets or header values, so a copied or backed up state
-directory is not a credential leak.
+incident on every sink, and the pending events of disk sinks. A queued event
+may carry `mention`, the route text resolved when that event was created. The
+field is omitted when empty, it is not part of the event payload, and a file
+written before routes existed still loads. The file deliberately does not hold
+URLs, secrets or header values, so a copied or backed up state directory is
+not a credential leak.
 
 Two decisions explain how it is written.
 

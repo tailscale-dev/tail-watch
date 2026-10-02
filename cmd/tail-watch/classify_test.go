@@ -444,7 +444,7 @@ func TestFreshICMPSkipsSupplementalProbe(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, _ := newTestClassifier(t, env, target)
 	c.Observe(Result{Target: target, Kind: checkICMP, Latency: time.Millisecond,
@@ -496,7 +496,7 @@ func TestObserveLayers(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	local := &Target{
 		Dynamic:  false,
@@ -517,7 +517,7 @@ func TestObserveLayers(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, pres := newTestClassifier(t, new(fakeEnv), router, nas, local)
 	seedRouter(pres)
@@ -637,7 +637,7 @@ func TestObserveLayers(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c.configured = append(c.configured, lonely)
 	c.byName[lonely.Name] = lonely
@@ -691,7 +691,7 @@ func TestLearningFallbackHAAndLocal(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	local := &Target{
 		Dynamic:  false,
@@ -712,7 +712,7 @@ func TestLearningFallbackHAAndLocal(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, pres := newTestClassifier(t, new(fakeEnv), router, backup, nas, local)
 	c.log = log
@@ -792,7 +792,7 @@ func TestMissingNodeIPUsesRoute(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, pres := newTestClassifier(t, new(fakeEnv), router, nas)
 	seedRouter(pres)
@@ -837,7 +837,7 @@ func TestLearningConcurrencyCap(t *testing.T) {
 			Checks:           nil,
 			Implicit:         false,
 			StableID:         "",
-			NodeID:           0,
+			NodeID:           0, Route: "",
 		}
 	}
 	c, _ := newTestClassifier(t, new(fakeEnv), targets...)
@@ -896,7 +896,7 @@ func TestImplicitTargetsAndGrantLog(t *testing.T) {
 		FlapWindow:       0,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	nas := &Target{
 		Dynamic:  false,
@@ -917,7 +917,7 @@ func TestImplicitTargetsAndGrantLog(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	other := &Target{
 		Dynamic:  false,
@@ -938,7 +938,7 @@ func TestImplicitTargetsAndGrantLog(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, pres := newTestClassifier(t, new(fakeEnv), mixed, nas, other)
 	c.log = log
@@ -1022,7 +1022,7 @@ func TestGrantWarningRounds(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, pres := newTestClassifier(t, new(fakeEnv), pdu)
 	c.log = log
@@ -1094,7 +1094,7 @@ func TestLearnerSchedule(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, _ := newTestClassifier(t, new(fakeEnv), nas)
 	c.clock = clk
@@ -1153,7 +1153,7 @@ func TestReconciliationRetainsThenRemoves(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, pres := newTestClassifier(t, new(fakeEnv), nas)
 	restored := &Target{
@@ -1172,7 +1172,7 @@ func TestReconciliationRetainsThenRemoves(t *testing.T) {
 		FailThreshold:    0,
 		RecoverThreshold: 0,
 		FlapLimit:        0,
-		FlapWindow:       0,
+		FlapWindow:       0, Route: "",
 	}
 	c.RestoreImplicit(restored)
 	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
@@ -1239,7 +1239,7 @@ func TestNoRemoteLANCompletesImmediately(t *testing.T) {
 		FlapWindow:       0,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, _ := newTestClassifier(t, new(fakeEnv), node)
 	restored := &Target{
@@ -1263,7 +1263,7 @@ func TestNoRemoteLANCompletesImmediately(t *testing.T) {
 		RecoverThreshold: 0,
 		FlapLimit:        0,
 		FlapWindow:       0,
-		Network:          "",
+		Network:          "", Route: "",
 	}
 	c.RestoreImplicit(restored)
 	l := newLearner(c)
@@ -1303,7 +1303,7 @@ func TestGraphCycleAndHARelease(t *testing.T) {
 		FlapWindow:       0,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	sw := &Target{
 		Dynamic:          false,
@@ -1323,7 +1323,7 @@ func TestGraphCycleAndHARelease(t *testing.T) {
 		FlapWindow:       0,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, pres := newTestClassifier(t, new(fakeEnv), router, sw)
 	seedRouter(pres)
@@ -1376,7 +1376,7 @@ func TestGraphCycleAndHARelease(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c2, pres2 := newTestClassifier(t, new(fakeEnv), a, b, child)
 	seedPair(pres2)
@@ -1427,7 +1427,7 @@ func TestSwitchParentDoesNotReplaceHandler(t *testing.T) {
 		FlapWindow:       0,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	cam := &Target{
 		Dynamic: false,
@@ -1448,7 +1448,7 @@ func TestSwitchParentDoesNotReplaceHandler(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	router := peerTarget("nyc-subnet-router", "nyc-router")
 	c, pres := newTestClassifier(t, new(fakeEnv), router, sw, cam)
@@ -1499,7 +1499,7 @@ func TestLayerAndParentMetrics(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 	c, pres := newTestClassifier(t, new(fakeEnv), nas)
 	seedRouter(pres)
@@ -1609,7 +1609,7 @@ func TestRegisterBeforeSchedule(t *testing.T) {
 		Network:          "",
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1742,7 +1742,7 @@ func peerTarget(name, addr string) *Target {
 		FlapWindow:       0,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 }
 

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"go.yaml.in/yaml/v3"
 )
 
 const (
@@ -188,7 +190,7 @@ func resolveSink(errs *[]error, i int, rs rawSink, stateDir string, seen map[str
 	loc := fmt.Sprintf("sinks[%d]", i)
 	label := rs.Name
 	if label == "" {
-		label = "(unnamed)"
+		label = unnamedLabel
 	}
 	fail := func(key, format string, args ...any) {
 		*errs = append(*errs, fmt.Errorf("%s.%s: sink %s: %s", loc, key, label, fmt.Sprintf(format, args...)))
@@ -381,6 +383,221 @@ func (s SinkConfig) checkSecrets() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// unnamedLabel is the text used when a target or route has no name.
+const unnamedLabel = "(unnamed)"
+
+// Route is one resolved notification route. Indexes are positions in the
+// config's sink list for names that exist. Names keeps the configured order,
+// including names that no longer have a sink.
+type Route struct {
+	Name     string
+	Severity Severity
+	Names    []string
+	Indexes  []int
+	Missing  []string
+	Mention  string
+	Source   string
+}
+
+// rawRoute is a route as written in the config file or routes.json.
+type rawRoute struct {
+	Name     string   `yaml:"name"               json:"name"`
+	Severity string   `yaml:"severity,omitempty" json:"severity,omitempty"`
+	Sinks    []string `yaml:"sinks"              json:"sinks"`
+	Mention  string   `yaml:"mention,omitempty"  json:"mention,omitempty"`
+	unknown  []string
+	err      error
+}
+
+//nolint:nilerr,unparam // YAML requires an error return; failures are collected in r.err for aggregate validation.
+func (r *rawRoute) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.MappingNode {
+		r.err = errors.New("must be a mapping")
+		return nil
+	}
+	known := map[string]struct{}{"name": {}, "severity": {}, "sinks": {}, "mention": {}}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		key := value.Content[i].Value
+		if _, ok := known[key]; !ok {
+			r.unknown = append(r.unknown, key)
+		}
+	}
+	var plain struct {
+		Name     string   `yaml:"name"`
+		Severity string   `yaml:"severity"`
+		Sinks    []string `yaml:"sinks"`
+		Mention  string   `yaml:"mention"`
+	}
+	if err := value.Decode(&plain); err != nil {
+		r.err = err
+		return nil
+	}
+	r.Name = plain.Name
+	r.Severity = plain.Severity
+	r.Sinks = append([]string(nil), plain.Sinks...)
+	r.Mention = plain.Mention
+	return nil
+}
+
+// resolveRoutes validates every route. A route that fails is left out of the
+// result; its problems are in errs. Unknown sink names are rejected.
+func resolveRoutes(errs *[]error, raws []rawRoute, sinks []SinkConfig) []Route {
+	out := make([]Route, 0, len(raws))
+	seen := map[string]int{}
+	for i, rr := range raws {
+		reportRouteDecode(errs, i, rr)
+		rt, ok := resolveOneRoute(errs, i, rr, sinks, seen, true)
+		if ok {
+			out = append(out, rt)
+		}
+	}
+	return out
+}
+
+func reportRouteDecode(errs *[]error, i int, rr rawRoute) {
+	if rr.err != nil {
+		*errs = append(*errs, fmt.Errorf("routes[%d]: %w", i, rr.err))
+	}
+	for _, key := range rr.unknown {
+		*errs = append(*errs, fmt.Errorf("routes[%d].%s: unknown key", i, key))
+	}
+}
+
+// resolveOneRoute checks one route. strict rejects a sink name that no sink
+// defines; otherwise that name is recorded on Missing and the route still loads.
+func resolveOneRoute(
+	errs *[]error, i int, rr rawRoute, sinks []SinkConfig, seen map[string]int, strict bool,
+) (Route, bool) {
+	loc := fmt.Sprintf("routes[%d]", i)
+	label := rr.Name
+	if label == "" {
+		label = unnamedLabel
+	}
+	ok := true
+	fail := func(key, format string, args ...any) {
+		ok = false
+		*errs = append(*errs, fmt.Errorf("%s.%s: route %s: %s", loc, key, label, fmt.Sprintf(format, args...)))
+	}
+	if !routeNameOK(fail, rr.Name, seen, i) {
+		ok = false
+	}
+	sev, sevOK := routeSeverity(rr.Severity)
+	if !sevOK {
+		fail("severity", "severity %q must be page or warn", rr.Severity)
+	}
+	if len(rr.Sinks) == 0 {
+		fail("sinks", "sinks must not be empty")
+	}
+	indexes, missing := routeSinkIndexes(fail, rr.Sinks, sinks, strict)
+	if !ok {
+		return Route{}, false
+	}
+	return Route{
+		Name: rr.Name, Severity: sev, Names: append([]string(nil), rr.Sinks...),
+		Indexes: indexes, Missing: missing, Mention: rr.Mention, Source: sourceConfig,
+	}, true
+}
+
+func routeNameOK(fail func(key, format string, args ...any), name string, seen map[string]int, i int) bool {
+	switch {
+	case name == "":
+		fail("name", "name is required")
+		return false
+	case !targetNameRE.MatchString(name):
+		fail("name", "name %q must match [A-Za-z0-9._-]", name)
+		return false
+	}
+	if prev, dup := seen[name]; dup {
+		fail("name", "duplicate route name %q (also routes[%d])", name, prev)
+		return false
+	}
+	seen[name] = i
+	return true
+}
+
+func routeSeverity(raw string) (Severity, bool) {
+	switch raw {
+	case "", string(SeverityPage):
+		return SeverityPage, true
+	case string(SeverityWarn):
+		return SeverityWarn, true
+	default:
+		return SeverityPage, false
+	}
+}
+
+func routeSinkIndexes(
+	fail func(key, format string, args ...any), names []string, sinks []SinkConfig, strict bool,
+) ([]int, []string) {
+	index := make(map[string]int, len(sinks))
+	for i, s := range sinks {
+		index[s.Name] = i
+	}
+	var indexes []int
+	var missing []string
+	seen := map[string]int{}
+	for j, name := range names {
+		if prev, dup := seen[name]; dup {
+			fail(fmt.Sprintf("sinks[%d]", j), "sink %q is listed twice (also sinks[%d])", name, prev)
+			continue
+		}
+		seen[name] = j
+		if idx, ok := index[name]; ok {
+			indexes = append(indexes, idx)
+			continue
+		}
+		if strict {
+			fail(fmt.Sprintf("sinks[%d]", j), "unknown sink %q", name)
+			continue
+		}
+		missing = append(missing, name)
+	}
+	return indexes, missing
+}
+
+// describeRoute is the check-config line for a route.
+func describeRoute(r Route) string {
+	names := "none"
+	if len(r.Names) > 0 {
+		names = strings.Join(r.Names, ",")
+	}
+	return fmt.Sprintf("route %s severity=%s sinks=%s", r.Name, r.Severity, names)
+}
+
+// targetRouteLine is the route and candidate-sink tail of a check-config target line.
+func targetRouteLine(t Target, routes []Route, sinks []SinkConfig) string {
+	if t.Route == "" {
+		return "route=none sinks=" + sinkNameList(sinks)
+	}
+	for _, r := range routes {
+		if r.Name != t.Route {
+			continue
+		}
+		candidates := make([]string, 0, len(r.Indexes))
+		for _, idx := range r.Indexes {
+			if idx >= 0 && idx < len(sinks) {
+				candidates = append(candidates, sinks[idx].Name)
+			}
+		}
+		if len(candidates) == 0 {
+			return "route=" + r.Name + " sinks=none"
+		}
+		return "route=" + r.Name + " sinks=" + strings.Join(candidates, ",")
+	}
+	return "route=" + t.Route + " sinks=none"
+}
+
+func sinkNameList(sinks []SinkConfig) string {
+	if len(sinks) == 0 {
+		return "none"
+	}
+	names := make([]string, len(sinks))
+	for i, s := range sinks {
+		names[i] = s.Name
+	}
+	return strings.Join(names, ",")
 }
 
 // describeSink is the check-config line for a sink. It never prints secrets.

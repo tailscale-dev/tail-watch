@@ -35,9 +35,11 @@ frame-ancestors 'none'`), `X-Content-Type-Options: nosniff` and `Cache-Control: 
 
 ### Requirement: Monitor list
 
-The page SHALL list every monitor with its name, address, site, severity, checks, source
-and current alert state, and SHALL refresh the list without a page reload. YAML monitors
-SHALL be shown as read-only, with no edit or delete control.
+The page SHALL list every monitor with its name, address, site, routing, checks, source
+and current alert state, and SHALL refresh the list without a page reload. The routing
+column SHALL show the route name and its severity, or the severity alone with "all sinks"
+for an unrouted monitor. YAML monitors SHALL be shown as read-only, with no edit or
+delete control.
 
 #### Scenario: State updates
 
@@ -50,12 +52,19 @@ SHALL be shown as read-only, with no edit or delete control.
 - **THEN** its row has no edit or delete control and is marked as coming from the config
   file
 
+#### Scenario: Routing column
+
+- **WHEN** monitor `pg-primary` names route `db-team` (`page`) and `nyc-printer` has
+  `severity: warn` and no route
+- **THEN** `pg-primary`'s row shows `db-team` and `page`, and `nyc-printer`'s row shows
+  `warn` and "all sinks"
+
 ### Requirement: Add and edit form
 
 The page SHALL provide a form to add a monitor and to edit a UI-created one, covering
-`name`, `addr`, `site`, `severity`, `parent`, `network`, `insecure_tls`, `checks`,
-`interval`, `timeout`, `fail_threshold`, `recover_threshold`, `flap_limit` and
-`flap_window`. The name field SHALL be read-only when editing. Server validation errors
+`name`, `addr`, `site`, routing (a `route`, or a `severity` with no route), `parent`,
+`network`, `insecure_tls`, `checks`, `interval`, `timeout`, `fail_threshold`,
+`recover_threshold`, `flap_limit` and `flap_window`. The name field SHALL be read-only when editing. Server validation errors
 SHALL be shown next to the field they name. The parent field SHALL offer only monitors
 that have exactly one `icmp` or one `tsping` check.
 
@@ -278,3 +287,102 @@ inform, and the save gate decides.
   `tcp:443`, `icmp` passing and `tcp:443` refused
 - **THEN** the form shows `icmp` as passing with its latency and `tcp:443` as failing
   with `connection refused`
+
+### Requirement: Route picker
+
+The form's routing field SHALL be one control offering every route, YAML and UI, and
+two unrouted choices, `page` and `warn`, which send to every sink. Each route option SHALL
+show the route's name, severity and sink names. Choosing a route SHALL send `route` and no
+`severity`; choosing an unrouted choice SHALL send `severity` and no `route`. When the
+form opens to add a monitor, the unrouted `page` choice SHALL be selected. When editing,
+the monitor's stored route or severity SHALL be selected. If the routes cannot be fetched,
+the unrouted choices SHALL still be offered and the form SHALL still save.
+
+#### Scenario: Route option shows its destinations
+
+- **WHEN** route `db-team` has severity `page` and sinks `pagerduty` and `ops-slack`
+- **THEN** its option shows `db-team`, `page`, `pagerduty` and `ops-slack`
+
+#### Scenario: Choosing a route
+
+- **WHEN** the operator chooses `db-team` and saves
+- **THEN** the definition sent has `route: db-team` and no `severity`
+
+#### Scenario: Routes unavailable
+
+- **WHEN** the request for routes fails
+- **THEN** the routing field offers `page` and `warn` and the monitor can be saved
+
+### Requirement: Severity explanation
+
+The form SHALL explain, next to the routing field and without the operator opening
+anything, what each severity means: `page` is for failures someone must act on now,
+reaches sinks that accept page events, and carries a Slack mention when one is
+configured; `warn` is for failures that should be seen but never wake anyone, and is
+dropped by sinks whose `min_severity` is `page`. It SHALL also say that flapping is always
+sent as `warn`, and that a recovery goes wherever its down went.
+
+#### Scenario: Explanation visible
+
+- **WHEN** the operator opens the add form
+- **THEN** the text describing `page` and `warn` is shown beside the routing field
+
+### Requirement: Routing preview in the form
+
+The form SHALL show, for the current values, where a `target.down` and a
+`target.flapping` would be sent, using `POST /api/v1/route-preview`. Each sink SHALL be
+shown as sent, dropped with the reason in words (for example "not in route", "filtered by
+site", "below this sink's minimum severity"), or unknown. The preview SHALL update when the
+routing field, site, name or address changes, without the operator saving. When every sink
+drops the `target.down`, the form SHALL warn that this monitor's outage would notify no
+one. The preview SHALL inform only: it SHALL NOT block or change saving, and a failed
+preview SHALL NOT block the form.
+
+#### Scenario: Preview names a dropped sink
+
+- **WHEN** the operator picks route `db-team` (`[pagerduty, ops-slack]`) for a monitor
+  in site `lab`, and `pagerduty` matches only site `nyc`
+- **THEN** the preview shows `ops-slack` as sent and `pagerduty` as filtered by site
+
+#### Scenario: Nobody would be told
+
+- **WHEN** every sink would drop the monitor's `target.down`
+- **THEN** the form shows a warning that this monitor's outage would notify no one, and
+  saving is still possible
+
+#### Scenario: Preview follows edits
+
+- **WHEN** the operator changes the site from `lab` to `nyc`
+- **THEN** the preview updates and shows `pagerduty` as sent
+
+### Requirement: Routes page
+
+The UI SHALL provide a Routes page, reachable from the monitor page, that lists every
+sink read-only with its name, type and filters, and every route with its name, severity,
+sinks, mention, source and the monitors that use it. A route with `missing_sinks` SHALL
+show those sinks as missing. YAML routes SHALL be read-only. The page SHALL let the
+operator add a UI route, edit one (the name fixed), and delete one, choosing sinks from
+the configured sink names. Server validation errors SHALL be shown next to the field they
+name. Deleting SHALL ask to confirm; a refused delete SHALL show the monitors that still
+use the route. The page SHALL say that sinks are defined in the config file.
+
+#### Scenario: Add a route
+
+- **WHEN** the operator adds route `db-team` with severity `page` and sink `db-hook`
+- **THEN** the route is created and appears as an option in the monitor form's routing
+  field
+
+#### Scenario: Route in use cannot be deleted
+
+- **WHEN** the operator deletes `db-team` while `pg-primary` uses it
+- **THEN** the page shows that `pg-primary` still uses it and the route remains
+
+#### Scenario: YAML route is read-only
+
+- **WHEN** a route has `source: config`
+- **THEN** it has no edit or delete control and is marked as coming from the config file
+
+#### Scenario: Missing sink shown
+
+- **WHEN** a UI route reports `missing_sinks: ["db-hook"]`
+- **THEN** its row marks `db-hook` as missing from the config

@@ -184,6 +184,124 @@ sinks:
 	}
 }
 
+const routeSinks = `
+sinks:
+  - {name: pagerduty, type: webhook, url_env: U}
+  - {name: ops-slack, type: slack, url_env: S}
+`
+
+func TestRouteValidation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		yaml string
+		want []string
+	}{
+		{
+			"unknown sink",
+			"routes:\n  - {name: db-team, sinks: [pagerdutty]}",
+			[]string{"routes[0].sinks[0]", "pagerdutty"},
+		},
+		{
+			"empty sinks",
+			"routes:\n  - {name: db-team, sinks: []}",
+			[]string{"routes[0].sinks", "sinks must not be empty"},
+		},
+		{
+			"sink listed twice",
+			"routes:\n  - {name: db-team, sinks: [pagerduty, pagerduty]}",
+			[]string{"routes[0].sinks[1]", "listed twice"},
+		},
+		{
+			"duplicate name",
+			"routes:\n  - {name: db-team, sinks: [pagerduty]}\n  - {name: db-team, sinks: [ops-slack]}",
+			[]string{"routes[1].name", "duplicate route name"},
+		},
+		{
+			"bad name",
+			"routes:\n  - {name: 'db team', sinks: [pagerduty]}",
+			[]string{"routes[0].name", "must match"},
+		},
+		{
+			"unknown key",
+			"routes:\n  - {name: db-team, sinks: [pagerduty], bogus: 1}",
+			[]string{"routes[0].bogus", "unknown key"},
+		},
+		{
+			"bad severity",
+			"routes:\n  - {name: db-team, severity: loud, sinks: [pagerduty]}",
+			[]string{"routes[0].severity", "must be page or warn"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := parseConfig([]byte(sinkBase + routeSinks + tt.yaml))
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("missing %q in %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRouteDefaultsAndValid(t *testing.T) {
+	t.Parallel()
+	cfg, err := parseConfig([]byte(sinkBase + routeSinks + `
+routes:
+  - {name: db-team, sinks: [pagerduty, ops-slack]}
+  - {name: cameras, severity: warn, sinks: [ops-slack], mention: "<!subteam^S0CAM>"}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Routes) != 2 {
+		t.Fatalf("routes %d", len(cfg.Routes))
+	}
+	db := cfg.Routes[0]
+	if db.Severity != SeverityPage || db.Mention != "" || len(db.Indexes) != 2 || db.Names[0] != "pagerduty" {
+		t.Fatalf("default route %+v", db)
+	}
+	cam := cfg.Routes[1]
+	if cam.Severity != SeverityWarn || cam.Mention != "<!subteam^S0CAM>" || len(cam.Indexes) != 1 {
+		t.Fatalf("cameras %+v", cam)
+	}
+}
+
+func TestRouteValidationCollectsAllErrors(t *testing.T) {
+	t.Parallel()
+	_, err := parseConfig([]byte(sinkBase + routeSinks + `
+routes:
+  - {name: "bad name", severity: loud, sinks: [nope, nope], extra: 1}
+  - {name: db-team, sinks: []}
+`))
+	if err == nil {
+		t.Fatal("expected errors")
+	}
+	for _, want := range []string{
+		"routes[0].name",
+		"must match",
+		"routes[0].severity",
+		"must be page or warn",
+		"routes[0].sinks[0]",
+		"unknown sink",
+		"routes[0].sinks[1]",
+		"listed twice",
+		"routes[0].extra",
+		"unknown key",
+		"routes[1].sinks",
+		"sinks must not be empty",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
+	}
+}
+
 func TestSecretRefResolve(t *testing.T) {
 	t.Setenv("TW_SECRET", "s3cret")
 	t.Setenv("TW_EMPTY", "")

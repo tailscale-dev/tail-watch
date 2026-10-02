@@ -28,6 +28,7 @@ for the `checks` syntax.
 | `collector` | mapping | no | see below |
 | `defaults` | mapping | no | see below |
 | `targets` | list of targets | no | empty |
+| `routes` | list of routes | no | empty |
 | `sinks` | list of sinks | no | empty |
 | `heartbeat` | mapping | no | off |
 
@@ -131,6 +132,8 @@ heartbeat:
 - `notification-state.json`: open incidents, per-sink delivery state, and the
   pending events of `queue: disk` sinks. Mode `0600`. Written whenever
   `state_dir` is set and at least one sink exists.
+- `routes.json`: routes created in the UI. Mode `0600`. Read only when the UI
+  is on. See [Manage monitors in the UI](../how-to/monitor-ui.md).
 - `targets.json`: monitors created in the UI. Mode `0600`. Read only when the UI
   is on.
 
@@ -190,7 +193,8 @@ Constraints are checked on each target after defaults and overrides are merged.
 | `addr` | string | yes | | IP address or DNS name, including a MagicDNS short name. |
 | `checks` | list of strings | yes | | Non-empty, no duplicates. See [Checks](checks.md). |
 | `site` | string | no | empty | Free-form group label. Used for the `site` metric label and sink `match.sites`. |
-| `severity` | string | no | `page` | `page` or `warn`. Severity of the `target.down` event. |
+| `severity` | string | no | `page` | `page` or `warn`. Severity of `target.down` when `route` is unset. Mutually exclusive with `route`. |
+| `route` | string | no | empty | Name of a route in `routes`. That route's severity and sinks apply. Mutually exclusive with `severity`. |
 | `network` | string | no | `tailnet` | `tailnet` or `local`. |
 | `parent` | string | no | empty | Name of another target whose only check is `icmp` or `tsping`. |
 | `insecure_tls` | bool | no | `false` | Skip certificate verification for `http:` checks on this target. |
@@ -210,11 +214,49 @@ Rules enforced across targets:
   exactly one check, either `icmp` or `tsping`.
 - Parent cycles are rejected.
 - `name` must be unique.
+- A target sets `route` or `severity`, not both. `route` must name a route in
+  this file's `routes` list. A routed target's severity is the route's.
 
 For how the state, flap, and parent settings behave at run time, see
 [Alert state](../explanation/alert-state.md) and
 [Failure layers](../explanation/failure-layers.md). For `network`, see
 [Monitor remote subnets and local LANs](../how-to/remote-subnets.md).
+
+## `routes[]`
+
+A route names the sinks that receive a target's down and flapping events, and
+the severity of `target.down`. A target with no `route` is a candidate for
+every sink, at its own `severity`. `target.flapping` is always `warn`.
+`target.recovered` goes to the sinks that received the down.
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `name` | string | yes | | Unique. Must match `[A-Za-z0-9._-]+`. |
+| `severity` | string | no | `page` | `page` or `warn`. Severity of `target.down` for targets that name this route. |
+| `sinks` | list of strings | yes | | Non-empty names of sinks in `sinks`. A name may appear once. |
+| `mention` | string | no | empty | Slack text used instead of the sink's `mention_on_page` for a page-severity `target.down`. |
+
+```yaml
+sinks:
+  - name: db-hook
+    type: webhook
+    url_env: DB_HOOK_URL
+
+routes:
+  - name: db-team
+    severity: page
+    sinks: [db-hook]
+    mention: "<!subteam^S0DB>"
+
+targets:
+  - name: pg-primary
+    addr: 10.0.0.1
+    checks: [icmp]
+    route: db-team
+```
+
+To choose `page` or `warn`, and to create a route in the UI, see
+[Route notifications](../how-to/notification-routes.md).
 
 ## `sinks[]`
 

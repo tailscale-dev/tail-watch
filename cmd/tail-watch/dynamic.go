@@ -25,6 +25,7 @@ type dynamicTarget struct {
 	Addr             string   `json:"addr"`
 	Site             string   `json:"site,omitempty"`
 	Severity         string   `json:"severity,omitempty"`
+	Route            string   `json:"route,omitempty"`
 	Parent           string   `json:"parent,omitempty"`
 	InsecureTLS      bool     `json:"insecure_tls,omitempty"`
 	Interval         string   `json:"interval,omitempty"`
@@ -44,6 +45,7 @@ func (d dynamicTarget) raw() rawTarget {
 		Addr:             d.Addr,
 		Site:             d.Site,
 		Severity:         d.Severity,
+		Route:            d.Route,
 		Parent:           d.Parent,
 		InsecureTLS:      d.InsecureTLS,
 		Interval:         durationFromString(d.Interval),
@@ -90,17 +92,22 @@ func loadDynamic(dir string) ([]dynamicTarget, error) {
 	return out, nil
 }
 
-// saveDynamic atomically replaces targets.json in dir, mode 0600: write a
-// temporary file, fsync it, rename it over the store, then fsync the directory.
+// saveDynamic atomically replaces targets.json in dir.
 func saveDynamic(dir string, targets []dynamicTarget) error {
 	if targets == nil {
 		targets = []dynamicTarget{}
 	}
-	data, err := json.MarshalIndent(targets, "", "  ")
+	return writeJSONAtomic(dir, dynamicFileName, targets)
+}
+
+// writeJSONAtomic replaces file in dir, mode 0600: write a temporary file,
+// fsync it, rename it over the store, then fsync the directory.
+func writeJSONAtomic(dir, file string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, dynamicFileName+".*.tmp")
+	tmp, err := os.CreateTemp(dir, file+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -124,7 +131,7 @@ func saveDynamic(dir string, targets []dynamicTarget) error {
 	if closeErr := tmp.Close(); closeErr != nil {
 		return closeErr
 	}
-	if renameErr := os.Rename(name, filepath.Join(dir, dynamicFileName)); renameErr != nil {
+	if renameErr := os.Rename(name, filepath.Join(dir, file)); renameErr != nil {
 		return renameErr
 	}
 	renamed = true
@@ -149,7 +156,7 @@ func (c *Config) mergeDynamic(entries []dynamicTarget, log *slog.Logger) []rawTa
 			warnSkipped(log, e.Name, "name is already used by a configured or earlier monitor")
 			continue
 		}
-		t, errs := c.validateCandidate(kept, raw)
+		t, errs := c.validateCandidate(kept, raw, c.Routes)
 		if len(errs) > 0 {
 			warnSkipped(log, e.Name, errors.Join(errs...).Error())
 			continue

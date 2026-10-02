@@ -58,7 +58,7 @@ func TestPublishCompletionOrder(t *testing.T) {
 		Checks:           nil,
 		Implicit:         false,
 		StableID:         "",
-		NodeID:           0,
+		NodeID:           0, Route: "",
 	}
 
 	go pub.publish(Result{Target: target, Check: "early",

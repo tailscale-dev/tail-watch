@@ -21,7 +21,9 @@
   because metric names cannot contain a hyphen.
 - The monitor UI is off unless `--ui` or `collector.ui`: `dynamic.go` (`targets.json`
   store and startup merge), `monitor_api.go` (manager and handlers, one mutex,
-  persist then apply), `monitor_guard.go` (content type, Origin, `authorize`, audit
+  persist then apply), `monitor_routes.go` (route create, replace and delete,
+  the sink list and route preview; persist `routes.json`, then publish the
+  route table), `monitor_guard.go` (content type, Origin, `authorize`, audit
   log), `ui_serve.go` and `ui/` (embedded plain HTML, CSS and JS, no build step).
   `Target.Dynamic` marks UI monitors; the alerter may remove one while `DOWN`.
   `classifier.AddConfigured` registers them and republishes the parent graph, which
@@ -32,7 +34,14 @@
   through `runCheckWith` (the prober's error normalization) after `bindChecks` gives
   `tsping` the shared resolver. A failing probe never refuses a save server-side; the UI
   gates Save on it with a confirm dialog. `guard` takes the audit `op` at registration;
-  an empty op means unaudited and unauthorized (validate only).
+  an empty op means unaudited and unauthorized (validate and
+  `POST /route-preview`). `GET /routes` and `GET /sinks`, like `GET /targets`,
+  are not wrapped. Route writes use `route.create`,
+  `route.replace` and `route.delete` and log `route write`. The manager's
+  `published` pointer is the notifier's route table when a notifier exists, so
+  the next down sees a route write. A route edit does not re-register monitors
+  or close incidents. The field is not named `routes`: that is the method that
+  registers the HTTP handlers.
 - `presence.go` is the IPN bus view. `tsping` name resolution uses it and
   falls back to the 30s `Status()` cache only while that view is unseeded.
 - `collector.local_only` runs the collector with no tailscaled (the ProxyGroup
@@ -130,6 +139,16 @@
   a pick only the matching entry shows; this is accepted browser behavior.
 - `ui_route_test.go` runs the route-matching functions of `app.js` under bun or node, so keep
   them between `function peerValue` and `// updateRouteHint` and free of DOM access.
+- `ui_routes_test.go` runs the `// --- route form` block of `app.js`
+  (`routeOptionLabel`, `reasonWords`, `previewWords`, `downNotifiesNoOne`,
+  `routingChoice`, `routingPayload`, `routingText`) under bun or node, so keep
+  that block free of DOM access. The Routing select sends `route` or
+  `severity`, never both. The preview waits about 300 ms and drops a response
+  once a newer one has been requested.
+- The Routes view is the `#routes` hash in the same `index.html`. Sinks on
+  that page are read-only. A route from the config file has no Edit or Delete.
+  Field errors are scoped to the open form, because both forms use
+  `data-field="name"`.
 - `ui_checks_test.go` runs the `// --- check conversion` block of `app.js` (`checkToString`,
   `checkFromString`) under bun or node, so keep that block free of DOM access. Check rows
   are the form's view of the check strings: the API and `targets.json` are unchanged, rows

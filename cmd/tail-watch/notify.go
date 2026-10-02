@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -63,6 +64,9 @@ type notifier struct {
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// routes is the latest published route snapshot. A nil load means no routes.
+	routes atomic.Pointer[routeTable]
 }
 
 func newNotifier(cfg notifierConfig) (*notifier, error) {
@@ -94,6 +98,7 @@ func newNotifier(cfg notifierConfig) (*notifier, error) {
 		persistBad: false,
 		cancel:     nil,
 		wg:         sync.WaitGroup{},
+		routes:     atomic.Pointer[routeTable]{},
 	}
 	for _, sc := range cfg.Sinks {
 		s, err := cfg.NewSink(sc)
@@ -256,8 +261,9 @@ func (n *notifier) applyLocked(tr Transition, removed bool) bool {
 		if !ok {
 			return false
 		}
-		ev := newDownEvent(id, n.cfg.Collector, tr)
-		n.b.openIncident(ev, targetDefOf(tr.Target), downSinceOf(tr), n.routeLocked(ev))
+		ev := newDownEventIn(id, n.cfg.Collector, tr, n.routes.Load())
+		sinks, mention := n.routeLocked(ev, tr.Target.Route)
+		n.b.openIncident(ev, targetDefOf(tr.Target), downSinceOf(tr), sinks, mention)
 		n.log.Info("incident opened", "target", name, "event", id, "check", tr.Check, "layer", string(tr.Layer))
 		return true
 	case mapRecovered:
@@ -267,7 +273,7 @@ func (n *notifier) applyLocked(tr Transition, removed bool) bool {
 		if !ok {
 			return false
 		}
-		n.enqueueLocked(newFlappingEvent(id, n.cfg.Collector, tr))
+		n.enqueueOn(newFlappingEvent(id, n.cfg.Collector, tr), tr.Target.Route)
 		return true
 	case mapNone:
 		return false
@@ -294,25 +300,40 @@ func (n *notifier) newIDLocked(prefix string) (string, bool) {
 	return id, true
 }
 
-// routeLocked lists the sinks whose filters accept ev, in config order.
-func (n *notifier) routeLocked(ev Event) []string {
+// routeLocked lists the sinks whose filters accept ev, in config order, and
+// the mention to store on a page-severity down. route narrows the candidates
+// before the sink filters run.
+func (n *notifier) routeLocked(ev Event, route string) ([]string, string) {
+	indexes, mention := routeCandidates(n.cfg.Sinks, n.routes.Load(), ev, route)
 	var tags []string
 	if ev.Target != nil && n.cfg.Tags != nil {
 		tags = n.cfg.Tags(ev.Target.Name)
 	}
-	var out []string
-	for _, sc := range n.cfg.Sinks {
-		if sc.accepts(ev, tags) {
-			out = append(out, sc.Name)
+	var names []string
+	for _, idx := range indexes {
+		if idx < 0 || idx >= len(n.cfg.Sinks) {
+			continue
+		}
+		sc := n.cfg.Sinks[idx]
+		if ok, _ := sc.explain(ev, tags); ok {
+			names = append(names, sc.Name)
 		}
 	}
-	return out
+	return names, mention
 }
 
-// enqueueLocked queues an event that opens no incident, such as a flap notice.
+// enqueueLocked queues an event that opens no incident and is not routed.
 func (n *notifier) enqueueLocked(ev Event) {
-	for _, name := range n.routeLocked(ev) {
-		n.b.push(name, &queued{Seq: n.b.seq(), IncidentID: "", Event: ev, Attempted: false, UnitID: ""})
+	n.enqueueOn(ev, "")
+}
+
+// enqueueOn queues ev for the sinks that accept it on route.
+func (n *notifier) enqueueOn(ev Event, route string) {
+	names, _ := n.routeLocked(ev, route)
+	for _, name := range names {
+		n.b.push(name, &queued{
+			Seq: n.b.seq(), IncidentID: "", Event: ev, Attempted: false, UnitID: "", Mention: "",
+		})
 	}
 }
 
@@ -508,9 +529,11 @@ func (w *worker) groupRemaining(now time.Time, pending int) time.Duration {
 func (w *worker) formLocked(items []*queued, now time.Time) *unit {
 	n := w.n
 	evs := make([]Event, len(items))
+	mentions := make([]string, len(items))
 	for i, it := range items {
 		it.Event.Late = now.Sub(it.Event.Time.Time()) > lateAfter
 		evs[i] = it.Event
+		mentions[i] = it.Mention
 	}
 	id := items[0].Event.ID
 	if w.grouped() {
@@ -520,7 +543,7 @@ func (w *worker) formLocked(items []*queued, now time.Time) *unit {
 		}
 		id = bid
 	}
-	body, err := w.s.Render(evs, id)
+	body, err := renderBody(w.s, evs, id, mentions)
 	u := n.b.beginUnit(w.cfg.Name, id, items, body)
 	if err != nil {
 		n.log.Error("cannot render notification", "sink", w.cfg.Name, "err", err)

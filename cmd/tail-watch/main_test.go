@@ -51,7 +51,8 @@ func TestVersionAndCheckConfig(t *testing.T) {
 		t.Fatalf("code %d stderr %s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "a interval=30s timeout=5s") ||
-		!strings.Contains(stdout.String(), "checks=icmp") {
+		!strings.Contains(stdout.String(), "checks=icmp") ||
+		!strings.Contains(stdout.String(), "route=none sinks=none") {
 		t.Fatalf("stdout %s", stdout.String())
 	}
 
@@ -63,6 +64,39 @@ func TestVersionAndCheckConfig(t *testing.T) {
 	stderr.Reset()
 	if code := run([]string{"check-config", "--config", bad}, &stdout, &stderr); code != 1 {
 		t.Fatalf("code %d stderr %s", code, stderr.String())
+	}
+}
+
+func TestCheckConfigPrintsRoutes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "routes.yaml")
+	body := []byte(`
+sinks:
+  - {name: db-hook, type: webhook, url_env: U}
+  - {name: ops-slack, type: slack, url_env: S}
+routes:
+  - {name: db-team, sinks: [db-hook]}
+targets:
+  - {name: pg-primary, addr: 10.0.0.1, checks: [icmp], route: db-team}
+  - {name: nyc-printer, addr: 10.0.0.2, checks: [icmp], severity: warn}
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"check-config", "--config", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d stderr %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"route db-team severity=page sinks=db-hook",
+		"pg-primary interval=30s timeout=5s network=tailnet checks=icmp route=db-team sinks=db-hook",
+		"nyc-printer interval=30s timeout=5s network=tailnet checks=icmp route=none sinks=db-hook,ops-slack",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
 	}
 }
 
@@ -127,6 +161,7 @@ func TestPreflight(t *testing.T) {
 			Implicit:         false,
 			StableID:         "",
 			NodeID:           0,
+			Route:            "",
 		},
 	}
 	loop := []Target{
@@ -144,6 +179,7 @@ func TestPreflight(t *testing.T) {
 			Implicit:         false,
 			StableID:         "",
 			NodeID:           0,
+			Route:            "",
 		},
 	}
 
@@ -650,6 +686,7 @@ targets:
 		ui:     false,
 
 		dynamic:  nil,
+		uiRoutes: nil,
 		registry: nil,
 		resolver: nil,
 		presence: nil,
