@@ -94,6 +94,9 @@
 - When a config key, flag, metric, event field, or log message changes, update
   `reference/config.md`, `reference/cli.md`, `reference/metrics.md`,
   `reference/payload.md`, or `how-to/troubleshoot.md` in the same change.
+- `CONTEXT.md` holds the project's hard boundaries and `ROADMAP.md` the plan. The roadmap
+  only pulls from GitHub: `/roadmap sync` links issues as they are filed and never pushes
+  `roadmap/*` or `effort/*` labels (`gh` cannot reach this repo anyway).
 - Check a config snippet with `tail-watch check-config`. `check-config` and `--once`
   do not resolve `*_env` secrets, so it passes with them unset.
 
