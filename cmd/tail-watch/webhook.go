@@ -45,8 +45,8 @@ func (w *webhookSink) Send(ctx context.Context, body []byte, m sendMeta) deliver
 		return secretUnavailable(fmt.Errorf("sink %s: url: %w", w.cfg.Name, err))
 	}
 	headers := map[string]string{
-		"Content-Type": contentTypeJSON,
-		"User-Agent":   "tail-watch/" + versionString(),
+		headerContentType: contentTypeJSON,
+		headerUserAgent:   "tail-watch/" + versionString(),
 	}
 	if w.cfg.Batch {
 		headers["Tail-Watch-Batch-Id"] = m.ID

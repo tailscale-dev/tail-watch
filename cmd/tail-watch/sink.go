@@ -21,6 +21,9 @@ const (
 	requestTimeout  = 10 * time.Second
 	maxResponseRead = 64 << 10
 	signatureHeader = "Tail-Watch-Signature"
+
+	headerContentType = "Content-Type"
+	headerUserAgent   = "User-Agent"
 )
 
 // newSinkWithEnv builds the delivery code for one configured sink. env, when
@@ -32,6 +35,8 @@ func newSinkWithEnv(sc SinkConfig, col CollectorInfo, env netEnv) (sink, error) 
 		return newWebhookSink(sc, client), nil
 	case sinkSlack:
 		return newSlackSink(sc, col, client), nil
+	case sinkTeams:
+		return newTeamsSink(sc, col, client), nil
 	default:
 		return nil, fmt.Errorf("sink %s: unknown type %q", sc.Name, sc.Type)
 	}

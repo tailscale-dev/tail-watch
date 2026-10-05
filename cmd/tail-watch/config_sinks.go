@@ -23,6 +23,7 @@ const (
 
 	sinkWebhook = "webhook"
 	sinkSlack   = "slack"
+	sinkTeams   = "teams"
 
 	queueMemory = "memory"
 	queueDisk   = "disk"
@@ -228,9 +229,9 @@ func resolveSink(errs *[]error, i int, rs rawSink, stateDir string, seen map[str
 		}
 	}
 	switch rs.Type {
-	case sinkWebhook, sinkSlack:
+	case sinkWebhook, sinkSlack, sinkTeams:
 	default:
-		fail("type", "type %q must be webhook or slack", rs.Type)
+		fail("type", "type %q must be webhook, slack or teams", rs.Type)
 	}
 	if (rs.URLEnv == "") == (rs.URLFile == "") {
 		fail("url", "exactly one of url_env or url_file is required")
@@ -246,7 +247,7 @@ func resolveSink(errs *[]error, i int, rs rawSink, stateDir string, seen map[str
 
 func resolveSinkTypeKeys(fail func(key, format string, args ...any), rs rawSink) {
 	switch rs.Type {
-	case sinkSlack:
+	case sinkSlack, sinkTeams:
 		for _, k := range []struct {
 			key string
 			set bool
@@ -258,8 +259,11 @@ func resolveSinkTypeKeys(fail func(key, format string, args ...any), rs rawSink)
 			{"headers_env", len(rs.HeadersEnv) > 0},
 		} {
 			if k.set {
-				fail(k.key, "%s is not valid for a slack sink", k.key)
+				fail(k.key, "%s is not valid for a %s sink", k.key, rs.Type)
 			}
+		}
+		if rs.Type == sinkTeams && rs.MentionOnPage != "" {
+			fail("mention_on_page", "mention_on_page is not valid for a teams sink")
 		}
 	case sinkWebhook:
 		if rs.MentionOnPage != "" {
@@ -365,6 +369,18 @@ func (c *Config) resolveSecrets() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// messageSink reports whether the sink posts chat messages (Slack, Teams), whose
+// group is capped by queue_size rather than max_batch.
+func (s SinkConfig) messageSink() bool {
+	return s.Type == sinkSlack || s.Type == sinkTeams
+}
+
+// groupsMessages reports whether the sink folds events inside group_wait into
+// one request: message sinks always do, a webhook does when batching.
+func (s SinkConfig) groupsMessages() bool {
+	return s.messageSink() || s.Batch
 }
 
 func (s SinkConfig) checkSecrets() error {

@@ -28,6 +28,7 @@ services:
   tail-watch:
     environment:
       - SLACK_WEBHOOK_URL
+      - TEAMS_WEBHOOK_URL
       - OPS_WEBHOOK_URL
       - OPS_WEBHOOK_SECRET
       - HEARTBEAT_URL

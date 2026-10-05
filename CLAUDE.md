@@ -62,8 +62,8 @@
   `incidents.go` (incident and per-sink delivery state, `restoreOpen`), `queue.go`
   (bounded queues, atomic `notification-state.json`, startup replay), `notify.go` (the
   coordinator and per-sink workers), `deliver.go` (shared retry loop), `sink.go`,
-  `webhook.go`, `slack.go`, `heartbeat.go`, `notifytest.go`, `notify_metrics.go`, and
-  sink schema in `config_sinks.go`.
+  `webhook.go`, `slack.go`, `teams.go`, `heartbeat.go`, `notifytest.go`,
+  `notify_metrics.go`, and sink schema in `config_sinks.go`.
 - One `notifier` mutex guards the whole `book` (incidents plus queues), and every mutation
   commits the snapshot under it, so workers only see durable intents after the commit.
   `ObserveTransition` only writes the 4096-slot intake channel; never add I/O to it.
@@ -73,9 +73,10 @@
   and counts timers and tickers. Wait with `waitTimers`/`tickers` before `Advance`, or a
   worker that has not armed its timer yet misses the advance. Retry timers and group-wait
   timers both come from `NewTimer`, so count them when scripting a sequence.
-- Golden files live in `cmd/tail-watch/testdata/{payload,slack}`; regenerate with
-  `go test -run 'TestPayloadGolden|TestSlackGolden' -update ./cmd/tail-watch`, then
-  review the diff.
+- Golden files live in `cmd/tail-watch/testdata/{payload,slack,teams}`; regenerate with
+  `go test ./cmd/tail-watch -run 'TestPayloadGolden|TestSlackGolden|TestTeamsGolden'
+  -update`, then review the diff. The package must come before `-update`, or Go stops
+  reading packages at the unknown flag and fails with "no Go files in .".
 - Startup order matters: `newNotifier` (corrupt state or unset secrets stop startup) runs
   in `run()` before the prober; `restoreOpen` runs in `startCollectors` after the alerter
   and classifier exist and before any target is scheduled. `--once` never builds a notifier,
@@ -145,6 +146,12 @@
   that block free of DOM access. The Routing select sends `route` or
   `severity`, never both. The preview waits about 300 ms and drops a response
   once a newer one has been requested.
+- `teams_render_test.go` renders every `testdata/teams/*.json` golden with the vendored
+  `adaptivecards` renderer, Teams host config and `markdown-it` in
+  `testdata/teams/render/` (versions in `docs/contributing/ui-browser-test.md`), through
+  the shared `browserPage` helper. `teamsHeadlineColors` must list every golden, so a new
+  golden needs a row there. Teams markdown turns a single `\n` into a space, so card detail
+  lines are joined with `\n\n`.
 - The Routes view is the `#routes` hash in the same `index.html`. Sinks on
   that page are read-only. A route from the config file has no Edit or Delete.
   Field errors are scoped to the open form, because both forms use
@@ -165,8 +172,14 @@
   brings up just the nodes for manual work. The tailscale image's busybox has no `httpd`,
   so the http fixture is an `nc` responder that must read the request before replying.
 - The Slack webhook is read from `SLACK_WEBHOOK_URL` or from the pulumi env named by
-  `TAIL_WATCH_SLACK_PULUMI_ENV`; never write it to a file or log it (`redactSecrets`
-  strips `hooks.slack.com` URLs).
+  `TAIL_WATCH_SLACK_PULUMI_ENV`, and the Teams one from `TEAMS_WEBHOOK_URL` or
+  `TAIL_WATCH_TEAMS_PULUMI_ENV` (both through `liveSinkURL`); never write them to a file
+  or log them (`redactSecrets` strips `hooks.slack.com`, `logic.azure.com` and
+  `powerplatform.com` URLs and `sig=` values).
+- `TestLiveTeams` (`TAIL_WATCH_LIVE_TEAMS=1`) posts real cards to a Teams workflow with no
+  tailnet. It needs its own gate because operators export `TEAMS_WEBHOOK_URL` to run the
+  collector, and `mise run test` must not post to their channel. A Workflows trigger
+  answers `202`, so assert `2xx`, never `200`.
 
 ## VM systemd test
 

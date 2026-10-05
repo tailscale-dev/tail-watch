@@ -89,6 +89,29 @@ heartbeat:
 	}
 }
 
+func TestTeamsSinkValid(t *testing.T) {
+	t.Parallel()
+	cfg, err := parseConfig([]byte(sinkBase + `
+sinks:
+  - name: ops-teams
+    type: teams
+    url_env: TEAMS_WEBHOOK_URL
+    status_url: https://monitor-nyc.example.ts.net:9109
+    group_wait: 30s
+    min_severity: warn
+    queue_size: 50
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := cfg.Sinks[0]
+	if s.Type != sinkTeams || s.URL.Env != "TEAMS_WEBHOOK_URL" ||
+		s.StatusURL != "https://monitor-nyc.example.ts.net:9109" ||
+		s.GroupWait != 30*time.Second || s.MinSeverity != SeverityWarn || s.QueueSize != 50 {
+		t.Fatalf("teams: %+v", s)
+	}
+}
+
 func TestSinkValidation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -105,7 +128,7 @@ func TestSinkValidation(t *testing.T) {
 		{"reserved incidents", "sinks:\n  - {name: incidents, type: slack, url_env: U}", "reserved"},
 		{"reserved intake", "sinks:\n  - {name: intake, type: slack, url_env: U}", "reserved"},
 		{"reserved state", "sinks:\n  - {name: state, type: slack, url_env: U}", "reserved"},
-		{"unknown type", "sinks:\n  - {name: a, type: pagerduty, url_env: U}", "must be webhook or slack"},
+		{"unknown type", "sinks:\n  - {name: a, type: pagerduty, url_env: U}", "must be webhook, slack or teams"},
 		{"no url", "sinks:\n  - {name: a, type: slack}", "exactly one of url_env or url_file"},
 		{
 			"two urls",
@@ -113,9 +136,39 @@ func TestSinkValidation(t *testing.T) {
 			"exactly one of url_env or url_file",
 		},
 		{
+			"teams two urls",
+			"sinks:\n  - {name: a, type: teams, url_env: U, url_file: /f}",
+			"exactly one of url_env or url_file",
+		},
+		{
 			"slack batch",
 			"sinks:\n  - {name: a, type: slack, url_env: U, batch: true}",
 			"batch is not valid for a slack sink",
+		},
+		{
+			"teams batch",
+			"sinks:\n  - {name: a, type: teams, url_env: U, batch: true}",
+			"batch is not valid for a teams sink",
+		},
+		{
+			"teams max_batch",
+			"sinks:\n  - {name: a, type: teams, url_env: U, max_batch: 5}",
+			"max_batch is not valid for a teams sink",
+		},
+		{
+			"teams secret",
+			"sinks:\n  - {name: a, type: teams, url_env: U, secret_file: /f}",
+			"secret_file is not valid for a teams sink",
+		},
+		{
+			"teams headers",
+			"sinks:\n  - {name: a, type: teams, url_env: U, headers_env: {Authorization: A}}",
+			"headers_env is not valid for a teams sink",
+		},
+		{
+			"teams mention",
+			"sinks:\n  - {name: a, type: teams, url_env: U, mention_on_page: '<at>Jane</at>'}",
+			"mention_on_page is not valid for a teams sink",
 		},
 		{"slack secret", "sinks:\n  - {name: a, type: slack, url_env: U, secret_env: S}", "secret_env is not valid"},
 		{
@@ -177,7 +230,7 @@ sinks:
 	if err == nil {
 		t.Fatal("expected errors")
 	}
-	for _, want := range []string{"reserved", "must be webhook or slack", "queue_size must be positive"} {
+	for _, want := range []string{"reserved", "must be webhook, slack or teams", "queue_size must be positive"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("missing %q in %v", want, err)
 		}
@@ -367,10 +420,28 @@ func TestRedactURL(t *testing.T) {
 	}
 }
 
+func TestRedactSecrets(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		"key tskey-abc123_x rest":                            "key redacted rest",
+		"hook https://hooks.slack.com/services/T0/B0/x done": "hook redacted done",
+		"flow https://contoso.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke?api-version=2016&sig=p%2Fsecret done":                                               "flow redacted done",
+		"flow https://default0a1b.07.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/abc/triggers/manual/paths/invoke?api-version=1&sig=x done": "flow redacted done",
+		"query sig=sekret&sp=sv done": "query redacted&sp=sv done",
+		"nothing to hide":             "nothing to hide",
+	}
+	for in, want := range tests {
+		if got := redactSecrets(in); got != want {
+			t.Errorf("redactSecrets(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestCheckConfigPrintsSinksWithoutSecrets(t *testing.T) {
 	t.Setenv("TW_HOOK_URL", "https://hooks.example.com/SECRETPATH")
 	t.Setenv("TW_HOOK_SECRET", "hmac-value-xyz")
 	t.Setenv("TW_HOOK_AUTH", "Bearer token-value")
+	t.Setenv("TW_TEAMS_URL", "https://contoso.logic.azure.com/workflows/abc?sig=teams-secret-value")
 	path := filepath.Join(t.TempDir(), "c.yaml")
 	src := sinkBase + `
 sinks:
@@ -381,6 +452,9 @@ sinks:
     headers_env: {Authorization: TW_HOOK_AUTH}
     events: [target.down]
     match: {sites: [nyc]}
+  - name: ops-teams
+    type: teams
+    url_env: TW_TEAMS_URL
 heartbeat:
   url_env: TW_HOOK_URL
 `
@@ -396,7 +470,13 @@ heartbeat:
 		!strings.Contains(out, "target.down") || !strings.Contains(out, "sites:nyc") {
 		t.Fatalf("missing sink description:\n%s", out)
 	}
-	for _, secret := range []string{"SECRETPATH", "hmac-value-xyz", "token-value", "TW_HOOK_SECRET"} {
+	if !strings.Contains(out, "sink ops-teams type=teams") {
+		t.Fatalf("missing teams sink description:\n%s", out)
+	}
+	for _, secret := range []string{
+		"SECRETPATH", "hmac-value-xyz", "token-value", "TW_HOOK_SECRET",
+		"teams-secret-value", "TW_TEAMS_URL",
+	} {
 		if strings.Contains(out, secret) {
 			t.Fatalf("output leaks %q:\n%s", secret, out)
 		}

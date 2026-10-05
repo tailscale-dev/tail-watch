@@ -24,6 +24,7 @@ const (
 	liveLANPrefix   = "10.10.53.0/24"
 	liveLANAddr     = "10.10.53.1"
 	liveSlackEnvVar = "SLACK_WEBHOOK_URL"
+	liveTeamsEnvVar = "TEAMS_WEBHOOK_URL"
 )
 
 // TestLiveNotifications runs the whole notification path on a real tailnet.
@@ -37,7 +38,8 @@ const (
 // pulumi env with environmentVariables.SLACK_WEBHOOK_URL. Slack is one-way, so
 // the test checks tail-watch's own sent and failed counters for that sink;
 // look in the channel for the messages. TAIL_WATCH_LIVE_MENTION sets
-// mention_on_page for that sink.
+// mention_on_page for that sink. Teams is added the same way, from
+// TEAMS_WEBHOOK_URL or TAIL_WATCH_TEAMS_PULUMI_ENV, and checked the same way.
 func TestLiveNotifications(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TAIL_WATCH_LIVE_TAILNET") == "" {
@@ -49,6 +51,7 @@ func TestLiveNotifications(t *testing.T) {
 	t.Cleanup(func() { api.deleteRun(t, runID) })
 
 	slack := liveSlackURL(t)
+	teams := liveTeamsURL(t)
 	rcv := newLiveReceiver(t)
 	stack := newLiveStack(t, runID, api.authKey(t, liveTags()))
 	stack.files = append(stack.files, filepath.Join(packageDir(t), "testdata", "compose.live-notify.yaml"))
@@ -67,6 +70,9 @@ func TestLiveNotifications(t *testing.T) {
 	if slack != "" {
 		stack.env[liveSlackEnvVar] = slack
 	}
+	if teams != "" {
+		stack.env[liveTeamsEnvVar] = teams
+	}
 
 	stack.start(t)
 	enableLiveRoute(t, api, runID+"-lan", liveLANPrefix)
@@ -76,7 +82,7 @@ func TestLiveNotifications(t *testing.T) {
 	for _, service := range []string{"fx-icmp", "fx-tsping", "fx-tcp", "fx-http"} {
 		ips[service] = liveFixtureIP(t, stack, service)
 	}
-	stack.env["TAIL_WATCH_CONFIG_FILE"] = writeNotifyConfig(t, ips, slack != "")
+	stack.env["TAIL_WATCH_CONFIG_FILE"] = writeNotifyConfig(t, ips, slack != "", teams != "")
 	stack.output(t, "up", "--detach", "--no-deps", "tail-watch")
 
 	rcv.waitFor(t, "collector.started", func(e Event) bool { return e.Type == EventStarted })
@@ -162,16 +168,23 @@ func TestLiveNotifications(t *testing.T) {
 	if slack != "" && !strings.Contains(string(out), "ops-slack slack 200") {
 		t.Fatalf("notify-test did not report the Slack sink as 200:\n%s", out)
 	}
+	if teams != "" && !teamsDelivered(string(out)) {
+		t.Fatalf("notify-test did not report the Teams sink as 2xx:\n%s", redactSecrets(string(out)))
+	}
 
 	metrics := string(stack.output(t, "exec", "--no-TTY", "tailscale", "wget", "-qO-", "http://127.0.0.1:9109/metrics"))
 	assertSinkCounters(t, metrics, "ops-webhook")
 	if slack != "" {
 		assertSinkCounters(t, metrics, "ops-slack")
 	}
+	if teams != "" {
+		assertSinkCounters(t, metrics, "ops-teams")
+	}
 	if bad := rcv.badSignatures(); bad != 0 {
 		t.Fatalf("%d webhook requests failed signature verification", bad)
 	}
-	t.Logf("verified %d webhook events, %d heartbeats; slack=%v", rcv.eventCount(), rcv.beatCount(), slack != "")
+	t.Logf("verified %d webhook events, %d heartbeats; slack=%v teams=%v",
+		rcv.eventCount(), rcv.beatCount(), slack != "", teams != "")
 }
 
 // liveScenario fails one fixture, expects exactly one down for its target, heals
@@ -280,7 +293,7 @@ func liveFixtureIP(t *testing.T, stack *liveStack, service string) string {
 	return firstIPv4(strings.Fields(ip))
 }
 
-func writeNotifyConfig(t *testing.T, ips map[string]string, withSlack bool) string {
+func writeNotifyConfig(t *testing.T, ips map[string]string, withSlack, withTeams bool) string {
 	t.Helper()
 	var b strings.Builder
 	b.WriteString(`collector:
@@ -313,6 +326,9 @@ targets:
 			fmt.Fprintf(&b, "    mention_on_page: %q\n", mention)
 		}
 	}
+	if withTeams {
+		b.WriteString("  - name: ops-teams\n    type: teams\n    url_env: TEAMS_WEBHOOK_URL\n    group_wait: 2s\n")
+	}
 	b.WriteString("heartbeat:\n  url_env: HEARTBEAT_URL\n  interval: 5s\n")
 	path := filepath.Join(t.TempDir(), "tail-watch.yaml")
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
@@ -325,12 +341,33 @@ targets:
 // env, or "" to run without Slack. It is never logged.
 func liveSlackURL(t *testing.T) string {
 	t.Helper()
-	if v := os.Getenv(liveSlackEnvVar); v != "" {
+	url := liveSinkURL(t, liveSlackEnvVar, "TAIL_WATCH_SLACK_PULUMI_ENV")
+	if url == "" {
+		t.Log("no Slack webhook configured; running without the Slack sink")
+	}
+	return url
+}
+
+// liveTeamsURL is liveSlackURL for the Teams Workflows webhook.
+func liveTeamsURL(t *testing.T) string {
+	t.Helper()
+	url := liveSinkURL(t, liveTeamsEnvVar, "TAIL_WATCH_TEAMS_PULUMI_ENV")
+	if url == "" {
+		t.Log("no Teams webhook configured; running without the Teams sink")
+	}
+	return url
+}
+
+// liveSinkURL reads a sink URL from envVar, or from environmentVariables.<envVar>
+// of the pulumi env named by pulumiVar, and returns "" when neither is set. A
+// named pulumi env that lacks the variable fails the test.
+func liveSinkURL(t *testing.T, envVar, pulumiVar string) string {
+	t.Helper()
+	if v := os.Getenv(envVar); v != "" {
 		return v
 	}
-	name := os.Getenv("TAIL_WATCH_SLACK_PULUMI_ENV")
+	name := os.Getenv(pulumiVar)
 	if name == "" {
-		t.Log("no Slack webhook configured; running the webhook sink only")
 		return ""
 	}
 	out, err := exec.CommandContext(t.Context(), "pulumi", "env", "open", name, "--format", "json").Output()
@@ -340,10 +377,10 @@ func liveSlackURL(t *testing.T) string {
 	var env struct {
 		Vars map[string]string `json:"environmentVariables"`
 	}
-	if uerr := json.Unmarshal(out, &env); uerr != nil || env.Vars[liveSlackEnvVar] == "" {
-		t.Fatalf("%s has no environmentVariables.%s", name, liveSlackEnvVar)
+	if uerr := json.Unmarshal(out, &env); uerr != nil || env.Vars[envVar] == "" {
+		t.Fatalf("%s has no environmentVariables.%s", name, envVar)
 	}
-	return env.Vars[liveSlackEnvVar]
+	return env.Vars[envVar]
 }
 
 // liveReceiver is the webhook and heartbeat receiver the collector posts to. It

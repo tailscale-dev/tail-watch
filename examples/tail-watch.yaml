@@ -82,6 +82,15 @@ sinks:
     match:
       sites: [nyc, lab]
 
+  - name: ops-teams
+    type: teams
+    url_env: TEAMS_WEBHOOK_URL # Workflows "When a Teams webhook request is received" URL
+    min_severity: warn
+    group_wait: 10s
+    status_url: https://monitor-nyc.example.ts.net:9109
+    match:
+      sites: [nyc, lab]
+
 # Pings a dead-man's-switch service so a dead collector still alerts.
 heartbeat:
   url_env: HEARTBEAT_URL

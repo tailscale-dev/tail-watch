@@ -638,7 +638,9 @@ func sanitizeTarget(name string) string {
 	return b.String()
 }
 
-var secretRE = regexp.MustCompile(`tskey-[A-Za-z0-9_-]+|https://hooks\.slack\.com/\S+`)
+var secretRE = regexp.MustCompile(
+	`tskey-[A-Za-z0-9_-]+|https://hooks\.slack\.com/\S+|https://\S*(?:logic\.azure\.com|powerplatform\.com)\S*|sig=[^&\s]+`,
+)
 
 func redactSecrets(s string) string {
 	return secretRE.ReplaceAllString(s, "redacted")

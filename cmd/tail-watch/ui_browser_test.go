@@ -27,6 +27,17 @@ func uiPageOn(t *testing.T, e *apiEnv, peers peerSource) playwright.Page {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
+	page := browserPage(t)
+	if _, err := page.Goto(srv.URL + "/ui/"); err != nil {
+		t.Fatal(err)
+	}
+	return page
+}
+
+// browserPage returns a blank Chromium page, or skips the test when the
+// Playwright driver or its browser is not installed.
+func browserPage(t *testing.T) playwright.Page {
+	t.Helper()
 	pw, err := playwright.Run()
 	if err != nil {
 		t.Skipf("playwright driver not installed: %v", err)
@@ -39,9 +50,6 @@ func uiPageOn(t *testing.T, e *apiEnv, peers peerSource) playwright.Page {
 	t.Cleanup(func() { _ = browser.Close() })
 	page, err := browser.NewPage()
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = page.Goto(srv.URL + "/ui/"); err != nil {
 		t.Fatal(err)
 	}
 	return page

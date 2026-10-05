@@ -12,7 +12,7 @@ const (
 	slackMaxLines      = 10
 	slackMaxDeps       = 10
 	slackMaxErrorLen   = 300
-	slackMinInterval   = time.Second
+	messageMinInterval = time.Second
 	slackTimeLayout    = "2006-01-02 15:04 UTC"
 	slackClockLayout   = "15:04 UTC"
 	slackRedCircle     = ":red_circle:"
@@ -36,7 +36,7 @@ func newSlackSink(cfg SinkConfig, col CollectorInfo, client *http.Client) *slack
 
 func (s *slackSink) Name() string { return s.cfg.Name }
 
-func (s *slackSink) MinInterval() time.Duration { return slackMinInterval }
+func (s *slackSink) MinInterval() time.Duration { return messageMinInterval }
 
 type slackText struct {
 	Type string `json:"type"`
@@ -286,8 +286,8 @@ func (s *slackSink) Send(ctx context.Context, body []byte, m sendMeta) deliveryR
 		return secretUnavailable(fmt.Errorf("sink %s: url: %w", s.cfg.Name, err))
 	}
 	headers := map[string]string{
-		"Content-Type": contentTypeJSON,
-		"User-Agent":   "tail-watch/" + versionString(),
+		headerContentType: contentTypeJSON,
+		headerUserAgent:   "tail-watch/" + versionString(),
 	}
 	return httpPost(ctx, s.client, url, body, headers, m.At)
 }

@@ -165,7 +165,7 @@ func sendTest(ctx context.Context, sc SinkConfig, col CollectorInfo, ev Event, d
 		return fmt.Sprintf("%s error: %v", prefix, err), false
 	}
 	id := ev.ID
-	if sc.Type == sinkSlack || sc.Batch {
+	if sc.groupsMessages() {
 		if id, err = newID(prefixBatch, deps.clock.Now(), nil); err != nil {
 			return fmt.Sprintf("%s error: %v", prefix, err), false
 		}

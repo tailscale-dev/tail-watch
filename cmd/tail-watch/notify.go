@@ -429,12 +429,12 @@ type worker struct {
 }
 
 func (w *worker) grouped() bool {
-	return w.cfg.Type == sinkSlack || w.cfg.Batch
+	return w.cfg.groupsMessages()
 }
 
 func (w *worker) groupCap() int {
 	switch {
-	case w.cfg.Type == sinkSlack:
+	case w.cfg.messageSink():
 		return w.cfg.QueueSize
 	case w.cfg.Batch:
 		return w.cfg.MaxBatch

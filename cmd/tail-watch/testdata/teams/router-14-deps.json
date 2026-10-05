@@ -1,0 +1,26 @@
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+          {
+            "type": "TextBlock",
+            "text": "DOWN  nyc-router (learned)  tcp:445  (unrouted)",
+            "wrap": true,
+            "color": "Attention"
+          },
+          {
+            "type": "TextBlock",
+            "text": "addr 100.64.0.9 · site nyc · path direct 12 ms\n\nerror: connection refused\n\ndown since 14:00 UTC · 3 failures · collector monitor-nyc\n\nand 14 targets behind it: nyc-host-01, nyc-host-02, nyc-host-03, nyc-host-04, nyc-host-05, nyc-host-06, nyc-host-07, nyc-host-08, nyc-host-09, nyc-host-10, …",
+            "wrap": true
+          }
+        ]
+      }
+    }
+  ]
+}

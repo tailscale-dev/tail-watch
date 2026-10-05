@@ -262,7 +262,8 @@ To choose `page` or `warn`, and to create a route in the UI, see
 
 A sink is a notification destination. For delivery behavior, see
 [Incidents and queues](../explanation/incidents-and-queues.md), and for setup, see
-[Send alerts to Slack](../how-to/slack-sink.md) and
+[Send alerts to Slack](../how-to/slack-sink.md),
+[Send alerts to Microsoft Teams](../how-to/teams-sink.md) and
 [Send alerts to a webhook](../how-to/webhook-sink.md).
 
 ### Common keys
@@ -270,7 +271,7 @@ A sink is a notification destination. For delivery behavior, see
 | Key | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
 | `name` | string | yes | | Unique. Must match `[A-Za-z0-9._-]+`. `incidents`, `intake`, and `state` are reserved. |
-| `type` | string | yes | | `webhook` or `slack`. |
+| `type` | string | yes | | `webhook`, `slack` or `teams`. |
 | `url_env` | string | one of `url_env`, `url_file` | | Environment variable holding the destination URL. |
 | `url_file` | string | one of `url_env`, `url_file` | | File holding the destination URL. |
 | `min_severity` | string | no | `info` | `info`, `warn`, or `page`. Events below it are not sent. |
@@ -285,8 +286,8 @@ Exactly one of `url_env` and `url_file` must be set. Values from a file have
 surrounding whitespace trimmed. All secrets are read again on every send, so a
 rotated secret needs no restart.
 
-`group_wait` groups events for a `slack` sink, and for a `webhook` sink only when
-`batch` is `true`.
+`group_wait` groups events for a `slack` or `teams` sink, and for a `webhook`
+sink only when `batch` is `true`.
 
 Valid `events` values:
 
@@ -339,6 +340,16 @@ unsigned and the collector logs a warning at startup. See
 
 A `slack` sink rejects `batch`, `max_batch`, `secret_env`, `secret_file`, and
 `headers_env`. A `webhook` sink rejects `mention_on_page` and `status_url`.
+
+### Teams-only keys
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `status_url` | string | no | empty | Base URL. Each target's name links to `<status_url>/#<target>`. |
+
+A `teams` sink rejects `batch`, `max_batch`, `secret_env`, `secret_file`,
+`headers_env` and `mention_on_page`. A route's `mention` is not printed on a
+Teams card. See [Send alerts to Microsoft Teams](../how-to/teams-sink.md).
 
 ## `heartbeat`
 

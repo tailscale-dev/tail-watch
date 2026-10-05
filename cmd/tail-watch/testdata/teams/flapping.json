@@ -1,0 +1,26 @@
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+          {
+            "type": "TextBlock",
+            "text": "FLAPPING nyc-nas tcp:445  (service)",
+            "wrap": true,
+            "color": "Warning"
+          },
+          {
+            "type": "TextBlock",
+            "text": "addr 10.20.0.50 · site nyc · parent nyc-router · path direct 12 ms\n\nerror: connection refused\n\ndown since 14:00 UTC · 3 failures · collector monitor-nyc",
+            "wrap": true
+          }
+        ]
+      }
+    }
+  ]
+}

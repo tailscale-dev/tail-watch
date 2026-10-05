@@ -21,6 +21,8 @@ need to do.
 - [Route notifications](how-to/notification-routes.md): choose `page` or `warn`
   and which sinks hear a monitor.
 - [Send alerts to Slack](how-to/slack-sink.md)
+- [Send alerts to Microsoft Teams](how-to/teams-sink.md): Adaptive Cards via a
+  Workflows webhook.
 - [Send alerts to a webhook](how-to/webhook-sink.md): signing, batching, retries.
 - [Watch the watcher with a heartbeat](how-to/heartbeat.md)
 - [Troubleshoot](how-to/troubleshoot.md)

@@ -10,8 +10,8 @@ The sink keys mentioned here are in the
 [configuration reference](../reference/config.md). The metrics are in the
 [metrics reference](../reference/metrics.md), and the fields on the wire are
 in the [payload reference](../reference/payload.md). Setup instructions are in
-the [webhook](../how-to/webhook-sink.md) and [Slack](../how-to/slack-sink.md)
-guides.
+the [webhook](../how-to/webhook-sink.md), [Slack](../how-to/slack-sink.md) and
+[Teams](../how-to/teams-sink.md) guides.
 
 ## Events and incidents
 

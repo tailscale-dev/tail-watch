@@ -47,6 +47,34 @@ as `TAIL_WATCH_SLACK_PULUMI_ENV`. To rotate it, run:
 pulumi env set <env> environmentVariables.SLACK_WEBHOOK_URL '<new url>' --secret
 ```
 
+## Teams
+
+Teams is optional in the same way. `TestLiveNotifications` adds an `ops-teams` sink when
+`TEAMS_WEBHOOK_URL` is set or `TAIL_WATCH_TEAMS_PULUMI_ENV` names a pulumi env with
+`environmentVariables.TEAMS_WEBHOOK_URL`, and checks its counters as it does for Slack.
+To get a URL, see [Send alerts to Microsoft Teams](../how-to/teams-sink.md).
+
+To check only the Teams cards, with no tailnet or Docker, run `TestLiveTeams`:
+
+```bash
+TAIL_WATCH_LIVE_TEAMS=1 TAIL_WATCH_TEAMS_PULUMI_ENV=<org>/tail-watch-live/teams \
+  go test -count=1 -run TestLiveTeams -v ./cmd/tail-watch
+```
+
+It sends three cards: the `notify-test` card, one grouped card with a down, a learned router
+with 14 dependents, an escaped error, a cut error, a flap and a recovery, and a 12-event
+card that ends in "and 2 more". It needs its own gate because operators export
+`TEAMS_WEBHOOK_URL` to run the collector, and a plain test run must not post to their
+channel. The workflow only answers `202`, so look in the channel to check that the cards
+render. To store the URL, run:
+
+```bash
+pulumi env set <env> environmentVariables.TEAMS_WEBHOOK_URL '<workflow url>' --secret
+```
+
+The URL's `sig` query is a bearer secret. The test logs scrub `logic.azure.com` and
+`powerplatform.com` URLs and any `sig=` value.
+
 ## Restart behavior
 
 The Slack sink uses a memory queue, so an event still inside its `group_wait` window when

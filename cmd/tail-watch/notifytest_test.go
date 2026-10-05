@@ -207,3 +207,23 @@ func TestNotifyTestHelpPrintsFlags(t *testing.T) {
 		}
 	}
 }
+
+// A grouped sink sends notify-test as a one-event group with a bat_ id. Teams
+// never prints the id, so a batched webhook, which sends it as a header, is
+// where the id is observable.
+func TestNotifyTestBatchedWebhookUsesBatchID(t *testing.T) {
+	rc := newReceiver(t)
+	t.Setenv("TW_NT_A", rc.srv.URL)
+	path := notifyTestConfig(t, "\nsinks:\n  - {name: hook, type: webhook, url_env: TW_NT_A, batch: true}\n")
+	var out, errOut strings.Builder
+	if code := runNotifyTestWith([]string{"--config", path}, &out, &errOut,
+		notifyTestDeps{identity: staticIdentity, env: nil, clock: nil}); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out.String(), errOut.String())
+	}
+	if rc.count() != 1 {
+		t.Fatalf("requests %d", rc.count())
+	}
+	if id := rc.request(0).Header.Get("Tail-Watch-Batch-Id"); !strings.HasPrefix(id, "bat_") {
+		t.Fatalf("Tail-Watch-Batch-Id %q, want a bat_ id", id)
+	}
+}
