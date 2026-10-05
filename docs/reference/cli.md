@@ -164,6 +164,10 @@ Served on the listen address by the collector, not under `--once`.
 | `/api/v1/validate` | Monitor API: `POST` validate a monitor without saving it. |
 | `/api/v1/probe` | Monitor API: `POST` validate a monitor, then run each of its checks once without saving it. Authorized and audited like a write. |
 | `/api/v1/peers` | Monitor API: `GET` the tailnet peers the collector can currently see, for the address picker. `404` unless the UI is on. |
+| `/api/v1/routes` | Monitor API: `GET` every route from the config file and the UI, `POST` create a UI route. See [Read routes and sinks](../how-to/monitor-ui.md#read-routes-and-sinks). |
+| `/api/v1/routes/{name}` | Monitor API: `PUT` replace, `DELETE` remove a UI route. See [Change a route](../how-to/monitor-ui.md#change-a-route). |
+| `/api/v1/sinks` | Monitor API: `GET` the configured sinks without their secrets. |
+| `/api/v1/route-preview` | Monitor API: `POST` a monitor definition and get the sinks each event type would reach, without saving it. See [Preview where an event would go](../how-to/monitor-ui.md#preview-where-an-event-would-go). |
 
 `POST /api/v1/probe` takes the same body as `POST /api/v1/targets`. An invalid
 definition gets `422` with an `errors` list and runs no check. A valid one gets
