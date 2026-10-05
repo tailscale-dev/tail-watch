@@ -11,8 +11,8 @@ Items have no GitHub issues yet; when one is filed, `/roadmap sync` links it her
 ## Immediate Focus
 
 - [ ] Archive the `add-teams-sink` OpenSpec change so `openspec/specs/teams-sink` exists [S]
-- [ ] Retire `tailnet-reachability-monitor-design.md` as the source design; point
-  `openspec/config.yaml` and `CLAUDE.md` at `openspec/specs/` [S]
+- [x] Delete `tailnet-reachability-monitor-design.md`; point `openspec/config.yaml` and
+  `CLAUDE.md` at `openspec/specs/` [S]
 - [ ] Add `/api/v1/routes`, `/api/v1/sinks` and `/api/v1/route-preview` to the endpoint
   table in `docs/reference/cli.md` [S]
 - [ ] Update or remove the stale root `tasks.md` [S]

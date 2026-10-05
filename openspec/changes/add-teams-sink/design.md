@@ -47,11 +47,9 @@ shape as the phase 1 Slack incoming webhook: a URL in `url_env` or
 `url_file`, no OAuth, no new module. It is not the phase 2 bot (no thread,
 no edit) and not PagerDuty (no `dedup_key`).
 
-Reconcile the doc in this change. Leave the historical MVP sentence in
-place, and add a "Teams" subsection after "Slack" that points at this sink:
-the envelope, `group_wait`, the one-card-per-second cap, `status_url`, and
-the rejected keys. Add one sentence that a Teams Workflows webhook was added
-beside the Slack incoming webhook. Do not move Teams onto the phase 2 list.
+The design doc was deleted after this change, so it is not edited here.
+`ROADMAP.md` lists Teams as shipped and keeps PagerDuty and the Slack bot in
+the near-term items.
 
 MessageCard is intentionally absent. Connectors that required it were
 switched off in May 2026, and the stock template does not render that body

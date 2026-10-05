@@ -23,10 +23,10 @@
 
 - [x] 4.1 Add `docs/how-to/teams-sink.md` for the stock "When a Teams webhook request is received" template: paste the URL into `url_env` or `url_file`, the `type: teams` snippet, `notify-test`, co-owners, the Workflows bot footer, and that route mentions are not printed. Link it from `docs/README.md`, `docs/reference/config.md`, `docs/explanation/incidents-and-queues.md` and `docs/how-to/troubleshoot.md`. Verify `markdownlint-cli2` passes on those files.
 - [x] 4.2 Update `docs/reference/config.md`: `type` includes `teams`, `group_wait` groups Teams the way it groups Slack, and a Teams-only section lists `status_url` and the rejected keys. Update the sink list in `CLAUDE.md` to name `teams.go`. Verify `markdownlint-cli2` passes on the config page.
-- [x] 4.3 Add a Teams subsection after "Slack" in `tailnet-reachability-monitor-design.md` and one sentence that a Workflows webhook sits beside the Slack incoming webhook. Leave the historical "two sink types" sentence and the phase 2 list (PagerDuty, Slack bot) unchanged. Add an `ops-teams` sink to `examples/tail-watch.yaml`. Verify `markdownlint-cli2` passes on the design doc and `mise exec -- go run ./cmd/tail-watch check-config --config examples/tail-watch.yaml` exits 0.
+- [x] 4.3 Add an `ops-teams` sink to `examples/tail-watch.yaml`. Verify `mise exec -- go run ./cmd/tail-watch check-config --config examples/tail-watch.yaml` exits 0.
 
 ## 5. Validation
 
 - [x] 5.1 Run `mise run build`, `mise exec -- go vet ./...` and `mise run test`. Verify all three succeed.
 - [x] 5.2 Run `mise run lint` and `mise exec -- go run golang.org/x/vuln/cmd/govulncheck@latest ./...`. Verify zero lint issues and no reachable vulnerabilities.
-- [x] 5.3 Run `markdownlint-cli2` on `docs/`, `README.md`, `CLAUDE.md`, `tailnet-reachability-monitor-design.md` and `openspec/changes/add-teams-sink/`, and `mise exec -- openspec validate add-teams-sink --strict`. Verify both pass.
+- [x] 5.3 Run `markdownlint-cli2` on `docs/`, `README.md`, `CLAUDE.md` and `openspec/changes/add-teams-sink/`, and `mise exec -- openspec validate add-teams-sink --strict`. Verify both pass.

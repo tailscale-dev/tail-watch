@@ -21,7 +21,7 @@ designs, and it leaves everyone else to build that flow themselves.
   events, then "and N more") and send at most one request per second.
 - Reject `batch`, `max_batch`, `secret_env`, `secret_file`, `headers_env`,
   and `mention_on_page` on a Teams sink. A route `mention` is not printed.
-- Document the sink, add an example, and record the design-doc deviation.
+- Document the sink and add an example.
 
 This follows the rendering and delivery pattern in design-doc sections
 "Slack" and "Delivery" under "Notifications". It deviates from that chapter's
@@ -66,7 +66,7 @@ queues, retries, and the JSON payload stay as specified.
   webhook URL is a bearer secret (its `sig` query). Logs keep scheme and
   host only.
 - Docs: a how-to, the sink tables in the config reference, the docs index,
-  an example sink, and a short Teams subsection in the design doc.
+  and an example sink.
 - Network: outbound HTTPS to the workflow host, through the same sink client
   as Slack (no redirect following, 10s timeout).
 - Dependencies: none. The public event payload is unchanged.

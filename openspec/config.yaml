@@ -2,8 +2,8 @@ schema: spec-driven
 
 context: |
   Product: tail-watch, a tailnet reachability monitor. The binary is `tail-watch`.
-  Source design: tailnet-reachability-monitor-design.md at the repo root. It is
-  the reference for behavior; OpenSpec specs are the contract once archived.
+  Behavior contract: the archived specs in openspec/specs/. Boundaries are in
+  CONTEXT.md and planned work in ROADMAP.md, both at the repo root.
 
   Tech stack:
   - Go (version pinned in mise.toml and go.mod), module
@@ -34,13 +34,13 @@ context: |
 
 rules:
   proposal:
-    - Name the design-doc section(s) the change implements.
-    - State the phase (MVP = phase 1) and list deferred phase 2/3 items as non-goals.
+    - Name the openspec/specs capabilities the change adds or modifies, and the ROADMAP.md item it delivers, if any.
+    - List related ROADMAP.md items the change does not deliver as non-goals.
   specs:
     - Every requirement uses SHALL/MUST and has at least one scenario.
-    - Name config keys, metric names, event types and payload fields exactly as the design doc does.
+    - Name config keys, metric names, event types and payload fields exactly as the existing specs and docs/reference do.
   design:
-    - Record any place the change deviates from the design doc, and why.
+    - Record any place the change crosses a CONTEXT.md boundary or contradicts an existing spec, and why.
   tasks:
     - Each task names the file(s) it touches.
     - Pair each behavior task with its test task.
