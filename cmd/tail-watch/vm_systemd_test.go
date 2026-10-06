@@ -546,6 +546,9 @@ func (r *vmRun) checksAndQueue(t *testing.T) {
 	); owner != "tail-watch" {
 		t.Fatalf("notification-state.json owned by %q, want tail-watch", owner)
 	}
+	if mode := strings.TrimSpace(r.v.MustRun("stat -c %a /var/lib/tail-watch")); mode != "700" {
+		t.Fatalf("/var/lib/tail-watch mode %s, want 700", mode)
+	}
 	t.Logf("state dir:\n%s", r.v.MustRun("ls -la /var/lib/tail-watch"))
 
 	startFixtureListener(t, r.v, r.fxPrefix)

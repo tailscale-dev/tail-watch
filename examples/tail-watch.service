@@ -11,6 +11,7 @@ Group=tail-watch
 ExecStart=/usr/local/bin/tail-watch --config /etc/tail-watch/tail-watch.yaml
 EnvironmentFile=-/etc/tail-watch/tail-watch.env
 StateDirectory=tail-watch
+StateDirectoryMode=0700
 Restart=on-failure
 RestartSec=5
 AmbientCapabilities=CAP_NET_RAW

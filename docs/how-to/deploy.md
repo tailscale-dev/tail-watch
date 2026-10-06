@@ -151,7 +151,12 @@ How the unit fits the collector:
 - `StateDirectory=tail-watch` creates `/var/lib/tail-watch` owned by the
   service user, and `ProtectSystem=strict` keeps it writable while the rest
   of the filesystem is read-only. This matches `collector.state_dir` in
-  `examples/tail-watch.yaml`.
+  `examples/tail-watch.yaml`. `StateDirectoryMode=0700` keeps other users out
+  of the directory, which holds the notification queue and the monitors from
+  the UI; without it systemd creates it as `0755` and the collector logs
+  `state_dir is readable by group or others`. An existing install picks the
+  mode up when you add the setting, run `sudo systemctl daemon-reload`, and
+  restart the service.
 - `AmbientCapabilities=CAP_NET_RAW` lets the non-root user send ICMP checks.
 - `Restart=on-failure` with `RestartSec=5`: a corrupt notification state or
   an unset secret stops startup on purpose, and the slow restart loop keeps

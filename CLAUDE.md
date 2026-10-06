@@ -260,7 +260,9 @@
   approved (or covered by `autoApprovers.services`), and a grant must name `svc:tail-watch`:
   a `*` destination does not cover `svc:`. Reach it from Windows; the WSL Linux client is
   not on the tailnet.
-- The shipped `examples/tail-watch.service` leaves `/var/lib/tail-watch` mode 0755, so the
-  collector logs `state_dir is readable by group or others` on first start.
+- `examples/tail-watch.service` sets `StateDirectoryMode=0700`; without it systemd makes
+  `/var/lib/tail-watch` 0755 and the collector logs `state_dir is readable by group or
+  others`. `TestExampleUnitStateDirectoryMode` ties the unit to `stateDirMode`, and
+  `TestVMSystemd` asserts the mode on a real VM.
 - WSL cannot `ssh` to the Proxmox host; use `tailscale.exe ssh root@proxmox`, which may
   print a check URL once. Pipe nested remote work through the host, not `bash -s`.
