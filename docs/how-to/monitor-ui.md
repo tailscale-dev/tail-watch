@@ -71,6 +71,9 @@ Steps:
    A grant covers the whole port, so it also exposes `/metrics`.
 3. Open `http://<tailnet-ip>:9109/ui/` from that device.
 
+To keep the listener on loopback and give the UI an HTTPS name instead, see
+[Expose the UI as a Tailscale Service](monitor-ui-service.md).
+
 In the Compose layout tail-watch shares the `tailscale` container's network
 namespace, so every process in that namespace can reach a loopback listener.
 

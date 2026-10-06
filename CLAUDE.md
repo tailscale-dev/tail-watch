@@ -109,6 +109,19 @@
   so write it as `feat:`, `fix:`, `perf:`, `revert:` or `docs:`. Commits with
   only a `dir: verb` subject never open a release PR.
 
+## Container image
+
+- Releases push `ghcr.io/tailscale-dev/tail-watch` (`X.Y.Z`, `X.Y`, `latest`; amd64 and
+  arm64) from the `publish` job through GoReleaser `dockers_v2` and `Dockerfile.release`,
+  which copies the prebuilt binary from `$TARGETPLATFORM/`. `Dockerfile` is still the
+  from-source build; `TestDockerfilesAgree` keeps their runtime stages equal.
+- `mise run release-check` builds the image per platform without pushing, as
+  `-amd64`/`-arm64` tags. The arm64 build needs QEMU and fails with `exec format error`
+  on a host without it; CI installs it. The local `ghcr.io/...-amd64` tags it leaves are
+  safe to `docker image rm`.
+- The first push makes the GHCR package private; an org admin sets it public once in
+  the web UI (`gh` cannot reach this org). See `docs/contributing/releases.md`.
+
 ## Upgrading Go dependencies
 
 - Upgrade only `tailscale.com` (`go get tailscale.com@vX.Y.Z && go mod tidy`).
@@ -208,7 +221,12 @@
   never hard-code `ingress`.
 - `examples/kubernetes/sidecar.yaml` is the reference container. `TestSidecarCopiesAgree`
   (not gated) fails when the Kyverno, MutatingAdmissionPolicy, freeze-and-patch or
-  how-to webhook copy drifts from it, so edit all five together.
+  how-to webhook copy drifts from it, so edit all five together. Each copy's image tag
+  is written by release-please from the line carrying `x-release-please-version` (listed
+  in `release-please-config.json` `extra-files`), and the test fails when it differs from
+  `.release-please-manifest.json`. Never hand-edit a tag, and keep the marker on the line
+  when you move the image (`#` in YAML and shell, `//` in CEL and Go; freeze-and-patch
+  holds it in an `IMAGE=` variable because its JSON cannot carry comments).
 - `scripts/kind-stack.sh up|down` is the harness (cluster config
   `cmd/tail-watch/testdata/kind-proxygroup.yaml`, fixtures in
   `cmd/tail-watch/testdata/kind/`); the test runs `up` itself when the cluster or the
@@ -216,6 +234,9 @@
   below the `tailscale.com` version in `go.mod`; the OAuth client comes from the
   `tailscale-phase-2/tailscale` pulumi env as `tailscale:operatorClientId/Secret` and
   reaches Helm through a mode-0600 values file, never the command line or a log.
+  The harness holds no image version: `TAIL_WATCH_KIND_IMAGE` defaults to the image in
+  `examples/kubernetes/sidecar.yaml`, and `up` builds from source under that name and
+  `kind load`s it, so the how-to blocks run against the local build, not GHCR.
 - The test's `sidecarConfig` is the documented ConfigMap with tighter timing; keep its
   mechanics (local-only, `tcp:` check, webhook sink) in step with
   `examples/kubernetes/configmap.yaml`. The receiver is `alert-receiver` in `testdata/kind/`:
@@ -224,3 +245,22 @@
 - The test leaves the harness up. Teardown is `scripts/kind-stack.sh down`: it deletes the
   cluster, the Tailscale Service `svc:tw-pg-web`, and every tailnet device with the `tw-pg`
   hostname prefix.
+
+## Dogfood VM (Proxmox)
+
+- A small customer-style deployment runs on Proxmox VM 206, `tail-watch-1`, built from
+  the maintainer's private homelab repo (`scripts/deploy-tail-watch.sh`; stages `vm`,
+  `enroll`, `install`, `serve`, `status`). It builds `cmd/tail-watch` from this
+  checkout, so redeploy with
+  `esc run default/tail-watch-vm -- scripts/deploy-tail-watch.sh install` from that repo.
+  Secrets live in the Pulumi ESC env `default/tail-watch-vm`; never print them.
+- The UI is exposed as `svc:tail-watch` (`https://tail-watch.<tailnet>.ts.net/ui/`)
+  through `tailscale serve --service=svc:tail-watch --https=443 --bg 127.0.0.1:9109`.
+  The Service must be defined on the admin console's Services page first, the host
+  approved (or covered by `autoApprovers.services`), and a grant must name `svc:tail-watch`:
+  a `*` destination does not cover `svc:`. Reach it from Windows; the WSL Linux client is
+  not on the tailnet.
+- The shipped `examples/tail-watch.service` leaves `/var/lib/tail-watch` mode 0755, so the
+  collector logs `state_dir is readable by group or others` on first start.
+- WSL cannot `ssh` to the Proxmox host; use `tailscale.exe ssh root@proxmox`, which may
+  print a check URL once. Pipe nested remote work through the host, not `bash -s`.

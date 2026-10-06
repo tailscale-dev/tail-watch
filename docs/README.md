@@ -18,6 +18,8 @@ need to do.
 - [Watch a Kubernetes ProxyGroup](how-to/kubernetes-proxygroup.md): an opt-in
   sidecar in the operator's proxy pods.
 - [Manage monitors in the UI](how-to/monitor-ui.md)
+- [Expose the UI as a Tailscale Service](how-to/monitor-ui-service.md): an
+  HTTPS name on the tailnet, with the listener left on loopback.
 - [Route notifications](how-to/notification-routes.md): choose `page` or `warn`
   and which sinks hear a monitor.
 - [Send alerts to Slack](how-to/slack-sink.md)
