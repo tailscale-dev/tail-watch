@@ -31,7 +31,7 @@ PG="$1"
 NS="tailscale"
 OPERATOR_DEPLOYMENT="operator"
 STS="${PG}"
-IMAGE="ghcr.io/tailscale-dev/tail-watch:0.1.0" # x-release-please-version
+IMAGE="ghcr.io/tailscale-dev/tail-watch:0.2.0" # x-release-please-version
 
 # The same container and volume as examples/kubernetes/sidecar.yaml, as a
 # strategic merge patch. Containers and volumes merge by name.

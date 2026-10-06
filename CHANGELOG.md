@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.0](https://github.com/tailscale-dev/tail-watch/compare/v0.1.0...v0.2.0) (2026-10-06)
+
+
+### Added
+
+* add a Microsoft Teams sink ([f418c23](https://github.com/tailscale-dev/tail-watch/commit/f418c230697c3fdc14aedea462315653951e5432))
+* add peer picker, check builder and name fill to the monitor UI ([609ba1d](https://github.com/tailscale-dev/tail-watch/commit/609ba1d9243c3a24405f5732272000d28bcf51c6))
+* gate monitor saves on a live probe in the monitor UI ([649cc31](https://github.com/tailscale-dev/tail-watch/commit/649cc31a5584add01cfa71f3a8b5dd11e0dae886))
+* publish a container image to GHCR ([400e370](https://github.com/tailscale-dev/tail-watch/commit/400e3706a048d12dba8f6ef973c96eab959c9a0a))
+* run tail-watch as a sidecar in Kubernetes ProxyGroup pods ([2add5c6](https://github.com/tailscale-dev/tail-watch/commit/2add5c66ea757dd5feafec90499174f4489570a3))
+
+
+### Documentation
+
+* add a how-to for exposing the UI as a Tailscale Service ([37db6f4](https://github.com/tailscale-dev/tail-watch/commit/37db6f427940cf7fc4194bc60a061e866175cd14))
+* add CONTEXT.md and ROADMAP.md ([162700d](https://github.com/tailscale-dev/tail-watch/commit/162700dd804df4afcba13b0ca8228fe37783a5ee))
+* add systemd deployment guide and example unit ([88561db](https://github.com/tailscale-dev/tail-watch/commit/88561db606af0b3bb125f8a81e7ca5b73375dcba))
+* list the route and sink endpoints in the CLI reference ([b4b51ac](https://github.com/tailscale-dev/tail-watch/commit/b4b51ac43ba2da4527dbee5535e9f08e59fb8fd1))
+
+## Changelog
+
 ## Unreleased
 
 ### Added
