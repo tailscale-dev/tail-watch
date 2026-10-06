@@ -23,6 +23,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   release-please:
+    if: vars.RELEASE_PLEASE_ENABLED == 'true'
     needs: checks
     runs-on: ubuntu-latest
     permissions:

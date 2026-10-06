@@ -10,7 +10,14 @@ archives for Linux, macOS, and Windows on amd64 and arm64.
 
 ## Releasing
 
-Use Conventional Commits in squash-merge titles (`fix: ...`, `feat: ...`,
+Release automation is off until launch. The `release-please` job in
+`.github/workflows/release.yml` runs only when the repository variable
+`RELEASE_PLEASE_ENABLED` is `true`, so with it unset no release PR opens and
+nothing publishes on a push to `main`. To cut a release by hand, push the tag
+and run the **Release** workflow with that tag as its input. The OpenSpec
+change `enable-release-please` lists what to do before setting the variable.
+
+Once it is on, use Conventional Commits in squash-merge titles (`fix: ...`, `feat: ...`,
 or `feat!: ...` for breaking changes). After checks pass on `main`,
 release-please opens or updates a release PR containing the version and
 changelog. Merge that PR to create a GitHub release; GoReleaser then attaches
