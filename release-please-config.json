@@ -7,6 +7,13 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
       "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        "examples/kubernetes/sidecar.yaml",
+        "examples/kubernetes/kyverno-clusterpolicy.yaml",
+        "examples/kubernetes/mutatingadmissionpolicy.yaml",
+        "examples/kubernetes/freeze-and-patch.sh",
+        "docs/how-to/kubernetes-proxygroup.md"
+      ],
       "draft": false,
       "prerelease": false,
       "changelog-sections": [

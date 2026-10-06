@@ -30,7 +30,7 @@ Phase 2 of the original design, ordered by value to an operator who already runs
   warning and an `unsupported` metric? Gates the `tsnetEnv` item [S]
 - [ ] Tag discovery (`discover:`): build targets from peer tags [L]
 - [ ] Slack bot-token mode with threaded recoveries [L]
-- [ ] Publish a container image [M]
+- [x] Publish a container image [M]
 
 ## Future Vision (Long-Term)
 

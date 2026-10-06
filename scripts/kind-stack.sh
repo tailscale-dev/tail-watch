@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Bring up (or tear down) the kind cluster for TestKindProxyGroup: the
 # Tailscale operator pinned to the tailscale.com version in go.mod, the
-# fixtures in cmd/tail-watch/testdata/kind, and a locally built tail-watch
-# image loaded into the cluster. It does not inject the sidecar or run any
+# fixtures in cmd/tail-watch/testdata/kind, and a tail-watch image built from
+# this checkout, tagged with the image named in examples/kubernetes/sidecar.yaml
+# and loaded into the cluster. It does not inject the sidecar or run any
 # scenario; the test does that with the doc blocks from
 # docs/how-to/kubernetes-proxygroup.md. See
 # docs/contributing/kind-proxygroup-test.md. Credentials come from the pulumi
@@ -19,7 +20,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER="${TAIL_WATCH_KIND_CLUSTER:-tail-watch-proxygroup}"
 ENVNAME="${TAIL_WATCH_PULUMI_ENV:-tailscale-phase-2/tailscale}"
-IMAGE="${TAIL_WATCH_KIND_IMAGE:-tail-watch:0.1.0}"
+SIDECAR_IMAGE="$(sed -n 's/^ *image: *\([^ ]*\).*/\1/p' "$ROOT/examples/kubernetes/sidecar.yaml")"
+IMAGE="${TAIL_WATCH_KIND_IMAGE:-$SIDECAR_IMAGE}"
+if [ -z "$IMAGE" ]; then
+  echo "no image in examples/kubernetes/sidecar.yaml and TAIL_WATCH_KIND_IMAGE is unset" >&2
+  exit 1
+fi
 SERVICE_NAME="svc:tw-pg-web"
 DEVICE_PREFIX="tw-pg"
 

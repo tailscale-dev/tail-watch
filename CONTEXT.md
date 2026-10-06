@@ -20,6 +20,9 @@ sidecar.
   general SNMP polling.
 - **No changes to tailscaled or the control server.** It is a client of the LocalAPI
   (Status, Ping, WatchIPNBus) and adds nothing to tailscaled's dependency graph.
+- **No `tailscaled` in the container image.** The published image carries only the
+  collector. It reaches a tailscaled that runs beside it through a mounted LocalAPI
+  socket or a shared network namespace, or runs `local_only` with none.
 - **No shared state between collectors.** Each collector decides alone; quorum across
   collectors happens in Alertmanager.
 - **Secrets stay in `*_env` / `*_file` keys.** Sink URLs, HMAC keys and headers are never

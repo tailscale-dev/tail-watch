@@ -187,19 +187,31 @@ If it cannot, pass a `--user` or `--group-add` that can.
 
 Steps:
 
-1. Build the image:
+1. Pull the image for a release:
+
+   ```bash
+   docker pull ghcr.io/tailscale-dev/tail-watch:<version>
+   ```
+
+   `<version>` is a release number without the `v`, as listed on the
+   [releases page](https://github.com/tailscale-dev/tail-watch/releases). The image
+   is built for `linux/amd64` and `linux/arm64`, and Docker picks the one for your
+   host. Each release is also tagged with its `X.Y` line and `latest`, but pin the full
+   version for anything you run unattended. Releases after `v0.1.0` have an image;
+   for `v0.1.0` and earlier, build from source instead:
 
    ```bash
    docker build -t tail-watch .
    ```
 
-2. Run it:
+2. Run it, with the image name you pulled or built in place of
+   `ghcr.io/tailscale-dev/tail-watch:<version>`:
 
    ```bash
    docker run --rm --network host \
      -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock \
      -v /etc/tail-watch/tail-watch.yaml:/etc/tail-watch/tail-watch.yaml:ro \
-     tail-watch
+     ghcr.io/tailscale-dev/tail-watch:<version>
    ```
 
 Verify: `curl -s http://127.0.0.1:9109/healthz` answers `ok`. If the

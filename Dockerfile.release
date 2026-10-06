@@ -1,0 +1,10 @@
+FROM alpine:3.24
+
+ARG TARGETPLATFORM
+
+RUN adduser -D -H -u 65532 tail-watch \
+ && mkdir -p /var/lib/tail-watch \
+ && chown tail-watch /var/lib/tail-watch
+COPY $TARGETPLATFORM/tail-watch /usr/local/bin/tail-watch
+USER tail-watch
+ENTRYPOINT ["/usr/local/bin/tail-watch"]

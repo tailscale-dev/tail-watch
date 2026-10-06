@@ -31,6 +31,7 @@ PG="$1"
 NS="tailscale"
 OPERATOR_DEPLOYMENT="operator"
 STS="${PG}"
+IMAGE="ghcr.io/tailscale-dev/tail-watch:0.1.0" # x-release-please-version
 
 # The same container and volume as examples/kubernetes/sidecar.yaml, as a
 # strategic merge patch. Containers and volumes merge by name.
@@ -42,7 +43,7 @@ read -r -d '' PATCH <<EOF || true
         "containers": [
           {
             "name": "tail-watch",
-            "image": "tail-watch:0.1.0",
+            "image": "${IMAGE}",
             "imagePullPolicy": "IfNotPresent",
             "args": ["--config", "/etc/tail-watch/tail-watch.yaml",
                      "--listen", "127.0.0.1:9109"],

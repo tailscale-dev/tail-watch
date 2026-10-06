@@ -57,18 +57,25 @@ kubectl get configmap tail-watch-ingress -n tailscale \
   -o jsonpath='{.data.tail-watch\.yaml}' | tail-watch check-config --config /dev/stdin
 ```
 
-## Build the image
+## The image
 
-The project does not publish to a registry yet. Build the image from the
-repository at the release tag and push it somewhere the cluster can pull:
+Every release after `v0.1.0` publishes a multi-architecture image to
+`ghcr.io/tailscale-dev/tail-watch`, tagged with the release version without the `v`.
+The manifests below name that image at the version they ship with, so a cluster
+with access to GHCR pulls it with no extra step.
+
+To use a build of your own, for an air-gapped cluster or a local kind test, build from
+the repository at the tag you want and name the image exactly as the manifests do
+(`examples/kubernetes/sidecar.yaml` shows the name), then push it where the cluster can
+pull, or `kind load docker-image` it:
 
 ```bash
-git checkout v0.1.0
-docker build -t tail-watch:0.1.0 .
+git checkout v<version>
+docker build -t "$(sed -n 's/^ *image: *\([^ ]*\).*/\1/p' examples/kubernetes/sidecar.yaml)" .
 ```
 
-For a local kind cluster, `kind load docker-image tail-watch:0.1.0` is
-enough. The manifests use `imagePullPolicy: IfNotPresent`.
+The manifests use `imagePullPolicy: IfNotPresent`, so an image already on the node is
+used and not pulled.
 
 ## MutatingAdmissionPolicy
 
@@ -213,7 +220,7 @@ import (
 func sidecar(name string) map[string]any {
 	return map[string]any{
 		"name":            "tail-watch",
-		"image":           "tail-watch:0.1.0",
+		"image":           "ghcr.io/tailscale-dev/tail-watch:0.1.0", // x-release-please-version
 		"imagePullPolicy": "IfNotPresent",
 		"args": []string{"--config", "/etc/tail-watch/tail-watch.yaml",
 			"--listen", "127.0.0.1:9109"},

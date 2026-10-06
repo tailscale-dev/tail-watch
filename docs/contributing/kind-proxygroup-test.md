@@ -74,8 +74,11 @@ scripts/kind-stack.sh down  # cluster, Tailscale Service and tw-pg devices gone
 ```
 
 `TAIL_WATCH_KIND_CLUSTER` overrides the cluster name
-(`tail-watch-proxygroup`), `TAIL_WATCH_KIND_IMAGE` the image built and loaded
-(`tail-watch:0.1.0`). The test builds the same harness itself when the cluster
+(`tail-watch-proxygroup`), `TAIL_WATCH_KIND_IMAGE` the name the image is built
+under and loaded as. It defaults to the image in `examples/kubernetes/sidecar.yaml`,
+so the doc blocks run unchanged and `imagePullPolicy: IfNotPresent` uses the
+local build instead of pulling from GHCR. Override it only to match a changed
+image name in those blocks. The test builds the same harness itself when the cluster
 is missing, so a bare `go test` run works; `kind-stack.sh up` is for iterating
 on the scenarios without paying cluster startup each time.
 

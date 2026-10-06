@@ -13,10 +13,9 @@
 # container starts and tail-watch exits with "config not found".
 containers:
   - name: tail-watch
-    # The project does not publish to a registry yet. Build at the release
-    # tag (docker build -t tail-watch:0.1.0 .) and push it somewhere the
-    # cluster can pull, or kind load it for a local test.
-    image: tail-watch:0.1.0
+    # Every release publishes this image; release-please moves the tag to the
+    # new version in the release PR.
+    image: ghcr.io/tailscale-dev/tail-watch:0.1.0 # x-release-please-version
     imagePullPolicy: IfNotPresent
     args:
       - --config

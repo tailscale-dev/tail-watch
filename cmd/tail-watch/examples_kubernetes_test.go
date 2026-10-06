@@ -38,6 +38,14 @@ func TestSidecarCopiesAgree(t *testing.T) {
 	}
 	want := ref.withoutName(t, "tail-watch-ingress")
 
+	var released map[string]string
+	if err := json.Unmarshal([]byte(read(".release-please-manifest.json")), &released); err != nil {
+		t.Fatal(err)
+	}
+	if got, wantImage := ref.Containers[0]["image"], "ghcr.io/tailscale-dev/tail-watch:"+released["."]; got != wantImage {
+		t.Errorf("sidecar.yaml image %v, want %s (the version in .release-please-manifest.json)", got, wantImage)
+	}
+
 	structural := []struct {
 		name, nameExpr string
 		fragment       func(*testing.T) podFragment
@@ -132,7 +140,12 @@ func freezeFragment(t *testing.T, src string) podFragment {
 			} `json:"template"`
 		} `json:"spec"`
 	}
-	if err := json.Unmarshal([]byte(m[1]), &patch); err != nil {
+	image := regexp.MustCompile(`(?m)^IMAGE="([^"]+)"`).FindStringSubmatch(src)
+	if image == nil {
+		t.Fatal("freeze-and-patch.sh has no IMAGE assignment")
+	}
+	patchJSON := strings.ReplaceAll(m[1], "${IMAGE}", image[1])
+	if err := json.Unmarshal([]byte(patchJSON), &patch); err != nil {
 		t.Fatal(err)
 	}
 	return patch.Spec.Template.Spec

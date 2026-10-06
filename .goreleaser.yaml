@@ -32,6 +32,28 @@ archives:
       - examples/tail-watch.yaml
       - examples/tail-watch.service
 
+dockers_v2:
+  - id: tail-watch
+    ids: [tail-watch]
+    dockerfile: Dockerfile.release
+    images:
+      - ghcr.io/tailscale-dev/tail-watch
+    tags:
+      - "{{ .Version }}"
+      - "{{ .Major }}.{{ .Minor }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.description: Tailnet reachability monitor
+      org.opencontainers.image.source: https://github.com/tailscale-dev/tail-watch
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: BSD-3-Clause
+    sbom: false
+
 checksum:
   name_template: checksums.txt
 
