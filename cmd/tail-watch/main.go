@@ -27,7 +27,6 @@ import (
 	"tailscale.com/paths"
 	"tailscale.com/prober"
 	"tailscale.com/tstime"
-	"tailscale.com/tsweb"
 )
 
 // version is set with -ldflags "-X main.version=…". Empty falls back
@@ -451,19 +450,7 @@ func (a *app) runServer() int {
 		go beat.run(ctx)
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/", tsweb.StdHandler(
-		p.StatusHandler(prober.WithTitle("tail-watch")),
-		tsweb.HandlerOptions{Logf: a.logf,
-			QuietLoggingIfSuccessful: false,
-			Now:                      nil,
-			StatusCodeCounters:       nil,
-			StatusCodeCountersFull:   nil,
-			BucketedStats:            nil,
-			OnStart:                  nil,
-			OnError:                  nil,
-			OnCompletion:             nil,
-		},
-	))
+	mux.Handle("/", accessLogged(a.log, p.StatusHandler(prober.WithTitle("tail-watch"))))
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -532,10 +519,6 @@ func (a *app) mountMonitorUI(mux *http.ServeMux) {
 		a.log.Warn("monitor write API is reachable beyond loopback; access is controlled only by the network",
 			"addr", a.listen)
 	}
-}
-
-func (a *app) logf(format string, args ...any) {
-	a.log.Info(fmt.Sprintf(format, args...))
 }
 
 // localOnlyIdentity sets the payload identity from the hostname and logs it.
