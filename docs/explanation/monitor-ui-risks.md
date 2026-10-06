@@ -153,10 +153,19 @@ Every create, replace, delete and probe is logged at info level, whether it was
 accepted or refused. Each entry has the operation, the monitor name, the
 outcome and the caller's remote address. Refused requests are logged too,
 including those rejected for content type or origin, which makes probing
-visible. The caller address is the remote address of the connection, so at best the log
-answers "which device did this", never "which person", because there is no
-login to attribute it to. A request that arrives through a proxy or a shared
-network namespace may show the address of the intermediary instead.
+visible. `remote` is the address of the connection, so on its own the log
+answers "which device did this", never "which person", because tail-watch has no
+login. A request that arrives through a proxy or a shared network namespace shows the
+address of the intermediary instead.
+
+Behind `tailscale serve` there is more. serve connects from loopback and tells the
+backend who called, so when the connection is from loopback tail-watch adds `user`, the
+caller's tailnet login from `Tailscale-User-Login`, and `caller`, their tailnet address
+from `X-Forwarded-For`. A connection from anywhere else never gets these fields, because
+a remote client could have written the headers. A process on the collector host can still
+forge them, as it can already reach the API. When serve sends no login, for example for
+a tagged node, the line has no `user`. Treat `user` as attribution for an honest operator,
+not as authentication.
 
 The audit log is your way to reconstruct what changed. Ship it somewhere that
 someone who can edit monitors cannot rewrite.

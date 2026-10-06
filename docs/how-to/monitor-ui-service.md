@@ -74,11 +74,13 @@ Verify: `curl https://tail-watch.<tailnet>.ts.net/healthz` prints `ok`, and
   name, so creating and probing monitors works through the Service.
 - The Service exposes the whole listener, so `/metrics` and `/healthz` are
   reachable by everyone the grant allows, not only the UI.
-- The audit log records the proxy, not the caller. Every `monitor write` and
-  `route write` line has `remote` set to a loopback address such as
-  `127.0.0.1:43322`, and the same is true of the request lines. The log
-  cannot say which tailnet user changed a monitor. Keep the grant to the
-  smallest set of admins. See [Monitor UI risks](../explanation/monitor-ui-risks.md).
+- `remote` in the audit log is the proxy, a loopback address such as
+  `127.0.0.1:43322`. serve also tells tail-watch who called, so every `monitor write` and
+  `route write` line carries `user` (the caller's tailnet login) and `caller` (their tailnet
+  address), and so do the request lines. When serve sends no login, the line has no `user`.
+  Keep the grant to the smallest set of admins. See
+  [Monitor UI risks](../explanation/monitor-ui-risks.md) for what `user` does and does not
+  prove.
 
 ## If the Service does not work
 

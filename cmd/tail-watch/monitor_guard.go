@@ -59,12 +59,14 @@ func (m *monitorManager) guard(next http.HandlerFunc, op string) http.HandlerFun
 			if strings.HasPrefix(op, "route.") {
 				msg, nameKey = "route write", "route"
 			}
-			m.log.LogAttrs(r.Context(), slog.LevelInfo, msg,
+			attrs := []slog.Attr{
 				slog.String("op", op),
 				slog.String(nameKey, w.name),
 				slog.Int("status", w.status),
 				slog.String("outcome", outcomeOf(w.status)),
-				slog.String("remote", r.RemoteAddr))
+				slog.String("remote", r.RemoteAddr),
+			}
+			m.log.LogAttrs(r.Context(), slog.LevelInfo, msg, append(attrs, callerAttrs(r)...)...)
 		}()
 		if !isJSON(r.Header.Get("Content-Type")) {
 			writeAPIError(w, fail(http.StatusUnsupportedMediaType, "Content-Type must be application/json"))

@@ -219,7 +219,8 @@ Behavior to expect when editing or deleting:
   logs `routes.json is present but the UI is off; leaving it unread`.
 
 Every monitor write is logged with the caller's address as a `monitor write`
-line with `op`, `target`, `status`, `outcome` and `remote`. A probe from
+line with `op`, `target`, `status`, `outcome` and `remote`, and `user` and `caller` when
+the request came through [a Tailscale Service](monitor-ui-service.md). A probe from
 **Check** or **Save** is logged the same way with `op` set to `probe`. A route
 write is a `route write` line instead; see [Change a route](#change-a-route).
 To find writes, filter the JSON log on that message.
@@ -275,7 +276,8 @@ saves, routes to the sinks that remain, and lists the missing name in
 
 These writes are authorized like a monitor write. Each one, accepted or
 refused, is logged at info as `route write` with `op` (`route.create`,
-`route.replace` or `route.delete`), `route`, `status`, `outcome` and `remote`.
+`route.replace` or `route.delete`), `route`, `status`, `outcome` and `remote`, plus `user`
+and `caller` behind a Tailscale Service.
 
 ## Preview where an event would go
 
