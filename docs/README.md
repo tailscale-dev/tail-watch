@@ -8,6 +8,8 @@ need to do.
 
 - [Set up your first monitor](tutorial/first-monitor.md): from the example Compose
   file to an alert in Slack.
+- [Receive your first webhook](tutorial/webhook-receiver.md): a local receiver that
+  verifies signatures and ignores duplicates, with no tailnet.
 
 ## How-to guides
 
