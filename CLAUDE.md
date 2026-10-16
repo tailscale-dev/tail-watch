@@ -105,13 +105,15 @@
 - Follow the Tailscale commit style in `AGENTS.md`: a `dir: verb ...`
   subject, a plain-text body, and a `Fixes #n` or `Updates #n` trailer. It
   does not use Conventional Commits, so do not run commitlint.
-- release-please is off until launch: its job in `release.yml` runs only when the repo
-  variable `RELEASE_PLEASE_ENABLED` is `true`. The OpenSpec change
-  `enable-release-please` lists the steps before setting it, so no `feat:` marker commit
-  is needed meanwhile.
-- The exception is the PR title: release-please reads the squash-merge title,
-  so write it as `feat:`, `fix:`, `perf:`, `revert:` or `docs:`. Commits with
-  only a `dir: verb` subject never open a release PR.
+- Releases are cut by hand; release-please does not work for this repo. Its job in
+  `release.yml` runs only when the repo variable `RELEASE_PLEASE_ENABLED` is `true`, and
+  it is unset, so no `feat:` marker commit or `feat:` PR title is needed. The steps are
+  in `docs/contributing/releases.md`: bump the version everywhere, edit `CHANGELOG.md`
+  by hand, tag, create the GitHub release, then run the **Release** workflow. The
+  workflow fails at "Verify release tag" if the GitHub release does not exist yet.
+- `gh` can read runs and check-runs here, but the PAT gets `403` on workflow dispatch
+  and `gh release create`. Push the tag with git; create the release and dispatch the
+  workflow in the web UI.
 
 ## Container image
 
@@ -226,9 +228,10 @@
 - `examples/kubernetes/sidecar.yaml` is the reference container. `TestSidecarCopiesAgree`
   (not gated) fails when the Kyverno, MutatingAdmissionPolicy, freeze-and-patch or
   how-to webhook copy drifts from it, so edit all five together. Each copy's image tag
-  is written by release-please from the line carrying `x-release-please-version` (listed
-  in `release-please-config.json` `extra-files`), and the test fails when it differs from
-  `.release-please-manifest.json`. Never hand-edit a tag, and keep the marker on the line
+  sits on the line carrying `x-release-please-version` (listed in
+  `release-please-config.json` `extra-files`), and the test fails when it differs from
+  `.release-please-manifest.json`. Change a tag only in the release commit, together
+  with the manifest, and keep the marker on the line
   when you move the image (`#` in YAML and shell, `//` in CEL and Go; freeze-and-patch
   holds it in an `IMAGE=` variable because its JSON cannot carry comments).
 - `scripts/kind-stack.sh up|down` is the harness (cluster config

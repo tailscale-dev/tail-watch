@@ -25,9 +25,13 @@ To cut `vX.Y.Z`:
    by hand.
 3. Run `mise run check`, push the commit to `main`, and wait for CI.
 4. Push the tag: `git tag -s vX.Y.Z && git push origin vX.Y.Z`.
-5. Run the **Release** workflow from the Actions tab with the tag as its `tag` input.
-   GoReleaser creates the GitHub release, attaches the archives and `checksums.txt`, and
-   pushes the container image (see [Container image](#container-image)). Each archive
+5. Create the GitHub release for the tag, because the workflow's "Verify release tag"
+   step runs `gh release view` and fails without one:
+   `gh release create vX.Y.Z --verify-tag --title vX.Y.Z --notes-file <notes>`, with the
+   changelog section as the notes.
+6. Run the **Release** workflow from the Actions tab with the tag as its `tag` input.
+   GoReleaser attaches the archives and `checksums.txt` to that release and pushes the
+   container image (see [Container image](#container-image)). Each archive
    includes `tail-watch`, the license, the README, the `docs/` tree,
    `examples/tail-watch.yaml`, and `examples/tail-watch.service`. The binary's
    `--version` reports the release version.
@@ -65,11 +69,39 @@ the `tailscale-dev` organization must open the package's settings on GitHub, cha
 its visibility to **Public**, and confirm that `docker pull` works without logging in.
 `gh` cannot do this for this organization.
 
-The Kubernetes examples name this image at the current release version. release-please
-rewrites that version in the release PR from the lines that carry an
-`x-release-please-version` comment, and `TestSidecarCopiesAgree` fails when the
-examples and `.release-please-manifest.json` disagree, so do not edit those tags by
-hand.
+The Kubernetes examples name this image at the current release version, on the lines
+that carry an `x-release-please-version` comment. `TestSidecarCopiesAgree` fails when
+they and `.release-please-manifest.json` disagree, so change them only in the release
+commit, together with the manifest. With release-please on, it rewrites them in the
+release PR instead.
+
+## Verifying a published release
+
+After the **Release** workflow succeeds, check the artifacts before announcing the
+release. The checks below use the image and need Docker.
+
+1. Confirm the release lists `checksums.txt` and an archive for each OS and architecture.
+2. Pull the image with a Docker config that has no GHCR login, for example
+   `DOCKER_CONFIG=$(mktemp -d) docker pull ghcr.io/tailscale-dev/tail-watch:X.Y.Z`. A
+   `401` means the package is still private (see [Container image](#container-image)).
+3. Check the version: `docker run --rm ghcr.io/tailscale-dev/tail-watch:X.Y.Z --version`
+   prints `X.Y.Z`.
+4. Run the image against real nodes with the Docker harness, not your host tailnet.
+   Start `scripts/live-stack.sh up`, write a config at the path it prints, and add a
+   compose override that names the release image:
+
+   ```yaml
+   services:
+     tail-watch:
+       image: ghcr.io/tailscale-dev/tail-watch:X.Y.Z
+       pull_policy: never
+   ```
+
+   Start only the collector with the `docker compose` command that `up` prints, adding
+   `-f <override>` and the `--no-build` flag so it does not rebuild from source. Then
+   query `/healthz` and `/metrics` from the tailscale container, fail and heal a fixture,
+   and watch `tailwatch_target_state`. Finish with `scripts/live-stack.sh down`, which
+   deletes the test devices.
 
 ## Validating packaging locally
 
@@ -87,4 +119,5 @@ so it fails with `exec format error` on a host without arm64 emulation (Docker's
 
 Snapshot archives appear in `dist/`. If publishing fails after the release
 has been created, rerun the failed job or manually run the **Release** workflow
-with its existing tag (for example, `v0.1.0`).
+with its existing tag (for example, `v0.2.0`). The workflow needs the GitHub release
+for that tag to exist already.
