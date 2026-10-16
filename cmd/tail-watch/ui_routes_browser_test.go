@@ -658,7 +658,8 @@ func TestUIBrowserPreviewFollowsRouteOnEdit(t *testing.T) {
 	startAdd(t, page, "moving", "10.9.0.9")
 	addCheck(t, page, "icmp")
 	save(t, page)
-	if err := page.Locator("#banner").WaitFor(); err != nil {
+	edit := page.Locator(`button[aria-label="Edit moving"]`)
+	if err := edit.WaitFor(); err != nil {
 		t.Fatal(err)
 	}
 	release := make(chan struct{})
@@ -669,7 +670,7 @@ func TestUIBrowserPreviewFollowsRouteOnEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = page.Locator(`button[aria-label="Edit moving"]`).Click(); err != nil {
+	if err = edit.Click(); err != nil {
 		t.Fatal(err)
 	}
 	chooseRoute(t, page, "route:nowhere")
