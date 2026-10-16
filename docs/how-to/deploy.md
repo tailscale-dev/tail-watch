@@ -15,7 +15,7 @@ on amd64 and arm64, so no Go toolchain is needed. Archives are named
 URL uses the tag, which has a leading `v`; the archive name does not.
 
 ```bash
-VERSION=0.1.0   # release version, without the leading v
+VERSION=0.2.0   # release version, without the leading v
 OS=linux        # linux, darwin or windows
 ARCH=amd64      # amd64 or arm64
 

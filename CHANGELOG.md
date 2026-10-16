@@ -1,6 +1,33 @@
 # Changelog
 
-## Unreleased
+<!-- markdownlint-disable MD024 -->
+
+## 0.2.0 - 2026-10-15
+
+### Added
+
+- Notification sinks: signed `webhook`, Slack and Microsoft Teams, with routes that pick
+  sinks by severity and event, durable queues, retries, batching and a heartbeat.
+  `notify-test` sends a test event to each sink.
+- The monitor UI gains a peer picker, a check builder, a live probe that gates Save,
+  and a Routes view with a route preview.
+- `collector.local_only` runs the collector without `tailscaled`, for the Kubernetes
+  ProxyGroup sidecar. The Kubernetes how-to and `examples/kubernetes/` show four ways
+  to inject it.
+- A container image, `ghcr.io/tailscale-dev/tail-watch`, for `linux/amd64` and
+  `linux/arm64`.
+- A systemd deployment guide and example unit, a how-to for exposing the UI as a
+  Tailscale Service, and a tutorial for receiving a first webhook.
+
+### Changed
+
+- HTTP request logs are structured fields instead of a JSON string in `msg`.
+- Audit and request logs record the tailnet caller behind `tailscale serve` instead
+  of the proxy's loopback address.
+- The example systemd unit creates the state directory with mode 0700, so the
+  collector no longer warns about `state_dir` on first start.
+
+## 0.1.0 - 2026-09-29
 
 ### Added
 

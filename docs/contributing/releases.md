@@ -10,25 +10,31 @@ archives for Linux, macOS, and Windows on amd64 and arm64.
 
 ## Releasing
 
-Release automation is off until launch. The `release-please` job in
-`.github/workflows/release.yml` runs only when the repository variable
-`RELEASE_PLEASE_ENABLED` is `true`, so with it unset no release PR opens and
-nothing publishes on a push to `main`. To cut a release by hand, push the tag
-and run the **Release** workflow with that tag as its input. The OpenSpec
-change `enable-release-please` lists what to do before setting the variable.
+Releases are cut by hand; release-please does not work for this repository. The
+`release-please` job in `.github/workflows/release.yml` runs only when the repository
+variable `RELEASE_PLEASE_ENABLED` is `true`, and it is unset, so nothing opens a release
+PR or publishes on a push to `main`.
 
-Once it is on, use Conventional Commits in squash-merge titles (`fix: ...`, `feat: ...`,
-or `feat!: ...` for breaking changes). After checks pass on `main`,
-release-please opens or updates a release PR containing the version and
-changelog. Merge that PR to create a GitHub release; GoReleaser then attaches
-the archives and `checksums.txt` and pushes the container image (see
-[Container image](#container-image)). Each archive includes `tail-watch`, the license,
-the README, the `docs/` tree, `examples/tail-watch.yaml`, and
-`examples/tail-watch.service`. The binary's `--version` reports the release version.
+To cut `vX.Y.Z`:
 
-release-please owns `CHANGELOG.md`; do not edit it by hand. It lists `feat`, `fix`,
-`perf`, `revert` and `docs` commits, so a documentation change appears under
-**Documentation** when its squash-merge title starts with `docs:`.
+1. In one commit, set the version in `.release-please-manifest.json` and in the image
+   tag on each line carrying `x-release-please-version` (listed in
+   `release-please-config.json` `extra-files`). `TestSidecarCopiesAgree` fails when they
+   disagree. Update the `VERSION` example in `docs/how-to/deploy.md`.
+2. Put the changes under an `X.Y.Z - YYYY-MM-DD` heading in `CHANGELOG.md`. Edit it
+   by hand.
+3. Run `mise run check`, push the commit to `main`, and wait for CI.
+4. Push the tag: `git tag -s vX.Y.Z && git push origin vX.Y.Z`.
+5. Run the **Release** workflow from the Actions tab with the tag as its `tag` input.
+   GoReleaser creates the GitHub release, attaches the archives and `checksums.txt`, and
+   pushes the container image (see [Container image](#container-image)). Each archive
+   includes `tail-watch`, the license, the README, the `docs/` tree,
+   `examples/tail-watch.yaml`, and `examples/tail-watch.service`. The binary's
+   `--version` reports the release version.
+
+The OpenSpec change `enable-release-please` lists what to do before turning the
+automation on. Once it is on, use Conventional Commits in squash-merge titles and merge
+the release PR instead; release-please then owns `CHANGELOG.md`.
 
 ## Repository setup
 

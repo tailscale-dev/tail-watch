@@ -15,7 +15,7 @@ containers:
   - name: tail-watch
     # Every release publishes this image; release-please moves the tag to the
     # new version in the release PR.
-    image: ghcr.io/tailscale-dev/tail-watch:0.1.0 # x-release-please-version
+    image: ghcr.io/tailscale-dev/tail-watch:0.2.0 # x-release-please-version
     imagePullPolicy: IfNotPresent
     args:
       - --config
