@@ -1,0 +1,37 @@
+# Tasks
+
+## 1. Config (`cmd/tail-watch/config_sinks.go`)
+
+- [ ] 1.1 Add `sinkPagerDuty = "pagerduty"`, the `routing_key_env`, `routing_key_file` and `region` keys to `rawSink`, and `RoutingKey secretRef` and `Region` to `SinkConfig` in `cmd/tail-watch/config_sinks.go`. Make the `url_env` / `url_file` rule per type: a PagerDuty sink needs exactly one routing key source and rejects `url_env`, `url_file`, `secret_env`, `secret_file`, `headers_env`, `batch`, `max_batch`, `group_wait` and `mention_on_page`; the other types reject `routing_key_*` and `region`. Accept `region` `us` (default) or `eu`. Change the unknown-type error to `must be webhook, slack, teams or pagerduty`. Verify new rows in `cmd/tail-watch/config_sinks_test.go` for a valid sink, both key sources, neither, `url_env` on PagerDuty, `routing_key_env` on a webhook sink, `group_wait`, `region: apac` and `region: eu`, and that the unknown-type row still fails.
+- [ ] 1.2 Default `events` to `target.down` and `target.recovered` for a PagerDuty sink and reject any other value, in `resolveSinkFilters` in `cmd/tail-watch/config_sinks.go`. Verify rows in `cmd/tail-watch/config_sinks_test.go` for `events: [target.flapping]`, `events: [target.down, collector.started]`, and an unset `events` that leaves `target.flapping` and `collector.started` undelivered.
+- [ ] 1.3 Make `SinkConfig.checkSecrets` in `cmd/tail-watch/config_sinks.go` resolve `RoutingKey` for a PagerDuty sink, so an unset variable or unreadable file stops startup and `notify-test`, naming the sink and the variable and never the value. Verify rows in `cmd/tail-watch/config_sinks_test.go` for an unset variable, an empty file and a valid file.
+- [ ] 1.4 Verify `describeSink` in `cmd/tail-watch/config_sinks.go` prints `type=pagerduty` and never the key: extend the `check-config` test in `cmd/tail-watch/config_sinks_test.go` with a PagerDuty sink whose `routing_key_env` value must be absent from stdout.
+
+## 2. Request body (`cmd/tail-watch/pagerduty.go`)
+
+- [ ] 2.1 Add `pdRequest` and `Render` in `cmd/tail-watch/pagerduty.go`: `target.down` as `trigger`, `target.recovered` (including `reason: removed`) as `resolve`, `dedup_key` `<target>/<check>` with the 16-hex SHA-256 form past 255 bytes, `payload` with `summary` (1024 bytes), `source`, `component`, `group`, `class`, `severity`, `timestamp` and `custom_details`, the 300-byte error cut, and a `status_url` `links` entry. Leave `routing_key` empty. Do not implement `mentionRenderer`. Verify `TestPagerDutyGolden` golden files in `cmd/tail-watch/testdata/pagerduty/` for down at layer `service`, a `warn` down, an implicit router with 14 dependents, recovered, recovered with `reason: removed`, a 301-byte error, a long check, a `status_url` with a trailing slash, and the test trigger. Regenerate with `go test ./cmd/tail-watch -run 'TestPagerDutyGolden' -update` and check that no golden file contains `routing_key`.
+- [ ] 2.2 Add a table test in `cmd/tail-watch/pagerduty_test.go` for the `dedup_key` helper: a short key, a key of exactly 255 bytes, a key of 256 bytes, and a recovered event whose key equals its down's. Verify the test passes.
+
+## 3. Delivery (`cmd/tail-watch/pagerduty.go`, `cmd/tail-watch/sink.go`)
+
+- [ ] 3.1 Add `newPagerDutySink` and `Send` in `cmd/tail-watch/pagerduty.go`: the endpoint comes from `region`, `Send` resolves the key, sets `routing_key` on the queued body, and calls `httpPost` with `Content-Type: application/json` and `User-Agent: tail-watch/<version>` and no `Tail-Watch-Signature`. `MinInterval` returns 0. Construct it from `newSinkWithEnv` in `cmd/tail-watch/sink.go`. Verify `httptest.Server` tests in `cmd/tail-watch/pagerduty_test.go`: the request carries the key; `202` is delivered; `400` is not retried and counts `tailwatch_notify_dropped_total{reason="permanent"}`; `503` retries; `429` with `Retry-After: 2` waits at least 2 seconds under `tstest.Clock` and resends the same body; the `eu` region targets `events.eu.pagerduty.com`.
+- [ ] 3.2 Keep the key out of queues and errors. Verify tests in `cmd/tail-watch/pagerduty_test.go`: a `queue: disk` sink's `notification-state.json` does not contain the key; a key file that changes between attempts is sent on the second attempt; an empty variable at send time retries with an error naming the sink and the variable and not the value; a transport error contains the scheme and host and not the key.
+- [ ] 3.3 Verify one event per request and no grouping: a test in `cmd/tail-watch/pagerduty_test.go` queues 5 events inside one second and sees 5 requests in queue order, and `groupsMessages` and `messageSink` are false for the type. Verify the Slack and Teams grouping tests still pass.
+- [ ] 3.4 Verify a recovery follows its page through a PagerDuty sink: a test in `cmd/tail-watch/pagerduty_test.go` delivers a down and then its recovery and sees a `trigger` and a `resolve` with the same `dedup_key`; a down that is dropped before any attempt sends no `resolve`. Reuse the notifier helpers in `cmd/tail-watch/notify_helpers_test.go`.
+
+## 4. notify-test (`cmd/tail-watch/pagerduty.go`)
+
+- [ ] 4.1 Render the `test` event as a `trigger` with `dedup_key` `tail-watch-test/<collector name>` and `severity: info`, and have `Send` post the `resolve` after an accepted trigger, in `cmd/tail-watch/pagerduty.go`. Return a failed trigger as is with no resolve, and return a failed resolve with an `Err` that names the resolve and the key. Verify tests in `cmd/tail-watch/pagerduty_test.go` and `cmd/tail-watch/notifytest_test.go`: both `202` prints `202` and exits 0; `400` on the trigger prints `400`, sends no resolve and exits 1; `400` on the resolve exits 1 with the key in the message.
+
+## 5. Docs and example
+
+- [ ] 5.1 Add `docs/how-to/pagerduty-sink.md`: create an Events API v2 integration on a service, store the key in `routing_key_env` or `routing_key_file`, the `type: pagerduty` snippet, `region`, severity mapping, `status_url`, dedup and shared-alert behavior, `max_age` and `queue: disk` for recoveries, that `notify-test` opens and resolves a test alert, and that flapping is not sent. Link it from `docs/README.md`, `docs/reference/config.md`, `docs/explanation/incidents-and-queues.md` and `docs/how-to/troubleshoot.md`. Verify `markdownlint-cli2` passes on those files.
+- [ ] 5.2 Update `docs/reference/config.md`: `type` includes `pagerduty`, the `routing_key_env`, `routing_key_file` and `region` rows, the `events` default for PagerDuty, and the keys a PagerDuty sink rejects. Add the `pagerduty` value to the `type` label in `docs/reference/metrics.md` if it lists sink types. Verify `markdownlint-cli2` passes on both pages.
+- [ ] 5.3 Add an `ops-pagerduty` sink to `examples/tail-watch.yaml`. Verify `mise exec -- go run ./cmd/tail-watch check-config --config examples/tail-watch.yaml` exits 0 with `PD_ROUTING_KEY` unset.
+- [ ] 5.4 Add `pagerduty.go` to the notification file list in `CLAUDE.md`, and tick the PagerDuty item in `ROADMAP.md`. Verify `markdownlint-cli2` passes on both files.
+
+## 6. Validation
+
+- [ ] 6.1 Run `mise run build`, `mise exec -- go vet ./...` and `mise run test`. Verify all three succeed.
+- [ ] 6.2 Run `mise run lint` and `mise exec -- go run golang.org/x/vuln/cmd/govulncheck@latest ./...`. Verify zero lint issues and no reachable vulnerabilities.
+- [ ] 6.3 Run `markdownlint-cli2` on `docs/`, `README.md`, `CLAUDE.md`, `ROADMAP.md` and `openspec/changes/add-pagerduty-sink/`, and `mise exec -- openspec validate add-pagerduty-sink --strict`. Verify both pass.
