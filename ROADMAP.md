@@ -44,14 +44,26 @@ Phase 2 of the original design, ordered by value to an operator who already runs
 Items that use more of Tailscale's own features, per the "Dogfooding Tailscale" section of
 [CONTEXT.md](CONTEXT.md).
 
-- [ ] Identity-based UI authorization: fill in the `authorize` hook from the caller's
-  tailnet identity or app capabilities (for example a `tailscale.com/cap/tail-watch` grant
-  with a viewer, editor or admin role), so `probe` and monitor writes can be granted apart.
-  Check whether `tailscale serve --accept-app-caps` and its header exist on the pinned
-  version first [M]
+- [ ] Identity-based UI authorization: fill in the `authorize` hook from the app
+  capabilities that `tailscale serve --accept-app-caps` forwards in
+  `Tailscale-App-Capabilities` (a grant with a viewer, editor or admin role), so `probe` and
+  monitor writes can be granted apart. Spiked on 2026-10-16: serve overwrites forged
+  capability, login and `X-Forwarded-For` headers, and no grant means no header. The
+  capability name must be in a domain we choose, not `tailscale.com`. The header comes from
+  grants to the host node's tag, so a grant to `svc:` alone is not enough; add an `app`-only
+  grant to the tag. It works through a `svc:` Service over HTTPS and for a user-owned
+  caller, who also gets `Tailscale-User-Login`. Over a Service `X-Forwarded-For` can be
+  IPv6, and the host needs manual approval [M]
 - [ ] Harden the audit identity: cross-check `Tailscale-User-Login` and `X-Forwarded-For`
   against `LocalClient().WhoIs`, so a local process cannot forge the login in the audit
   log [S]
+- [ ] Close the local-process gap in UI identity: listen on a Unix socket
+  (`collector.listen: unix:/path`, mode `0600`) that only `tailscale serve` and the
+  collector's user can open, so a process on the host cannot forge `X-Forwarded-For` for
+  an editor. Confirm first that `serve` can proxy to a Unix socket on the pinned version.
+  Matters most for shared-namespace deployments such as the Compose layout and the
+  ProxyGroup sidecar. Follows Identity-based UI authorization; `tsnetEnv` is the other
+  route [M]
 - [ ] Surface tailscaled's own health: `Status().Health` and the backend state as a metric
   and as a classifier input, so a collector that is itself partitioned does not page for
   its targets. Confirm what `presence.go` already reads first [M]

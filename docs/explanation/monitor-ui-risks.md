@@ -163,12 +163,29 @@ backend who called, so when the connection is from loopback tail-watch adds `use
 caller's tailnet login from `Tailscale-User-Login`, and `caller`, their tailnet address
 from `X-Forwarded-For`. A connection from anywhere else never gets these fields, because
 a remote client could have written the headers. A process on the collector host can still
-forge them, as it can already reach the API. When serve sends no login, for example for
-a tagged node, the line has no `user`. Treat `user` as attribution for an honest operator,
-not as authentication.
+forge them (see
+[the host trust boundary](#anyone-on-the-collector-host-is-trusted)). When serve sends
+no login, for example for a tagged node, the line has no `user`. Treat `user` as
+attribution for an honest operator, not as authentication.
 
 The audit log is your way to reconstruct what changed. Ship it somewhere that
 someone who can edit monitors cannot rewrite.
+
+## Anyone on the collector host is trusted
+
+The listener cannot tell a local process from `tailscale serve`. Both connect from
+loopback, and the audit log's `user` and `caller` fields come from headers that `serve`
+writes and a local process can write too. Anyone who can run a process in the collector's
+network stack can therefore reach the write API and name any login or tailnet address as
+the caller. They can also read the configuration, the environment and `state_dir`, so on a
+host where only trusted administrators have a shell this adds little. The case to weigh
+is a shared network namespace: in the Compose layout, and in a ProxyGroup sidecar pod,
+every container in the namespace is "local".
+
+tail-watch does not close this gap. Keep shell and container access to the collector host
+as tight as the access you give the UI, and treat `user` and `caller` as attribution, not
+proof. Closing the gap needs a listener that only `serve` can open, such as a Unix socket,
+which is on the [roadmap](../../ROADMAP.md).
 
 ## Choosing whether to enable it
 
