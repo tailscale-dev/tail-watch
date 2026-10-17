@@ -21,7 +21,8 @@ Items have no GitHub issues yet; when one is filed, `/roadmap sync` links it her
 Phase 2 of the original design, ordered by value to an operator who already runs it.
 
 - [ ] PagerDuty sink: Events API v2, `dedup_key` set to `target/check` so recoveries
-  auto-resolve [M]
+  auto-resolve. Implemented and tested on branch `pagerduty-sink`; it stays there until a
+  PagerDuty account lets us run the live check (task 6.4 of `add-pagerduty-sink`) [M]
 - [ ] incident.io sink: HTTP alert source, `firing` and `resolved` paired by
   `deduplication_key`. OpenSpec change `add-incidentio-sink` drafted [M]
 - [ ] Setec as a secret source (`*_setec` keys beside `*_env` / `*_file`). OpenSpec change
