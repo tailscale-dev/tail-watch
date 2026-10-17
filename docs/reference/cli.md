@@ -49,7 +49,7 @@ one object per line, on stderr. At `debug`, every check result is logged.
 
 Runs the preflight, runs every check of every configured target once, prints one
 line per result, and exits. It starts no HTTP server, builds no notifier, resolves
-no secrets, sends no heartbeat, and ignores the UI.
+no secrets, does not contact a setec server, sends no heartbeat, and ignores the UI.
 
 ```text
 <target> <check> ok <latency>
@@ -67,7 +67,8 @@ Before serving, the collector fails with exit code 1 when:
 - tailscaled uses userspace networking (kernel mode is required);
 - a target is a remote subnet address on Linux and the host has not accepted
   routes (`tailscale set --accept-routes`);
-- a sink or heartbeat secret cannot be read or is empty (server mode only);
+- a sink or heartbeat secret cannot be read or is empty, including a setec
+  secret that is missing or a setec server that is unreachable (server mode only);
 - the notification state file cannot be decoded (server mode only).
 
 With `collector.local_only: true`, every tailscaled check above is skipped: the
@@ -84,8 +85,10 @@ beyond loopback.
 tail-watch check-config [--config <file>]
 ```
 
-Loads and validates the config. It does not contact tailscaled and does not
-resolve secrets, so it needs no environment variables. On success it prints one
+Loads and validates the config. It does not contact tailscaled, does not
+resolve secrets, and does not contact a setec server, so it needs no
+environment variables and no network. It does check `collector.setec` and
+every `*_setec` key. On success it prints one
 line per route, one per target, one per sink, and one for the heartbeat if
 configured, then exits 0. A route line is `route <name> severity=<page|warn>
 sinks=<names>`. Each target line ends with `route=<name|none>` and
@@ -99,6 +102,9 @@ sink ops-webhook type=webhook min_severity=page events=target.down,target.recove
 sink ops-slack type=slack min_severity=warn events=all queue=memory
 heartbeat interval=1m0s
 ```
+
+`url=setec:<name>` is printed only for a sink whose URL is a `url_setec` key.
+The name is the secret's name. The value is not printed.
 
 A target that names a route prints that route and only its sinks:
 
@@ -118,9 +124,13 @@ tail-watch notify-test [--config <file>] [--sink <name>] [--timeout <duration>] 
 
 Sends one `test` event through each selected sink's real signing, rendering, and
 retry code. It bypasses filters, queues, and `state_dir`. It needs the secrets
-that the sinks reference, and it works when tailscaled is unreachable, in which
-case the collector name in the payload is the OS hostname and `tailscale_ip` is
-omitted.
+that the sinks reference. For `*_setec` keys it opens the same in-memory store
+a normal start does, before each sink is checked. If that server is
+unreachable, each selected setec sink prints a line naming the sink and the
+secret and the command exits 1. The value is not printed. Sinks that use
+`*_env` or `*_file` still send. It works when tailscaled is unreachable, in
+which case the collector name in the payload is the OS hostname and
+`tailscale_ip` is omitted.
 
 | Flag | Type | Default | Meaning |
 | --- | --- | --- | --- |

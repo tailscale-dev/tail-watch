@@ -131,27 +131,27 @@ func TestFirstPrivateIPv4Host(t *testing.T) {
 
 func TestChosenSubnetIPSkipsUnusableRoutes(t *testing.T) {
 	devices := []tsDevice{
-		{Hostname: "advertised-only", Connected: true, AdvertisedRoutes: []string{"10.1.0.0/24"},
+		{Name: "", Hostname: "advertised-only", Connected: true, AdvertisedRoutes: []string{"10.1.0.0/24"},
 			ID:            "",
 			Addresses:     nil,
 			EnabledRoutes: nil,
 		},
-		{Hostname: "offline", Connected: false, EnabledRoutes: []string{"10.2.0.0/24"},
+		{Name: "", Hostname: "offline", Connected: false, EnabledRoutes: []string{"10.2.0.0/24"},
 			ID:               "",
 			Addresses:        nil,
 			AdvertisedRoutes: nil,
 		},
-		{Hostname: "tail-watch-live-1-router", Connected: true, EnabledRoutes: []string{"10.3.0.0/24"},
+		{Name: "", Hostname: "tail-watch-live-1-router", Connected: true, EnabledRoutes: []string{"10.3.0.0/24"},
 			ID:               "",
 			Addresses:        nil,
 			AdvertisedRoutes: nil,
 		},
-		{Hostname: "exit", Connected: true, EnabledRoutes: []string{"0.0.0.0/0"},
+		{Name: "", Hostname: "exit", Connected: true, EnabledRoutes: []string{"0.0.0.0/0"},
 			ID:               "",
 			Addresses:        nil,
 			AdvertisedRoutes: nil,
 		},
-		{Hostname: "router", Connected: true, EnabledRoutes: []string{"10.4.0.0/24"},
+		{Name: "", Hostname: "router", Connected: true, EnabledRoutes: []string{"10.4.0.0/24"},
 			ID:               "",
 			Addresses:        nil,
 			AdvertisedRoutes: nil,
@@ -229,6 +229,7 @@ type livePeer struct {
 
 type tsDevice struct {
 	ID               string   `json:"id"`
+	Name             string   `json:"name"`
 	Hostname         string   `json:"hostname"`
 	Connected        bool     `json:"connectedToControl"`
 	Addresses        []string `json:"addresses"`

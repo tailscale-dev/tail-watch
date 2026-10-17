@@ -79,43 +79,35 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "notify-test" {
 		return runNotifyTest(args[1:], stdout, stderr)
 	}
-	fs := flag.NewFlagSet("tail-watch", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	configFlag := fs.String("config", "", "config file path (overrides TAIL_WATCH_CONFIG)")
-	listenFlag := fs.String("listen", "", "HTTP listen address (overrides collector.listen)")
-	socketFlag := fs.String("socket", "", "tailscaled LocalAPI socket")
-	onceFlag := fs.Bool("once", false, "run every check once and exit")
-	uiFlag := registerUIFlag(fs)
-	versionFlag := fs.Bool("version", false, "print version and exit")
-	logLevelFlag := fs.String("log-level", "", "log level: debug, info, warn, error (overrides TAIL_WATCH_LOG_LEVEL)")
-	if err := fs.Parse(args); err != nil {
+	flags, err := parseRunFlags(args, stderr)
+	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return exitUsage
 	}
-	if *versionFlag {
+	if *flags.version {
 		_, _ = fmt.Fprintln(stdout, versionString())
 		return 0
 	}
-	log, err := newLogger(stderr, effectiveLogLevel(*logLevelFlag, os.Getenv("TAIL_WATCH_LOG_LEVEL")))
+	log, err := newLogger(stderr, effectiveLogLevel(*flags.logLevel, os.Getenv("TAIL_WATCH_LOG_LEVEL")))
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "log level: %v\n", err)
 		return exitUsage
 	}
 	slog.SetDefault(log)
-	path := resolveConfigPath(*configFlag, os.Getenv("TAIL_WATCH_CONFIG"))
+	path := resolveConfigPath(*flags.config, os.Getenv("TAIL_WATCH_CONFIG"))
 	cfg, err := loadConfig(path)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
-	ui, uiErr := resolveUI(cfg, *uiFlag, *onceFlag)
+	ui, uiErr := resolveUI(cfg, *flags.ui, *flags.once)
 	if uiErr != nil {
 		_, _ = fmt.Fprintln(stderr, uiErr)
 		return 1
 	}
-	socket := socketPath(*socketFlag)
+	socket := socketPath(*flags.socket)
 	a := &app{
 		cfg:    cfg,
 		env:    newKernelEnv(socket),
@@ -124,7 +116,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		pub:    newPublisher(),
 		stdout: stdout,
 		socket: socket,
-		listen: cfg.ListenAddr(*listenFlag),
+		listen: cfg.ListenAddr(*flags.listen),
 		ui:     ui,
 
 		dynamic:  nil,
@@ -144,9 +136,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		collector: CollectorInfo{Name: "", TailscaleIP: ""},
 	}
 	a.pub.add(debugConsumer{log: log})
-	if !a.loadStores(*onceFlag, stderr) {
+	if !a.loadStores(*flags.once, stderr) {
 		return 1
 	}
+	// --once does not resolve secrets, so it builds no setec store.
+	// The store opens before preflight, so an unreachable server exits
+	// without tailscaled, and before resolveSecrets, so startup fails fast.
+	closeSetec, code := a.openSetec(*flags.once, stderr)
+	if code != 0 {
+		return code
+	}
+	defer closeSetec()
 	if cfg.Collector.LocalOnly {
 		a.localOnlyIdentity()
 	} else {
@@ -156,7 +156,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	if *onceFlag {
+	if *flags.once {
 		return a.runOnce()
 	}
 	if notifyErr := a.buildNotifier(); notifyErr != nil {
@@ -164,6 +164,51 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return a.runServer()
+}
+
+// runFlags are the collector's flags. Pointers stay nil only for --ui,
+// which registerUIFlag leaves unset until the flag is given.
+type runFlags struct {
+	config   *string
+	listen   *string
+	socket   *string
+	once     *bool
+	ui       **bool
+	version  *bool
+	logLevel *string
+}
+
+func parseRunFlags(args []string, stderr io.Writer) (runFlags, error) {
+	fs := flag.NewFlagSet("tail-watch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	parsed := runFlags{
+		config:   fs.String("config", "", "config file path (overrides TAIL_WATCH_CONFIG)"),
+		listen:   fs.String("listen", "", "HTTP listen address (overrides collector.listen)"),
+		socket:   fs.String("socket", "", "tailscaled LocalAPI socket"),
+		once:     fs.Bool("once", false, "run every check once and exit"),
+		ui:       registerUIFlag(fs),
+		version:  fs.Bool("version", false, "print version and exit"),
+		logLevel: fs.String("log-level", "", "log level: debug, info, warn, error (overrides TAIL_WATCH_LOG_LEVEL)"),
+	}
+	return parsed, fs.Parse(args)
+}
+
+// openSetec builds the setec store unless once is set or the config names
+// no setec secret. The returned function stops the store's poller.
+func (a *app) openSetec(once bool, stderr io.Writer) (func(), int) {
+	noop := func() {}
+	if once {
+		return noop, 0
+	}
+	st, err := applySetec(context.Background(), a.cfg, a.env, a.log)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+		return noop, 1
+	}
+	if st == nil {
+		return noop, 0
+	}
+	return func() { _ = st.Close() }, 0
 }
 
 // loadStores reads the UI files and merges them when the UI is on. A false
@@ -224,7 +269,7 @@ func (a *app) buildNotifier() error {
 	}
 	for _, sc := range a.cfg.Sinks {
 		if sc.Type == sinkWebhook && !sc.Secret.isSet() {
-			a.log.Warn("webhook sink is unsigned: no secret_env or secret_file", "sink", sc.Name)
+			a.log.Warn("webhook sink is unsigned: no secret_env, secret_file or secret_setec", "sink", sc.Name)
 		}
 	}
 	if len(a.cfg.Sinks) == 0 {

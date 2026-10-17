@@ -490,7 +490,10 @@ func TestTargetRouteRejected(t *testing.T) {
 func TestListenFlagOverride(t *testing.T) {
 	t.Parallel()
 	cfg := &Config{
-		Collector:  CollectorConfig{Listen: "127.0.0.1:1", StateDir: "", UI: false, LocalOnly: false},
+		Collector: CollectorConfig{
+			Listen: "127.0.0.1:1", StateDir: "", UI: false, LocalOnly: false,
+			Setec: setecSettings{Server: "", PollInterval: 0, pollTicker: nil},
+		},
 		Targets:    nil,
 		Sinks:      nil,
 		Heartbeat:  nil,
@@ -608,4 +611,164 @@ func requireCandidateErrors(t *testing.T, errs []error, wants []string) {
 	if strings.Contains(joined, "targets[") {
 		t.Errorf("error still carries a target index:\n%s", joined)
 	}
+}
+
+//nolint:gocognit,cyclop,gocyclo // Each subtest is one collector.setec validation case.
+func TestSetecConfig(t *testing.T) {
+	t.Parallel()
+	const target = "targets:\n  - {name: nas, addr: 10.0.0.1, checks: [icmp]}\n"
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig([]byte(`
+collector:
+  setec:
+    server: https://setec.example.ts.net
+    poll_interval: 5m
+` + target + "sinks:\n  - {name: ops, type: slack, url_setec: tail-watch/slack-url}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Collector.Setec.Server != "https://setec.example.ts.net" ||
+			cfg.Collector.Setec.PollInterval != 5*time.Minute {
+			t.Fatalf("setec %+v", cfg.Collector.Setec)
+		}
+	})
+	t.Run("omitted poll", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig([]byte("collector:\n  setec:\n    server: https://setec.example.ts.net\n" + target))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Collector.Setec.PollInterval != 5*time.Minute {
+			t.Fatalf("poll %s", cfg.Collector.Setec.PollInterval)
+		}
+	})
+	t.Run("http server", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte("collector:\n  setec:\n    server: http://setec.example.ts.net\n" + target))
+		if err == nil || !strings.Contains(err.Error(), "collector.setec.server") ||
+			!strings.Contains(err.Error(), "https") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("missing host", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte("collector:\n  setec:\n    server: https://\n" + target))
+		if err == nil || !strings.Contains(err.Error(), "host") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("malformed server is reported once", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte("collector:\n  setec:\n    server: http://setec.example.ts.net\n" + target +
+			"sinks:\n  - {name: ops, type: slack, url_setec: s}\n"))
+		if err == nil || strings.Contains(err.Error(), "requires collector.setec.server") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("poll interval 10s", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte("collector:\n  setec:\n    server: https://setec.example.ts.net\n" +
+			"    poll_interval: 10s\n" + target))
+		if err == nil || !strings.Contains(err.Error(), "at least 1m") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("poll interval 1m", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig([]byte("collector:\n  setec:\n    server: https://setec.example.ts.net\n" +
+			"    poll_interval: 1m\n" + target))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Collector.Setec.PollInterval != time.Minute {
+			t.Fatalf("poll %s", cfg.Collector.Setec.PollInterval)
+		}
+	})
+	t.Run("local only section", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte(`
+collector: {local_only: true, setec: {server: https://setec.example.ts.net}}
+targets:
+  - {name: web, addr: web.apps.svc, checks: ['tcp:443']}
+`))
+		if err == nil || !strings.Contains(err.Error(), "collector.setec") ||
+			!strings.Contains(err.Error(), "local-only") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("local only keys", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte(`
+collector: {local_only: true}
+targets:
+  - {name: web, addr: web.apps.svc, checks: ['tcp:443']}
+sinks:
+  - name: ops
+    type: webhook
+    url_setec: hook/url
+    secret_setec: hook/secret
+    headers_setec: {Authorization: hook/auth}
+heartbeat:
+  url_setec: hb/url
+`))
+		if err == nil {
+			t.Fatal("expected errors")
+		}
+		for _, want := range []string{
+			"sinks[0].url_setec", "sinks[0].secret_setec", "sinks[0].headers_setec",
+			"heartbeat.url_setec", "sink ops", "unavailable in local-only mode",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("missing %q in %v", want, err)
+			}
+		}
+		if strings.Contains(err.Error(), "requires collector.setec.server") {
+			t.Fatalf("local-only also reported a missing server: %v", err)
+		}
+	})
+	t.Run("missing server", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte(target + `
+sinks:
+  - name: ops
+    type: webhook
+    url_setec: hook/url
+    secret_setec: hook/secret
+    headers_setec: {Authorization: hook/auth}
+heartbeat:
+  url_setec: hb/url
+`))
+		if err == nil {
+			t.Fatal("expected errors")
+		}
+		for _, want := range []string{
+			"sinks[0].url_setec", "sink ops", "secret_setec", "headers_setec",
+			"heartbeat.url_setec", "requires collector.setec.server",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("missing %q in %v", want, err)
+			}
+		}
+	})
+	t.Run("unused section", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig([]byte("collector:\n  setec:\n    server: https://setec.example.ts.net\n" + target))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Collector.Setec.Server == "" || len(setecSecretNames(cfg)) != 0 {
+			t.Fatalf("setec %+v names %v", cfg.Collector.Setec, setecSecretNames(cfg))
+		}
+	})
+	t.Run("empty section", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig([]byte("collector:\n  setec: {}\n" + target))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Collector.Setec.Server != "" || cfg.Collector.Setec.PollInterval != 0 {
+			t.Fatalf("empty section resolved %+v", cfg.Collector.Setec)
+		}
+	})
 }

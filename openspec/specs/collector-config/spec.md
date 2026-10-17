@@ -29,7 +29,8 @@ falling back to the `TAIL_WATCH_CONFIG` environment variable, falling back to
 
 The `collector` section SHALL accept `listen` (host:port for the HTTP server,
 default `127.0.0.1:9109`), `state_dir` (optional directory path), `ui` (boolean,
-default `false`) and `local_only` (boolean, default `false`). The `--listen` flag SHALL
+default `false`), `local_only` (boolean, default `false`) and `setec` (a
+mapping with `server` and `poll_interval`, defined by `setec-secrets`). The `--listen` flag SHALL
 override `collector.listen`. The `--ui` flag SHALL override `collector.ui`, and
 `--ui=false` SHALL turn it off. When the UI is on and `collector.state_dir` is unset,
 tail-watch SHALL exit non-zero before contacting tailscaled, with an error saying the UI
@@ -39,8 +40,8 @@ ignored and only YAML targets run.
 When `collector.local_only` is `true`, a target that sets no `network` SHALL default to
 `local` instead of `tailnet`, and validation SHALL reject, with every problem listed and
 each naming its field: a target with `network: tailnet` (`defaults` has no `network` key), any `tsping`
-check, and the UI being on from `collector.ui` or the `--ui` flag. `tail-watch
-check-config` SHALL apply the same rules.
+check, the UI being on from `collector.ui` or the `--ui` flag, and `collector.setec` or any
+`*_setec` key. `tail-watch check-config` SHALL apply the same rules.
 
 #### Scenario: Default listen address
 
@@ -56,6 +57,11 @@ check-config` SHALL apply the same rules.
 
 - **WHEN** `collector.ui: false` is set and tail-watch runs with `--ui`
 - **THEN** the UI is on
+
+#### Scenario: Setec section accepted
+
+- **WHEN** the config sets `collector.setec.server: https://setec.example.ts.net`
+- **THEN** the config loads and `poll_interval` is `5m`
 
 #### Scenario: UI without a state directory
 
@@ -84,6 +90,11 @@ check-config` SHALL apply the same rules.
 - **WHEN** `collector.local_only: true` is set and tail-watch runs with `--ui`
 - **THEN** tail-watch exits non-zero with an error saying the UI is unavailable in
   local-only mode
+
+#### Scenario: Local-only rejects setec
+
+- **WHEN** `collector.local_only: true` is set and a sink sets `url_setec`
+- **THEN** validation fails with an error naming the sink and the key
 
 ### Requirement: Defaults section
 

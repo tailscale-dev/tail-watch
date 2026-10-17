@@ -75,6 +75,32 @@ pulumi env set <env> environmentVariables.TEAMS_WEBHOOK_URL '<workflow url>' --s
 The URL's `sig` query is a bearer secret. The test logs scrub `logic.azure.com` and
 `powerplatform.com` URLs and any `sig=` value.
 
+## Setec
+
+`TestLiveSetec` runs the collector with every sink and heartbeat secret in a setec
+server, under the same `TAIL_WATCH_LIVE_TAILNET=1` gate. The server runs in `--dev`
+mode (a dummy KMS, not for production) as its own tsnet node, built by
+`scripts/build-setec.sh` at the version in `go.mod`. The test seeds three secrets from
+the collector's network namespace, checks signed webhook posts, a heartbeat and
+`notify-test`, then rotates the heartbeat URL and waits up to three minutes for pings to
+reach a second receiver without a restart.
+
+When a Slack webhook is configured (see above), the test also seeds it as
+`live/slack-url`, adds a `url_setec` Slack sink, and expects `notify-test` to report
+`ops-slack slack 200`, so one real message reaches the channel per run.
+
+```bash
+TAIL_WATCH_SLACK_PULUMI_ENV=<org>/tail-watch-live/slack \
+TAIL_WATCH_LIVE_TAILNET=1 go test -count=1 -timeout 18m -run 'TestLiveSetec$' -v ./cmd/tail-watch
+```
+
+The policy needs `tag:secrets` and the two `tag:monitor` grants in
+`cmd/tail-watch/testdata/snippet.hujson` (the grant's `put` and `activate` actions are for
+the test's own seeding, not for the collector). `TAIL_WATCH_LIVE_SETEC_TAG` changes the
+server's tag. The test turns on MagicDNS in the collector's node through
+`TS_LIVE_ACCEPT_DNS`, because the collector must resolve the server's name, and the first
+request waits while the server obtains a certificate.
+
 ## Restart behavior
 
 The Slack sink uses a memory queue, so an event still inside its `group_wait` window when
@@ -92,3 +118,6 @@ To bring up only the tailnet side, without the collector process or any scenario
 collector's tailscale node, the four fixture nodes, and the LAN router, approves the LAN
 route, and prints each node's address. `scripts/live-stack.sh down` removes the containers
 and deletes that stack's devices.
+
+Set `TAIL_WATCH_LIVE_SETEC=1` to add the setec server to that stack. `up` then also prints
+the server's name and how to seed a secret through the `setec-cli` service.

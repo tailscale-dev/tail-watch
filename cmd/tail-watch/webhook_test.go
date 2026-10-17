@@ -155,7 +155,7 @@ func urlFile(t *testing.T, url string) secretRef {
 	if err := os.WriteFile(path, []byte(url), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return secretRef{Env: "", File: path}
+	return secretRef{Env: "", File: path, Setec: "", src: nil}
 }
 
 func TestWebhookRequestFormatAndSignature(t *testing.T) {
@@ -163,8 +163,8 @@ func TestWebhookRequestFormatAndSignature(t *testing.T) {
 	t.Setenv("TW_TEST_AUTH", "Bearer abc")
 	rc := newReceiver(t)
 	w := webhookFor(t, rc.srv.URL+"/hook/private", func(sc *SinkConfig) {
-		sc.Secret = secretRef{Env: "TW_TEST_SECRET", File: ""}
-		sc.HeadersEnv = map[string]string{"Authorization": "TW_TEST_AUTH"}
+		sc.Secret = secretRef{Env: "TW_TEST_SECRET", File: "", Setec: "", src: nil}
+		sc.Headers = map[string]secretRef{"Authorization": {Env: "TW_TEST_AUTH", File: "", Setec: "", src: nil}}
 	})
 	ev := newDownEvent("evt_01JAB3K9T6M4X2Q8R7N5W0YZCD", goldenCollector(), goldenTransition())
 	body, err := w.Render([]Event{ev}, ev.ID)
@@ -316,7 +316,7 @@ func TestWebhookThroughNotifierRetriesServerError(t *testing.T) {
 	rc := newReceiver(t, 500, 200)
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
 	sc := testSink("hook")
-	sc.URL = secretRef{Env: "TW_TEST_URL", File: ""}
+	sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil}
 	h := realSinkHarness(
 		t,
 		harnessOpts{sinks: []SinkConfig{sc}, stateDir: "", tags: nil, intake: 0, scripts: nil, clock: nil},
@@ -340,7 +340,7 @@ func TestWebhookBatchedBurstSplits(t *testing.T) {
 	rc := newReceiver(t)
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
 	sc := testSink("hook")
-	sc.URL = secretRef{Env: "TW_TEST_URL", File: ""}
+	sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil}
 	sc.Batch = true
 	h := realSinkHarness(
 		t,
@@ -398,8 +398,8 @@ func TestWebhookBatchRetryKeepsBytesAndFreshSignature(t *testing.T) {
 	rc := newReceiver(t, 503, 200)
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
 	sc := testSink("hook")
-	sc.URL = secretRef{Env: "TW_TEST_URL", File: ""}
-	sc.Secret = secretRef{Env: "TW_TEST_SECRET", File: ""}
+	sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil}
+	sc.Secret = secretRef{Env: "TW_TEST_SECRET", File: "", Setec: "", src: nil}
 	sc.Batch = true
 	h := realSinkHarness(
 		t,
@@ -433,7 +433,7 @@ func TestWebhookBatchDropsWholeBatchOnPermanent(t *testing.T) {
 	rc := newReceiver(t, 400)
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
 	sc := testSink("hook")
-	sc.URL = secretRef{Env: "TW_TEST_URL", File: ""}
+	sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil}
 	sc.Batch = true
 	h := realSinkHarness(
 		t,
@@ -460,9 +460,9 @@ func TestNoSecretsReachDisk(t *testing.T) {
 	t.Setenv("TW_TEST_AUTH", "Bearer header-secret-456")
 	sc := testSink("hook")
 	sc.Queue = queueDisk
-	sc.URL = secretRef{Env: "TW_TEST_URL", File: ""}
-	sc.Secret = secretRef{Env: "TW_TEST_SECRET", File: ""}
-	sc.HeadersEnv = map[string]string{"Authorization": "TW_TEST_AUTH"}
+	sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil}
+	sc.Secret = secretRef{Env: "TW_TEST_SECRET", File: "", Setec: "", src: nil}
+	sc.Headers = map[string]secretRef{"Authorization": {Env: "TW_TEST_AUTH", File: "", Setec: "", src: nil}}
 	h := realSinkHarness(
 		t,
 		harnessOpts{sinks: []SinkConfig{sc}, stateDir: dir, tags: nil, intake: 0, scripts: nil, clock: nil},
@@ -486,5 +486,37 @@ func TestNoSecretsReachDisk(t *testing.T) {
 				t.Fatalf("%s contains %q", e.Name(), secret)
 			}
 		}
+	}
+}
+
+func TestWebhookSetecURLSecretAndHeader(t *testing.T) {
+	t.Parallel()
+	rc := newReceiver(t)
+	src := mapSource{values: map[string]string{
+		"hook/url":  rc.srv.URL + "/hook/private",
+		"hook/hmac": vectorSecret,
+		"hook/auth": "Bearer abc",
+	}}
+	sc := testSink("hook")
+	sc.URL = secretRef{Env: "", File: "", Setec: "hook/url", src: src}
+	sc.Secret = secretRef{Env: "", File: "", Setec: "hook/hmac", src: src}
+	sc.Headers = map[string]secretRef{"Authorization": {Env: "", File: "", Setec: "hook/auth", src: src}}
+	w := newWebhookSink(sc, newSinkClient(nil))
+	ev := newDownEvent("evt_01JAB3K9T6M4X2Q8R7N5W0YZCD", goldenCollector(), goldenTransition())
+	body, err := w.Render([]Event{ev}, ev.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	res := w.Send(context.Background(), body, sendMeta{ID: ev.ID, At: now})
+	if res.Class != resultOK || res.Status != 200 {
+		t.Fatalf("result %+v", res)
+	}
+	got := rc.request(0)
+	if got.Header.Get("Authorization") != "Bearer abc" {
+		t.Fatalf("Authorization %q", got.Header.Get("Authorization"))
+	}
+	if !verifySignature(vectorSecret, got.Header.Get(signatureHeader), got.Body, now, time.Minute) {
+		t.Fatal("receiver could not verify the setec signature")
 	}
 }

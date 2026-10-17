@@ -217,9 +217,9 @@ func testSink(name string) SinkConfig {
 	return SinkConfig{
 		Name:          name,
 		Type:          sinkWebhook,
-		URL:           secretRef{Env: "", File: ""},
-		Secret:        secretRef{Env: "", File: ""},
-		HeadersEnv:    nil,
+		URL:           secretRef{Env: "", File: "", Setec: "", src: nil},
+		Secret:        secretRef{Env: "", File: "", Setec: "", src: nil},
+		Headers:       nil,
 		MinSeverity:   SeverityInfo,
 		Events:        nil,
 		Match:         MatchConfig{Sites: nil, Targets: nil, Tags: nil},

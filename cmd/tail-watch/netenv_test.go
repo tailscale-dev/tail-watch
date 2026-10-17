@@ -44,3 +44,11 @@ func (f *fakeEnv) LocalClient() *local.Client { return &f.client }
 func (f *fakeEnv) UnprivilegedICMP() bool { return f.unpriv }
 
 var _ netEnv = (*fakeEnv)(nil)
+
+// dialingEnv is a host-network fakeEnv. dial may be nil, in which case
+// Dial uses the real stack. The Client field stays its zero value.
+func dialingEnv(dial func(context.Context, string, string) (net.Conn, error)) *fakeEnv {
+	env := new(fakeEnv)
+	env.dial = dial
+	return env
+}

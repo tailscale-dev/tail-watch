@@ -1018,6 +1018,71 @@ func httpGet(t *testing.T, url string) string {
 	return string(b)
 }
 
+//nolint:paralleltest // run installs a process-wide logger and these tests stub setec startup.
+func TestRunSetecStore(t *testing.T) {
+	previous := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	sock := filepath.Join(t.TempDir(), "missing.sock")
+	target := "targets:\n  - {name: a, addr: 10.0.0.1, checks: [icmp]}\n"
+	t.Run("no setec keys", func(t *testing.T) {
+		called := false
+		stubOpenSetec(t, func(
+			context.Context, netEnv, setecSettings, []string, *slog.Logger,
+		) (*setecStore, error) {
+			called = true
+			return nil, errors.New("setec store must not be built")
+		})
+		path := writeCfg(t, target)
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"--config", path, "--socket", sock}, &stdout, &stderr); code == 0 || called {
+			t.Fatalf("exit %d called %v\n%s", code, called, stderr.String())
+		}
+	})
+	t.Run("unreachable", func(t *testing.T) {
+		withSetecTimeout(t, 500*time.Millisecond)
+		path := writeCfg(t, `
+collector:
+  setec:
+    server: https://127.0.0.1:1
+sinks:
+  - {name: hook, type: webhook, url_setec: prod/hook/url}
+`+target)
+		var stdout, stderr bytes.Buffer
+		start := time.Now()
+		code := run([]string{"--config", path, "--socket", sock}, &stdout, &stderr)
+		if code == 0 || time.Since(start) > 5*time.Second {
+			t.Fatalf("exit %d after %s\n%s", code, time.Since(start), stderr.String())
+		}
+		msg := stderr.String()
+		if !strings.Contains(msg, "prod/hook/url") || !strings.Contains(msg, "127.0.0.1:1") {
+			t.Fatalf("stderr %s", msg)
+		}
+		if strings.Contains(msg, "tailscaled") {
+			t.Fatalf("preflight ran before setec:\n%s", msg)
+		}
+	})
+	t.Run("once", func(t *testing.T) {
+		called := false
+		stubOpenSetec(t, func(
+			context.Context, netEnv, setecSettings, []string, *slog.Logger,
+		) (*setecStore, error) {
+			called = true
+			return nil, errors.New("setec store must not be built")
+		})
+		path := writeCfg(t, `
+collector:
+  setec:
+    server: https://setec.example.ts.net
+sinks:
+  - {name: hook, type: webhook, url_setec: prod/hook/url}
+`+target)
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"--once", "--config", path, "--socket", sock}, &stdout, &stderr); called {
+			t.Fatalf("exit %d\n%s", code, stderr.String())
+		}
+	})
+}
+
 func TestCollectorFromPrefersIPv4(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -57,8 +57,8 @@ exists. This is a project rule, not a preference.
   socket or a shared network namespace, or runs `local_only` with none.
 - **No shared state between collectors.** Each collector decides alone; quorum across
   collectors happens in Alertmanager.
-- **Secrets stay in `*_env` / `*_file` keys.** Sink URLs, HMAC keys and headers are never
-  logged, persisted, returned by the API, or editable from the UI.
+- **Secrets stay in `*_env` / `*_file` / `*_setec` keys.** Sink URLs, HMAC keys and
+  headers are never logged, persisted, returned by the API, or editable from the UI.
 - **No credentials for discovery.** The peer picker uses the local node's view, never the
   Tailscale HTTP API, `tscli` or an API key.
 - **No UI authentication of its own.** Access is the tailnet ACL plus the Origin and

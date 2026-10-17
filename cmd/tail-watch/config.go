@@ -68,6 +68,9 @@ type CollectorConfig struct {
 	// network local, and tailnet targets, tsping checks and the UI are
 	// rejected.
 	LocalOnly bool
+	// Setec is the setec server used by *_setec secret keys. An empty
+	// Server means the config does not use setec.
+	Setec setecSettings
 }
 
 // Target is one monitored device with its checks and resolved timings.
@@ -152,10 +155,17 @@ type rawConfig struct {
 }
 
 type rawCollector struct {
-	Listen    string `yaml:"listen"`
-	StateDir  string `yaml:"state_dir"`
-	UI        *bool  `yaml:"ui"`
-	LocalOnly *bool  `yaml:"local_only"`
+	Listen    string    `yaml:"listen"`
+	StateDir  string    `yaml:"state_dir"`
+	UI        *bool     `yaml:"ui"`
+	LocalOnly *bool     `yaml:"local_only"`
+	Setec     *rawSetec `yaml:"setec"`
+}
+
+// rawSetec is the collector.setec section before validation.
+type rawSetec struct {
+	Server       string       `yaml:"server"`
+	PollInterval yamlDuration `yaml:"poll_interval"`
 }
 
 type rawDefaults struct {
@@ -272,12 +282,14 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 		errs = append(errs, fmt.Errorf("collector.ui: %w", errUILocalOnly))
 	}
 	base := resolveDefaults(&errs, raw.Defaults)
+	var noSetec setecSettings
 	cfg := &Config{
 		Collector: CollectorConfig{
 			Listen:    raw.Collector.Listen,
 			StateDir:  raw.Collector.StateDir,
 			UI:        raw.Collector.UI != nil && *raw.Collector.UI,
 			LocalOnly: localOnly,
+			Setec:     noSetec,
 		},
 		Targets:    nil,
 		Routes:     nil,
@@ -292,6 +304,9 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 	errs = append(errs, targetErrs...)
 	cfg.Targets = targets
 	cfg.Heartbeat = resolveHeartbeat(&errs, raw.Heartbeat)
+	cfg.Collector.Setec = resolveSetec(&errs, raw.Collector)
+	serverSet := raw.Collector.Setec != nil && raw.Collector.Setec.Server != ""
+	rejectSetecKeys(&errs, raw, localOnly, serverSet)
 	return cfg, errs
 }
 

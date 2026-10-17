@@ -15,8 +15,9 @@
 - Collector code is `package main` in `cmd/tail-watch/`: `main.go`, `netenv.go`,
   `config.go`, `checks.go`, `results.go`, `presence.go`, `classify.go`,
   `learn.go`, `alert.go` (plus `alert_emit.go`, `alert_flap.go`,
-  `alert_graph.go`, `alert_target.go`, `alert_log.go`), and `recheck.go`. Tests sit next to
-  that code.
+  `alert_graph.go`, `alert_target.go`, `alert_log.go`), `recheck.go`, and
+  `setec.go` (the in-memory setec store and `collector.setec` validation).
+  Tests sit next to that code.
   The binary is `tail-watch`. Prometheus series use the `tailwatch_` prefix
   because metric names cannot contain a hyphen.
 - The monitor UI is off unless `--ui` or `collector.ui`: `dynamic.go` (`targets.json`
@@ -46,7 +47,8 @@
   falls back to the 30s `Status()` cache only while that view is unseeded.
 - `collector.local_only` runs the collector with no tailscaled (the ProxyGroup
   sidecar placement): `config.go` defaults a network-less target to `local`
-  and rejects `network: tailnet`, `tsping` and the UI; `main.go` then skips
+  and rejects `network: tailnet`, `tsping`, the UI, `collector.setec`, and
+  every `*_setec` key; `main.go` then skips
   the LocalAPI preflight, presence view, resolver binding and dependency
   learner, and takes the identity from `os.Hostname()`, so payloads carry
   `collector.name` and omit `collector.tailscale_ip`. The classifier already
@@ -80,7 +82,7 @@
 - Startup order matters: `newNotifier` (corrupt state or unset secrets stop startup) runs
   in `run()` before the prober; `restoreOpen` runs in `startCollectors` after the alerter
   and classifier exist and before any target is scheduled. `--once` never builds a notifier,
-  resolves secrets, or sends a heartbeat.
+  resolves secrets, builds a setec store, or sends a heartbeat.
 - `alerter.RemoveTarget` refuses a configured target with an open incident but allows a
   DOWN implicit one. The learner removes a restored learned router only after an
   authoritative reconciliation, and the removed dirty snapshot makes the notifier close
@@ -98,7 +100,8 @@
   only pulls from GitHub: `/roadmap sync` links issues as they are filed and never pushes
   `roadmap/*` or `effort/*` labels (`gh` cannot reach this repo anyway).
 - Check a config snippet with `tail-watch check-config`. `check-config` and `--once`
-  do not resolve `*_env` secrets, so it passes with them unset.
+  do not resolve `*_env` or `*_setec` secrets and do not contact a setec server,
+  so check-config passes with them unset.
 
 ## Commits
 
@@ -133,6 +136,12 @@
 - Upgrade only `tailscale.com` (`go get tailscale.com@vX.Y.Z && go mod tidy`).
   Do not run `go get -u ./...`: it moves `gvisor.dev/gvisor` off the commit
   Tailscale pins and the build fails with "found packages stack and bridge".
+- The setec client (`github.com/tailscale/setec`) is a Tailscale-owned module.
+  Add it by name and bump it on its own
+  (`go get github.com/tailscale/setec@<commit> && go mod tidy`).
+  Confirm `gvisor.dev/gvisor` and `tailscale.com` did not move, and that
+  `go list -deps ./cmd/tail-watch` does not link AWS or Tink. Re-check the
+  grant in `docs/how-to/setec-secrets.md` against that commit's `docs/server.md`.
 - When bumping Go, update `mise.toml`, the `go` directive in `go.mod`, and
   `golang:<ver>-alpine` in the `Dockerfile` together.
 
@@ -198,6 +207,15 @@
   `TAIL_WATCH_TEAMS_PULUMI_ENV` (both through `liveSinkURL`); never write them to a file
   or log them (`redactSecrets` strips `hooks.slack.com`, `logic.azure.com` and
   `powerplatform.com` URLs and `sig=` values).
+- `TestLiveSetec` (same gate as `TestLiveNotifications`) runs a setec server in `--dev` mode
+  as a `tag:secrets` tsnet node, built outside this module by `scripts/build-setec.sh`
+  (building it in-module would pull AWS and Tink into `go.mod`). It needs `tag:secrets` and
+  the two grants in `testdata/snippet.hujson` merged into the tailnet policy, and fails at
+  the first auth key with "requested tags [tag:secrets] are invalid" until they are.
+  `live-stack.sh` adds the server only with `TAIL_WATCH_LIVE_SETEC=1`. The setec services
+  use the tailscale image, not alpine: a locally cached `alpine` may be arm64 and `sh` then
+  fails with `exec format error`. Passed live on 2026-10-17 (about 2 minutes). The collector's
+  tailscale node needs `TS_ACCEPT_DNS` on (`TS_LIVE_ACCEPT_DNS`) to resolve its name.
 - `TestLiveTeams` (`TAIL_WATCH_LIVE_TEAMS=1`) posts real cards to a Teams workflow with no
   tailnet. It needs its own gate because operators export `TEAMS_WEBHOOK_URL` to run the
   collector, and `mise run test` must not post to their channel. A Workflows trigger

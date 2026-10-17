@@ -28,6 +28,8 @@ need to do.
 - [Send alerts to Microsoft Teams](how-to/teams-sink.md): Adaptive Cards via a
   Workflows webhook.
 - [Send alerts to a webhook](how-to/webhook-sink.md): signing, batching, retries.
+- [Read secrets from setec](how-to/setec-secrets.md): sink URLs, HMAC keys,
+  and headers from a setec server on the tailnet.
 - [Watch the watcher with a heartbeat](how-to/heartbeat.md)
 - [Troubleshoot](how-to/troubleshoot.md)
 

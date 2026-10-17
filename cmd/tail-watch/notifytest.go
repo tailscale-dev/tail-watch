@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/netip"
 	"os"
 	"strings"
@@ -73,8 +74,29 @@ func runNotifyTestWith(args []string, stdout, stderr io.Writer, deps notifyTestD
 		deps.identity = func(ctx context.Context) (CollectorInfo, error) { return localIdentity(ctx, deps.env) }
 	}
 	col := collectorOrHostname(deps.identity)
-	ctx, cancel := context.WithTimeout(context.Background(), *timeoutFlag)
+	return sendNotifyTests(cfg, selected, col, *timeoutFlag, stdout, stderr, deps)
+}
+
+// sendNotifyTests opens the setec store when the config names one, then sends
+// the test event. A store failure is reported on each selected setec sink's
+// line. Env and file sinks still send.
+func sendNotifyTests(
+	cfg *Config,
+	selected []SinkConfig,
+	col CollectorInfo,
+	timeout time.Duration,
+	stdout, stderr io.Writer,
+	deps notifyTestDeps,
+) int {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	setecLog := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{
+		Level: slog.LevelWarn, AddSource: false, ReplaceAttr: nil,
+	}))
+	st, setecErr := applySetec(ctx, cfg, deps.env, setecLog)
+	if st != nil {
+		defer func() { _ = st.Close() }()
+	}
 	id, err := newID(prefixEvent, deps.clock.Now(), nil)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
@@ -85,6 +107,11 @@ func runNotifyTestWith(args []string, stdout, stderr io.Writer, deps notifyTestD
 	oks := make([]bool, len(selected))
 	var wg sync.WaitGroup
 	for i, sc := range selected {
+		if setecErr != nil && sinkUsesSetec(sc) {
+			lines[i] = fmt.Sprintf("%s %s error: %v", sc.Name, sc.Type, setecErr)
+			oks[i] = false
+			continue
+		}
 		wg.Go(func() {
 			lines[i], oks[i] = sendTest(ctx, sc, col, ev, deps)
 		})

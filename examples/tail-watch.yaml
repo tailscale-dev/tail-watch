@@ -9,6 +9,12 @@ collector:
   state_dir: /var/lib/tail-watch
   # ui: true serves the monitor UI at /ui/ (or run with --ui). It needs state_dir.
   # ui: true
+  # setec reads *_setec secrets from a tailnet setec server. It is commented
+  # out because startup contacts the server, and this file must still start
+  # with only the *_env variables set. See docs/how-to/setec-secrets.md.
+  # setec:
+  #   server: https://secrets.example.ts.net
+  #   poll_interval: 5m
 
 defaults:
   interval: 30s
@@ -61,8 +67,10 @@ targets:
       - tcp:9100
       - "http:http://192.168.1.50/|ready"
 
-# Notifications. Secrets come only from *_env or *_file keys.
+# Notifications. Secrets come from *_env, *_file, or *_setec keys.
 # Try them with: tail-watch notify-test --config examples/tail-watch.yaml
+# A commented ops-setec sink is below. Uncomment it, and collector.setec
+# above, only when that server is reachable. check-config does not contact it.
 sinks:
   - name: ops-webhook
     type: webhook
@@ -90,6 +98,13 @@ sinks:
     status_url: https://monitor-nyc.example.ts.net:9109
     match:
       sites: [nyc, lab]
+
+  # - name: ops-setec
+  #   type: webhook
+  #   url_setec: prod/tail-watch/webhook-url
+  #   secret_setec: prod/tail-watch/webhook-hmac
+  #   min_severity: page
+  #   events: [target.down, target.recovered]
 
 # Pings a dead-man's-switch service so a dead collector still alerts.
 heartbeat:

@@ -173,6 +173,10 @@ Variations, each as a drop-in from `sudo systemctl edit tail-watch`:
 - Secrets in `*_file` keys: instead of the environment file, use a systemd
   credential. Add `LoadCredential=slack-url:/etc/tail-watch/slack-url` and
   point the config at `url_file: /run/credentials/tail-watch.service/slack-url`.
+- Secrets in setec: the collector must be on the tailnet (not
+  `local_only`). Point `collector.setec.server` at the server and name each
+  secret with `*_setec`. Startup fails if the server is unreachable. See
+  [Read secrets from setec](setec-secrets.md).
 - A `state_dir` outside `/var/lib/tail-watch`: `ProtectSystem=strict` makes
   only `StateDirectory` writable, so add `ReadWritePaths=/data/tail-watch`
   (your path) for the directory in `collector.state_dir`.

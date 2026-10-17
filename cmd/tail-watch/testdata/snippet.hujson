@@ -5,6 +5,8 @@
 {
 	"tagOwners": {
 		"tag:monitor": ["autogroup:admin"],
+		// The setec server TestLiveSetec runs as a tsnet node.
+		"tag:secrets": ["autogroup:admin"],
 		// The Kubernetes operator and the ProxyGroup devices it creates, for
 		// TestKindProxyGroup.
 		"tag:k8s-operator": ["autogroup:admin"],
@@ -26,6 +28,26 @@
 			"src": ["tag:monitor"],
 			"dst": ["autogroup:member"],
 			"ip":  ["icmp:*", "tcp:22", "tcp:8080", "tcp:9000"],
+		},
+		// TestLiveSetec: the collector reaches the setec server, and may get, put
+		// and activate under live/ only. The test seeds and rotates its own
+		// secrets from the collector's node, so put and activate are granted.
+		{
+			"src": ["tag:monitor"],
+			"dst": ["tag:secrets"],
+			"ip":  ["*"],
+		},
+		{
+			"src": ["tag:monitor"],
+			"dst": ["tag:secrets"],
+			"app": {
+				"tailscale.com/cap/secrets": [
+					{
+						"action": ["get", "info", "put", "activate"],
+						"secret": ["live/*"],
+					},
+				],
+			},
 		},
 		// Subnet targets, including the test router's 10.10.50.1.
 		{

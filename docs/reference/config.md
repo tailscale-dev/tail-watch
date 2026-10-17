@@ -140,6 +140,18 @@ heartbeat:
 `state_dir` is required when `ui` is on (startup exits with an error otherwise)
 and when any sink sets `queue: disk`. `--once` ignores `ui`.
 
+### `setec`
+
+The server for `*_setec` secret keys. See
+[Read secrets from setec](../how-to/setec-secrets.md). The section is absent
+when omitted. An empty `setec: {}` is also absent. A section that no key uses
+is accepted and does not open a client.
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `server` | string | when any `*_setec` key is set | unset | `https` URL of the setec server, with a host. |
+| `poll_interval` | duration | no | `5m` | How often to poll for new values. At least `1m`. |
+
 ### Local-only mode
 
 With `local_only: true`, tail-watch runs without tailscaled: it makes no
@@ -155,6 +167,9 @@ Local-only mode changes what the loader accepts:
 - A target with `network: tailnet` is rejected.
 - A `tsping` check is rejected.
 - `ui: true` is rejected, and so is the `--ui` flag.
+- `collector.setec` is rejected.
+- `url_setec`, `secret_setec`, `headers_setec`, and `heartbeat.url_setec`
+  are rejected.
 
 Each problem is reported with its key path, and `check-config` applies the same
 rules. A minimal local-only config:
@@ -272,8 +287,9 @@ A sink is a notification destination. For delivery behavior, see
 | --- | --- | --- | --- | --- |
 | `name` | string | yes | | Unique. Must match `[A-Za-z0-9._-]+`. `incidents`, `intake`, and `state` are reserved. |
 | `type` | string | yes | | `webhook`, `slack` or `teams`. |
-| `url_env` | string | one of `url_env`, `url_file` | | Environment variable holding the destination URL. |
-| `url_file` | string | one of `url_env`, `url_file` | | File holding the destination URL. |
+| `url_env` | string | one of `url_env`, `url_file`, `url_setec` | | Environment variable holding the destination URL. |
+| `url_file` | string | one of `url_env`, `url_file`, `url_setec` | | File holding the destination URL. |
+| `url_setec` | string | one of `url_env`, `url_file`, `url_setec` | | setec secret name holding the destination URL. |
 | `min_severity` | string | no | `info` | `info`, `warn`, or `page`. Events below it are not sent. |
 | `events` | list of strings | no | all types | Event types to send. See the list below. |
 | `match` | mapping | no | no filter | Target filters. See below. |
@@ -282,9 +298,10 @@ A sink is a notification destination. For delivery behavior, see
 | `queue_size` | integer | no | `1000` | Maximum events waiting. At least 1. |
 | `group_wait` | duration | no | `10s` | How long to collect events into one request. Greater than 0. |
 
-Exactly one of `url_env` and `url_file` must be set. Values from a file have
-surrounding whitespace trimmed. All secrets are read again on every send, so a
-rotated secret needs no restart.
+Exactly one of `url_env`, `url_file`, and `url_setec` must be set. Values from
+a file or from setec have surrounding whitespace trimmed. All secrets are read
+again on every send. A file or environment value is picked up with no restart.
+A setec value is picked up after the next `collector.setec.poll_interval`.
 
 `group_wait` groups events for a `slack` or `teams` sink, and for a `webhook`
 sink only when `batch` is `true`.
@@ -323,12 +340,15 @@ all must match.
 | --- | --- | --- | --- | --- |
 | `secret_env` | string | no | unset | Environment variable holding the HMAC key. |
 | `secret_file` | string | no | unset | File holding the HMAC key. |
-| `headers_env` | mapping | no | empty | Header name to the name of an environment variable holding its value. |
+| `secret_setec` | string | no | unset | setec secret name holding the HMAC key. |
+| `headers_env` | mapping | no | empty | Header name to the environment variable holding its value. |
+| `headers_setec` | mapping | no | empty | Header name to the setec secret name holding its value. |
 | `batch` | bool | no | `false` | Send several events per request. |
 | `max_batch` | integer | no | `100` | Events per batch at most. At least 1. |
 
-Set at most one of `secret_env` and `secret_file`. Without a secret, requests are
-unsigned and the collector logs a warning at startup. See
+Set at most one of `secret_env`, `secret_file`, and `secret_setec`. A header
+name must not appear in both `headers_env` and `headers_setec`. Without a
+secret, requests are unsigned and the collector logs a warning at startup. See
 [Event payload](payload.md) for the signature and batch envelope.
 
 ### Slack-only keys
@@ -338,8 +358,9 @@ unsigned and the collector logs a warning at startup. See
 | `mention_on_page` | string | no | empty | Text prepended to a `target.down` of severity `page`, such as `<!subteam^S0123ABC>`. |
 | `status_url` | string | no | empty | Base URL. Each target line links to `<status_url>/#<target>`. |
 
-A `slack` sink rejects `batch`, `max_batch`, `secret_env`, `secret_file`, and
-`headers_env`. A `webhook` sink rejects `mention_on_page` and `status_url`.
+A `slack` sink rejects `batch`, `max_batch`, `secret_env`, `secret_file`,
+`secret_setec`, `headers_env`, and `headers_setec`. A `webhook` sink rejects
+`mention_on_page` and `status_url`.
 
 ### Teams-only keys
 
@@ -348,8 +369,9 @@ A `slack` sink rejects `batch`, `max_batch`, `secret_env`, `secret_file`, and
 | `status_url` | string | no | empty | Base URL. Each target's name links to `<status_url>/#<target>`. |
 
 A `teams` sink rejects `batch`, `max_batch`, `secret_env`, `secret_file`,
-`headers_env` and `mention_on_page`. A route's `mention` is not printed on a
-Teams card. See [Send alerts to Microsoft Teams](../how-to/teams-sink.md).
+`secret_setec`, `headers_env`, `headers_setec`, and `mention_on_page`. A
+route's `mention` is not printed on a Teams card. See
+[Send alerts to Microsoft Teams](../how-to/teams-sink.md).
 
 ## `heartbeat`
 
@@ -357,8 +379,9 @@ Pings a dead-man's-switch URL with `GET`. The section is off when omitted.
 
 | Key | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `url_env` | string | one of `url_env`, `url_file` | | Environment variable holding the URL. |
-| `url_file` | string | one of `url_env`, `url_file` | | File holding the URL. |
+| `url_env` | string | one of `url_env`, `url_file`, `url_setec` | | Environment variable holding the URL. |
+| `url_file` | string | one of `url_env`, `url_file`, `url_setec` | | File holding the URL. |
+| `url_setec` | string | one of `url_env`, `url_file`, `url_setec` | | setec secret name holding the URL. |
 | `interval` | duration | no | `1m` | Time between pings. Greater than 0. |
 
 Pings start once every target and check has a first result. Each request times
@@ -368,8 +391,10 @@ out after 10s, and a non-2xx response or an error is counted in
 
 ## Secret resolution
 
-At server startup, every `url_env`, `url_file`, `secret_env`, `secret_file`,
-`headers_env` value, and the heartbeat URL must resolve to a non-empty value, or
-startup exits with an error. `check-config` and `--once` do not resolve secrets.
-`check-config` prints each sink's name, type, filters, and queue mode, and never a
-secret.
+At server startup, every `url_env`, `url_file`, `url_setec`, `secret_env`,
+`secret_file`, `secret_setec`, `headers_env` value, `headers_setec` value, and
+the heartbeat URL must resolve to a non-empty value, or startup exits with an
+error. `check-config` and `--once` do not resolve secrets and do not contact a
+setec server. `check-config` prints each sink's name, type, filters, and queue
+mode, and never a secret value. A `url_setec` sink also prints
+`url=setec:<name>`. See [Read secrets from setec](../how-to/setec-secrets.md).

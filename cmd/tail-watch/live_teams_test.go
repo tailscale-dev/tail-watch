@@ -41,7 +41,7 @@ func TestLiveTeams(t *testing.T) {
 	}
 
 	sc := teamsSinkCfg(func(sc *SinkConfig) {
-		sc.URL = secretRef{Env: liveTeamsEnvVar, File: ""}
+		sc.URL = secretRef{Env: liveTeamsEnvVar, File: "", Setec: "", src: nil}
 		sc.StatusURL = "https://monitor-nyc.example.ts.net:9109"
 	})
 	s := newTeamsSink(sc, goldenCollector(), newSinkClient(nil))

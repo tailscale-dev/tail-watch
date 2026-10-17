@@ -302,7 +302,7 @@ func TestTeamsEnvelope(t *testing.T) {
 func TestTeamsBadRequestIsPermanent(t *testing.T) {
 	rc := newReceiver(t, 400)
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
-	sc := teamsSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: ""} })
+	sc := teamsSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil} })
 	h := realSinkHarness(
 		t,
 		harnessOpts{sinks: []SinkConfig{sc}, stateDir: "", tags: nil, intake: 0, scripts: nil, clock: nil},
@@ -324,7 +324,7 @@ func TestTeamsRetryAfterThroughRealSink(t *testing.T) {
 	rc := newReceiver(t, 429, 200)
 	rc.extra[1] = func(w http.ResponseWriter) { w.Header().Set("Retry-After", "2") }
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
-	sc := teamsSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: ""} })
+	sc := teamsSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil} })
 	h := realSinkHarness(
 		t,
 		harnessOpts{sinks: []SinkConfig{sc}, stateDir: "", tags: nil, intake: 0, scripts: nil, clock: nil},
@@ -368,7 +368,7 @@ func TestTeamsErrorRedactsURL(t *testing.T) {
 func TestTeamsGroupsBurstIntoOneCard(t *testing.T) {
 	rc := newReceiver(t)
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
-	sc := teamsSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: ""} })
+	sc := teamsSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil} })
 	h := realSinkHarness(
 		t,
 		harnessOpts{sinks: []SinkConfig{sc}, stateDir: "", tags: nil, intake: 0, scripts: nil, clock: nil},
@@ -424,7 +424,7 @@ func TestTeamsSendsAtMostOnePerSecond(t *testing.T) {
 	rc := newReceiver(t, 200, 200)
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
 	sc := teamsSinkCfg(func(sc *SinkConfig) {
-		sc.URL = secretRef{Env: "TW_TEST_URL", File: ""}
+		sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil}
 		sc.GroupWait = 600 * time.Millisecond
 	})
 	h := realSinkHarness(
@@ -451,4 +451,21 @@ func TestTeamsSendsAtMostOnePerSecond(t *testing.T) {
 	}
 	h.clock.Advance(time.Second)
 	eventually(t, func() bool { return rc.count() == 2 })
+}
+
+func TestTeamsSetecURL(t *testing.T) {
+	t.Parallel()
+	rc := newReceiver(t)
+	sc := teamsSinkCfg(func(sc *SinkConfig) {
+		sc.URL = secretRef{
+			Env: "", File: "", Setec: "teams/url",
+			src: mapSource{values: map[string]string{"teams/url": rc.srv.URL}},
+		}
+	})
+	s := newTeamsSink(sc, goldenCollector(), newSinkClient(nil))
+	body := renderTeamsJSON(t, []Event{newDownEvent("evt_D1", goldenCollector(), goldenTransition())}, sc)
+	res := s.Send(context.Background(), body, sendMeta{ID: "evt_D1", At: time.Now()})
+	if res.Class != resultOK || rc.count() != 1 {
+		t.Fatalf("result %+v requests %d", res, rc.count())
+	}
 }

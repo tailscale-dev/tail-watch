@@ -22,6 +22,8 @@ x-fixture-env: &fixture-env
 
 services:
   tailscale:
+    environment:
+      TS_ACCEPT_DNS: ${TS_LIVE_ACCEPT_DNS:-false}
     extra_hosts:
       - host.docker.internal:host-gateway
 
@@ -87,6 +89,34 @@ services:
       TS_AUTHKEY: ${TS_KEY_HTTP:?}
       TS_HOSTNAME: ${TS_FX_PREFIX:?}-http
 
+  # A setec server in --dev mode (dummy KMS), a tsnet node of its own. The tag in
+  # TS_KEY_SETEC must be the grant's destination (tag:secrets by default). The
+  # binary comes from scripts/build-setec.sh. Needed only when the service is
+  # started, so the defaults keep the other live tests' compose parse working.
+  setec:
+    image: tailscale/tailscale:v1.102.5
+    hostname: ${TS_FX_PREFIX:?}-setec
+    entrypoint:
+      - /setec
+      - server
+      - --hostname=${TS_FX_PREFIX:?}-setec
+      - --state-dir=/state
+      - --dev
+    environment:
+      TS_AUTHKEY: ${TS_KEY_SETEC:-unset}
+    volumes:
+      - ${SETEC_BIN:-/dev/null}:/setec:ro
+      - setec-state:/state
+
+  # The setec CLI in the collector's network namespace, so its requests carry
+  # the collector's tailnet identity. Used to seed and rotate secrets.
+  setec-cli:
+    image: tailscale/tailscale:v1.102.5
+    network_mode: service:tailscale
+    entrypoint: [sh]
+    volumes:
+      - ${SETEC_BIN:-/dev/null}:/setec:ro
+
   lan-router:
     <<: *fixture
     hostname: ${TS_FX_PREFIX:?}-lan
@@ -106,3 +136,4 @@ services:
 
 volumes:
   notify-state:
+  setec-state:

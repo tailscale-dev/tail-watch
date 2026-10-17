@@ -53,8 +53,8 @@ func (w *webhookSink) Send(ctx context.Context, body []byte, m sendMeta) deliver
 	} else {
 		headers["Tail-Watch-Event-Id"] = m.ID
 	}
-	for name, env := range w.cfg.HeadersEnv {
-		v, headerErr := (secretRef{Env: env, File: ""}).resolve()
+	for name, ref := range w.cfg.Headers {
+		v, headerErr := ref.resolve()
 		if headerErr != nil {
 			return secretUnavailable(fmt.Errorf("sink %s: header %s: %w", w.cfg.Name, name, headerErr))
 		}

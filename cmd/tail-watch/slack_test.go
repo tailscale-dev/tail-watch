@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -299,7 +300,7 @@ func TestSlackEscapesUserText(t *testing.T) {
 func TestSlackGroupsBurstIntoOneMessage(t *testing.T) {
 	rc := newReceiver(t)
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
-	sc := slackSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: ""} })
+	sc := slackSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil} })
 	h := realSinkHarness(
 		t,
 		harnessOpts{sinks: []SinkConfig{sc}, stateDir: "", tags: nil, intake: 0, scripts: nil, clock: nil},
@@ -365,7 +366,7 @@ func TestSlackRetryAfterThroughRealSink(t *testing.T) {
 	rc := newReceiver(t, 429, 200)
 	rc.extra[1] = func(w http.ResponseWriter) { w.Header().Set("Retry-After", "2") }
 	t.Setenv("TW_TEST_URL", rc.srv.URL)
-	sc := slackSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: ""} })
+	sc := slackSinkCfg(func(sc *SinkConfig) { sc.URL = secretRef{Env: "TW_TEST_URL", File: "", Setec: "", src: nil} })
 	h := realSinkHarness(
 		t,
 		harnessOpts{sinks: []SinkConfig{sc}, stateDir: "", tags: nil, intake: 0, scripts: nil, clock: nil},
@@ -462,5 +463,22 @@ func TestSlackRouteMentions(t *testing.T) {
 	if !strings.HasPrefix(group, "<!a>\n<!b>\n") || strings.Count(group, "<!a>") != 1 ||
 		strings.Count(group, "<!b>") != 1 {
 		t.Fatalf("group mentions %q", group)
+	}
+}
+
+func TestSlackSetecURL(t *testing.T) {
+	t.Parallel()
+	rc := newReceiver(t)
+	sc := slackSinkCfg(func(sc *SinkConfig) {
+		sc.URL = secretRef{
+			Env: "", File: "", Setec: "slack/url",
+			src: mapSource{values: map[string]string{"slack/url": rc.srv.URL}},
+		}
+	})
+	s := newSlackSink(sc, goldenCollector(), newSinkClient(nil))
+	body := renderJSON(t, []Event{newDownEvent("evt_D1", goldenCollector(), goldenTransition())}, sc)
+	res := s.Send(context.Background(), body, sendMeta{ID: "evt_D1", At: time.Now()})
+	if res.Class != resultOK || rc.count() != 1 {
+		t.Fatalf("result %+v requests %d", res, rc.count())
 	}
 }

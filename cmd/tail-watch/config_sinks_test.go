@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,7 +62,7 @@ func TestParseDesignSinks(t *testing.T) {
 	}
 	wh := cfg.Sinks[0]
 	if wh.Queue != queueDisk || !wh.Batch || wh.MinSeverity != SeverityPage || wh.URL.Env != "OPS_WEBHOOK_URL" ||
-		wh.HeadersEnv["Authorization"] != "OPS_WEBHOOK_AUTH" || len(wh.Events) != 2 {
+		wh.Headers["Authorization"].Env != "OPS_WEBHOOK_AUTH" || len(wh.Events) != 2 {
 		t.Fatalf("webhook: %+v", wh)
 	}
 	sl := cfg.Sinks[1]
@@ -129,16 +132,21 @@ func TestSinkValidation(t *testing.T) {
 		{"reserved intake", "sinks:\n  - {name: intake, type: slack, url_env: U}", "reserved"},
 		{"reserved state", "sinks:\n  - {name: state, type: slack, url_env: U}", "reserved"},
 		{"unknown type", "sinks:\n  - {name: a, type: pagerduty, url_env: U}", "must be webhook, slack or teams"},
-		{"no url", "sinks:\n  - {name: a, type: slack}", "exactly one of url_env or url_file"},
+		{"no url", "sinks:\n  - {name: a, type: slack}", "exactly one of url_env, url_file or url_setec"},
 		{
 			"two urls",
 			"sinks:\n  - {name: a, type: slack, url_env: U, url_file: /f}",
-			"exactly one of url_env or url_file",
+			"exactly one of url_env, url_file or url_setec",
+		},
+		{
+			"two urls name the keys",
+			"sinks:\n  - {name: a, type: slack, url_env: U, url_setec: s}",
+			"url_env and url_setec are set",
 		},
 		{
 			"teams two urls",
 			"sinks:\n  - {name: a, type: teams, url_env: U, url_file: /f}",
-			"exactly one of url_env or url_file",
+			"exactly one of url_env, url_file or url_setec",
 		},
 		{
 			"slack batch",
@@ -201,7 +209,7 @@ func TestSinkValidation(t *testing.T) {
 		},
 		{"bad glob", "sinks:\n  - {name: a, type: webhook, url_env: U, match: {targets: ['[']}}", "invalid glob"},
 		{"bad severity", "sinks:\n  - {name: a, type: webhook, url_env: U, min_severity: loud}", "min_severity"},
-		{"heartbeat no url", "heartbeat:\n  interval: 1m", "exactly one of url_env or url_file"},
+		{"heartbeat no url", "heartbeat:\n  interval: 1m", "exactly one of url_env, url_file or url_setec"},
 		{"heartbeat interval", "heartbeat:\n  url_env: H\n  interval: 0s", "interval must be positive"},
 	}
 	for _, tt := range tests {
@@ -373,12 +381,22 @@ func TestSecretRefResolve(t *testing.T) {
 		want string
 		err  string
 	}{
-		{"env", secretRef{Env: "TW_SECRET", File: ""}, "s3cret", ""},
-		{"file trimmed", secretRef{Env: "", File: file}, "from-file", ""},
-		{"unset env", secretRef{Env: "TW_UNSET_NOPE", File: ""}, "", "TW_UNSET_NOPE is unset or empty"},
-		{"empty env", secretRef{Env: "TW_EMPTY", File: ""}, "", "TW_EMPTY is unset or empty"},
-		{"unreadable file", secretRef{Env: "", File: filepath.Join(dir, "missing")}, "", "secret file"},
-		{"empty file", secretRef{Env: "", File: empty}, "", "is empty"},
+		{"env", secretRef{Env: "TW_SECRET", File: "", Setec: "", src: nil}, "s3cret", ""},
+		{"file trimmed", secretRef{Env: "", File: file, Setec: "", src: nil}, "from-file", ""},
+		{
+			"unset env",
+			secretRef{Env: "TW_UNSET_NOPE", File: "", Setec: "", src: nil},
+			"",
+			"TW_UNSET_NOPE is unset or empty",
+		},
+		{"empty env", secretRef{Env: "TW_EMPTY", File: "", Setec: "", src: nil}, "", "TW_EMPTY is unset or empty"},
+		{
+			"unreadable file",
+			secretRef{Env: "", File: filepath.Join(dir, "missing"), Setec: "", src: nil},
+			"",
+			"secret file",
+		},
+		{"empty file", secretRef{Env: "", File: empty, Setec: "", src: nil}, "", "is empty"},
 	}
 	for _, tt := range tests {
 		got, err := tt.ref.resolve()
@@ -480,5 +498,311 @@ heartbeat:
 		if strings.Contains(out, secret) {
 			t.Fatalf("output leaks %q:\n%s", secret, out)
 		}
+	}
+}
+
+//nolint:gocognit // Each subtest is one source-validation case.
+func TestSetecSinkSources(t *testing.T) {
+	t.Parallel()
+	const head = "collector:\n  setec:\n    server: https://setec.example.ts.net\n" +
+		"targets:\n  - {name: nas, addr: 10.0.0.1, checks: [icmp]}\n"
+	t.Run("each source alone", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig([]byte(head + `
+sinks:
+  - {name: from-setec, type: slack, url_setec: tail-watch/slack-url}
+  - name: from-env
+    type: webhook
+    url_env: OPS_URL
+    secret_setec: hook/hmac
+    headers_setec: {Authorization: hook/auth}
+heartbeat:
+  url_setec: hb/url
+`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Sinks[0].URL.Setec != "tail-watch/slack-url" || cfg.Sinks[0].URL.Env != "" {
+			t.Fatalf("slack url %+v", cfg.Sinks[0].URL)
+		}
+		if cfg.Sinks[1].URL.Env != "OPS_URL" || cfg.Sinks[1].Secret.Setec != "hook/hmac" {
+			t.Fatalf("webhook %+v secret %+v", cfg.Sinks[1].URL, cfg.Sinks[1].Secret)
+		}
+		if cfg.Sinks[1].Headers["Authorization"].Setec != "hook/auth" {
+			t.Fatalf("header %+v", cfg.Sinks[1].Headers)
+		}
+		if cfg.Heartbeat == nil || cfg.Heartbeat.URL.Setec != "hb/url" {
+			t.Fatalf("heartbeat %+v", cfg.Heartbeat)
+		}
+	})
+	t.Run("two url sources", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte(head +
+			"sinks:\n  - {name: ops, type: webhook, url_env: OPS_URL, url_setec: ops-url}\n"))
+		if err == nil || !strings.Contains(err.Error(), "sink ops") ||
+			!strings.Contains(err.Error(), "url_env") || !strings.Contains(err.Error(), "url_setec") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("two secret sources", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte(head +
+			"sinks:\n  - {name: ops, type: webhook, url_env: U, secret_env: S, secret_setec: hook/hmac}\n"))
+		if err == nil || !strings.Contains(err.Error(), "secret_env") ||
+			!strings.Contains(err.Error(), "secret_setec") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("secret_setec on slack", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte(head + "sinks:\n  - {name: ops, type: slack, url_setec: u, secret_setec: s}\n"))
+		if err == nil || !strings.Contains(err.Error(), "secret_setec is not valid") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("headers_setec on teams", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte(head +
+			"sinks:\n  - {name: ops, type: teams, url_env: U, headers_setec: {Authorization: s}}\n"))
+		if err == nil || !strings.Contains(err.Error(), "headers_setec is not valid") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("header in both maps", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseConfig([]byte(head + `
+sinks:
+  - name: ops
+    type: webhook
+    url_env: U
+    headers_env: {Authorization: TOK}
+    headers_setec: {Authorization: hook/auth}
+`))
+		if err == nil || !strings.Contains(err.Error(), "sink ops") ||
+			!strings.Contains(err.Error(), "Authorization") ||
+			!strings.Contains(err.Error(), "headers_env") || !strings.Contains(err.Error(), "headers_setec") {
+			t.Fatalf("got %v", err)
+		}
+	})
+}
+
+func TestSecretRefSetec(t *testing.T) {
+	t.Parallel()
+	src := mapSource{values: map[string]string{
+		"hook/url":    "  https://example.test/hook  ",
+		"hook/empty":  "  ",
+		"hook/secret": "top-secret-value",
+	}}
+	tests := []struct {
+		name string
+		ref  secretRef
+		want string
+		err  string
+	}{
+		{"value", secretRef{Env: "", File: "", Setec: "hook/url", src: src}, "https://example.test/hook", ""},
+		{"unbound", secretRef{Env: "", File: "", Setec: "hook/url", src: nil}, "", "setec is not configured"},
+		{"missing", secretRef{Env: "", File: "", Setec: "missing", src: src}, "", "setec: secret not found: missing"},
+		{"empty", secretRef{Env: "", File: "", Setec: "hook/empty", src: src}, "", "is empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := tt.ref.resolve()
+			if tt.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.err) ||
+					strings.Contains(err.Error(), "top-secret-value") {
+					t.Fatalf("got %q %v", got, err)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("got %q %v", got, err)
+			}
+		})
+	}
+}
+
+func TestBindSecretsReachesEveryRef(t *testing.T) {
+	t.Parallel()
+	cfg, err := parseConfig([]byte(`
+collector:
+  setec:
+    server: https://setec.example.ts.net
+targets:
+  - {name: nas, addr: 10.0.0.1, checks: [icmp]}
+sinks:
+  - name: hook
+    type: webhook
+    url_setec: hook/url
+    secret_setec: hook/secret
+    headers_setec: {Authorization: hook/auth}
+heartbeat:
+  url_setec: hb/url
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, unbound := cfg.Sinks[0].URL.resolve()
+	if unbound == nil || !strings.Contains(unbound.Error(), "setec is not configured") {
+		t.Fatalf("unbound %v", unbound)
+	}
+	cfg.bindSecrets(mapSource{values: map[string]string{
+		"hook/url":    "https://example.test/hook",
+		"hook/secret": "hmac",
+		"hook/auth":   "Bearer t",
+		"hb/url":      "https://example.test/hb",
+	}})
+	got := map[string]string{}
+	for _, pair := range []struct {
+		name string
+		ref  secretRef
+	}{
+		{"url", cfg.Sinks[0].URL},
+		{"secret", cfg.Sinks[0].Secret},
+		{"header", cfg.Sinks[0].Headers["Authorization"]},
+		{"heartbeat", cfg.Heartbeat.URL},
+	} {
+		v, resolveErr := pair.ref.resolve()
+		if resolveErr != nil {
+			t.Fatalf("%s: %v", pair.name, resolveErr)
+		}
+		got[pair.name] = v
+	}
+	if got["url"] != "https://example.test/hook" || got["secret"] != "hmac" ||
+		got["header"] != "Bearer t" || got["heartbeat"] != "https://example.test/hb" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestCheckSecretsSetec(t *testing.T) {
+	t.Parallel()
+	load := func(t *testing.T) *Config {
+		t.Helper()
+		cfg, err := parseConfig([]byte(`
+collector:
+  setec:
+    server: https://setec.example.ts.net
+targets:
+  - {name: nas, addr: 10.0.0.1, checks: [icmp]}
+sinks:
+  - name: hook
+    type: webhook
+    url_setec: hook/url
+    secret_setec: hook/secret
+    headers_setec: {Authorization: hook/auth}
+heartbeat:
+  url_setec: hb/url
+`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	t.Run("missing", func(t *testing.T) {
+		t.Parallel()
+		cfg := load(t)
+		cfg.bindSecrets(mapSource{values: map[string]string{}})
+		err := cfg.resolveSecrets()
+		for _, want := range []string{
+			"sink hook: url:", "hook/url", "sink hook: secret:", "hook/secret",
+			"header Authorization", "hook/auth", "heartbeat:", "hb/url",
+		} {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("missing %q in %v", want, err)
+			}
+		}
+		if strings.Contains(err.Error(), "top-secret-value") {
+			t.Fatalf("value leaked: %v", err)
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
+		cfg := load(t)
+		cfg.bindSecrets(mapSource{values: map[string]string{
+			"hook/url": "  ", "hook/secret": "hmac", "hook/auth": "Bearer t", "hb/url": "https://example.test/hb",
+		}})
+		err := cfg.Sinks[0].checkSecrets()
+		if err == nil || !strings.Contains(err.Error(), "sink hook: url:") ||
+			!strings.Contains(err.Error(), "hook/url is empty") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		cfg := load(t)
+		cfg.bindSecrets(mapSource{values: map[string]string{
+			"hook/url": "https://example.test/hook", "hook/secret": "top-secret-value",
+			"hook/auth": "Bearer t", "hb/url": "https://example.test/hb",
+		}})
+		if err := cfg.resolveSecrets(); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+//nolint:gocognit,paralleltest // Stubs the process-wide constructor; each subtest is one check-config case.
+func TestCheckConfigSetec(t *testing.T) {
+	called := false
+	stubOpenSetec(t, func(
+		context.Context, netEnv, setecSettings, []string, *slog.Logger,
+	) (*setecStore, error) {
+		called = true
+		return nil, errors.New("setec store must not be built")
+	})
+	const target = "targets:\n  - {name: nas, addr: 10.0.0.1, checks: [icmp]}\n"
+	t.Run("prints the name offline", func(t *testing.T) {
+		path := writeCfg(t, "collector:\n  setec:\n    server: https://setec.example.ts.net\n"+target+
+			"sinks:\n  - {name: ops, type: slack, url_setec: tail-watch/slack-url}\n")
+		var stdout, stderr strings.Builder
+		if code := run([]string{"check-config", "--config", path}, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "url=setec:tail-watch/slack-url") {
+			t.Fatalf("stdout %s", stdout.String())
+		}
+		if strings.Contains(stdout.String(), "https://hooks.example") {
+			t.Fatalf("printed a value:\n%s", stdout.String())
+		}
+	})
+	t.Run("local only", func(t *testing.T) {
+		path := writeCfg(t, `
+collector: {local_only: true, setec: {server: https://setec.example.ts.net}}
+targets:
+  - {name: web, addr: web.apps.svc, checks: ['tcp:443']}
+sinks:
+  - {name: ops, type: webhook, url_setec: hook/url}
+`)
+		var stdout, stderr strings.Builder
+		if code := run([]string{"check-config", "--config", path}, &stdout, &stderr); code != 1 {
+			t.Fatalf("exit %d\n%s", code, stderr.String())
+		}
+		for _, want := range []string{
+			"collector.setec", "sinks[0].url_setec", "sink ops", "unavailable in local-only mode",
+		} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Errorf("missing %q in %s", want, stderr.String())
+			}
+		}
+	})
+	t.Run("missing server", func(t *testing.T) {
+		path := writeCfg(t, target+"sinks:\n  - {name: ops, type: slack, url_setec: tail-watch/slack-url}\n")
+		var stdout, stderr strings.Builder
+		if code := run([]string{"check-config", "--config", path}, &stdout, &stderr); code != 1 {
+			t.Fatalf("exit %d\n%s", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "url_setec") ||
+			!strings.Contains(stderr.String(), "collector.setec.server") {
+			t.Fatalf("stderr %s", stderr.String())
+		}
+	})
+	t.Run("unused section", func(t *testing.T) {
+		path := writeCfg(t, "collector:\n  setec:\n    server: https://setec.example.ts.net\n"+target)
+		var stdout, stderr strings.Builder
+		if code := run([]string{"check-config", "--config", path}, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr.String())
+		}
+	})
+	if called {
+		t.Fatal("check-config built a setec store")
 	}
 }

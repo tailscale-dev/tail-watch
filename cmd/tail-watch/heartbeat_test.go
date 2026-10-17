@@ -93,3 +93,26 @@ func TestHeartbeatStopsOnShutdown(t *testing.T) {
 		t.Fatal("heartbeat pinged after shutdown")
 	}
 }
+
+func TestHeartbeatSetecURL(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method %s", r.Method)
+		}
+		hits.Add(1)
+	}))
+	defer srv.Close()
+	hb := newHeartbeat(HeartbeatConfig{
+		URL: secretRef{
+			Env: "", File: "", Setec: "hb/url",
+			src: mapSource{values: map[string]string{"hb/url": srv.URL + "/ping"}},
+		},
+		Interval: time.Minute,
+	}, newCountingClock(), discardLog(), nil, nil, prometheus.NewRegistry())
+	hb.ping(context.Background())
+	if hits.Load() != 1 {
+		t.Fatalf("pings %d", hits.Load())
+	}
+}

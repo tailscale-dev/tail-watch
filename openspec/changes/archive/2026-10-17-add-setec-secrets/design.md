@@ -60,7 +60,7 @@ Tailscale" section that names setec as the secrets source, so no exception
 needs recording here. The cost is small because setec is
 Tailscale's own and its `go.mod` requires `tailscale.com` and Go versions at or
 below ours (checked against `main`: `tailscale.com v1.102.3`, `go 1.26.6`, ours
-are `v1.102.5` and `1.27.1`), so minimum version selection should keep our
+are `v1.102.5` and `1.27.2`), so minimum version selection should keep our
 pins. Two things are unverified until `go get` runs, and task 1.1 gates on
 them: that the client package pulls in `creachadair/msync` and
 `creachadair/mds` but not the AWS or Tink modules the server uses, and that

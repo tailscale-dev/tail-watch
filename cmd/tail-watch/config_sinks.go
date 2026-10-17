@@ -69,15 +69,49 @@ func (s Severity) rank() int {
 	}
 }
 
-// secretRef names where a secret value lives. Exactly one field is set.
+// secretRef names where a secret value lives. Exactly one of Env, File and
+// Setec is set. src is the setec store bound at startup; env and file refs
+// ignore it.
 type secretRef struct {
-	Env  string
-	File string
+	Env   string
+	File  string
+	Setec string
+	src   secretSource
 }
 
-func (r secretRef) isSet() bool { return r.Env != "" || r.File != "" }
+func (r secretRef) isSet() bool { return r.Env != "" || r.File != "" || r.Setec != "" }
 
-// resolve reads the current secret value. File values are whitespace trimmed.
+// setSourcesNote names the keys that are set when more than one source is
+// given, as ": url_env and url_file are set". It is empty for zero or one.
+func setSourcesNote(prefix, env, file, setec string) string {
+	var keys []string
+	for _, k := range []struct{ suffix, val string }{{"env", env}, {"file", file}, {"setec", setec}} {
+		if k.val != "" {
+			keys = append(keys, prefix+"_"+k.suffix)
+		}
+	}
+	if len(keys) <= 1 {
+		return ""
+	}
+	return ": " + strings.Join(keys, " and ") + " are set"
+}
+
+func secretSourceCount(env, file, setec string) int {
+	n := 0
+	if env != "" {
+		n++
+	}
+	if file != "" {
+		n++
+	}
+	if setec != "" {
+		n++
+	}
+	return n
+}
+
+// resolve reads the current secret value. File and setec values are
+// whitespace trimmed. A setec ref with no bound store is an error.
 func (r secretRef) resolve() (string, error) {
 	switch {
 	case r.Env != "":
@@ -96,6 +130,11 @@ func (r secretRef) resolve() (string, error) {
 			return "", fmt.Errorf("secret file %s is empty", r.File)
 		}
 		return v, nil
+	case r.Setec != "":
+		if r.src == nil {
+			return "", errors.New("setec is not configured")
+		}
+		return r.src.get(r.Setec)
 	default:
 		return "", errors.New("no secret source configured")
 	}
@@ -119,11 +158,12 @@ type MatchConfig struct {
 
 // SinkConfig is one resolved notification sink.
 type SinkConfig struct {
-	Name          string
-	Type          string
-	URL           secretRef
-	Secret        secretRef
-	HeadersEnv    map[string]string
+	Name   string
+	Type   string
+	URL    secretRef
+	Secret secretRef
+	// Headers maps a header name to the secret holding its value.
+	Headers       map[string]secretRef
 	MinSeverity   Severity
 	Events        []EventType
 	Match         MatchConfig
@@ -154,9 +194,12 @@ type rawSink struct {
 	Type          string            `yaml:"type"`
 	URLEnv        string            `yaml:"url_env"`
 	URLFile       string            `yaml:"url_file"`
+	URLSetec      string            `yaml:"url_setec"`
 	SecretEnv     string            `yaml:"secret_env"`
 	SecretFile    string            `yaml:"secret_file"`
+	SecretSetec   string            `yaml:"secret_setec"`
 	HeadersEnv    map[string]string `yaml:"headers_env"`
+	HeadersSetec  map[string]string `yaml:"headers_setec"`
 	MinSeverity   string            `yaml:"min_severity"`
 	Events        []string          `yaml:"events"`
 	Match         rawMatch          `yaml:"match"`
@@ -173,6 +216,7 @@ type rawSink struct {
 type rawHeartbeat struct {
 	URLEnv   string       `yaml:"url_env"`
 	URLFile  string       `yaml:"url_file"`
+	URLSetec string       `yaml:"url_setec"`
 	Interval yamlDuration `yaml:"interval"`
 }
 
@@ -199,9 +243,9 @@ func resolveSink(errs *[]error, i int, rs rawSink, stateDir string, seen map[str
 	s := SinkConfig{
 		Name:          rs.Name,
 		Type:          rs.Type,
-		URL:           secretRef{Env: rs.URLEnv, File: rs.URLFile},
-		Secret:        secretRef{Env: rs.SecretEnv, File: rs.SecretFile},
-		HeadersEnv:    rs.HeadersEnv,
+		URL:           secretRef{Env: rs.URLEnv, File: rs.URLFile, Setec: rs.URLSetec, src: nil},
+		Secret:        secretRef{Env: rs.SecretEnv, File: rs.SecretFile, Setec: rs.SecretSetec, src: nil},
+		Headers:       nil,
 		MinSeverity:   SeverityInfo,
 		Events:        nil,
 		Match:         MatchConfig{Sites: rs.Match.Sites, Targets: rs.Match.Targets, Tags: rs.Match.Tags},
@@ -233,12 +277,15 @@ func resolveSink(errs *[]error, i int, rs rawSink, stateDir string, seen map[str
 	default:
 		fail("type", "type %q must be webhook, slack or teams", rs.Type)
 	}
-	if (rs.URLEnv == "") == (rs.URLFile == "") {
-		fail("url", "exactly one of url_env or url_file is required")
+	if secretSourceCount(rs.URLEnv, rs.URLFile, rs.URLSetec) != 1 {
+		fail("url", "exactly one of url_env, url_file or url_setec is required%s",
+			setSourcesNote("url", rs.URLEnv, rs.URLFile, rs.URLSetec))
 	}
-	if rs.SecretEnv != "" && rs.SecretFile != "" {
-		fail("secret", "set only one of secret_env or secret_file")
+	if secretSourceCount(rs.SecretEnv, rs.SecretFile, rs.SecretSetec) > 1 {
+		fail("secret", "set only one of secret_env, secret_file or secret_setec%s",
+			setSourcesNote("secret", rs.SecretEnv, rs.SecretFile, rs.SecretSetec))
 	}
+	s.Headers = resolveHeaders(fail, rs.HeadersEnv, rs.HeadersSetec)
 	resolveSinkTypeKeys(fail, rs)
 	resolveSinkFilters(fail, rs, &s)
 	resolveSinkLimits(errs, fail, loc, rs, &s, stateDir)
@@ -256,7 +303,9 @@ func resolveSinkTypeKeys(fail func(key, format string, args ...any), rs rawSink)
 			{"max_batch", rs.MaxBatch != nil},
 			{"secret_env", rs.SecretEnv != ""},
 			{"secret_file", rs.SecretFile != ""},
+			{"secret_setec", rs.SecretSetec != ""},
 			{"headers_env", len(rs.HeadersEnv) > 0},
+			{"headers_setec", len(rs.HeadersSetec) > 0},
 		} {
 			if k.set {
 				fail(k.key, "%s is not valid for a %s sink", k.key, rs.Type)
@@ -273,6 +322,43 @@ func resolveSinkTypeKeys(fail func(key, format string, args ...any), rs rawSink)
 			fail("status_url", "status_url is only valid for a slack sink")
 		}
 	}
+}
+
+// resolveHeaders turns headers_env and headers_setec into secret refs.
+// A header name in both maps is an error. Empty names are errors.
+func resolveHeaders(
+	fail func(key, format string, args ...any),
+	envMap, setecMap map[string]string,
+) map[string]secretRef {
+	if len(envMap) == 0 && len(setecMap) == 0 {
+		return nil
+	}
+	out := make(map[string]secretRef, len(envMap)+len(setecMap))
+	for name, envName := range envMap {
+		switch {
+		case name == "":
+			fail("headers_env", "header name is empty")
+		case envName == "":
+			fail("headers_env", "header %s has an empty environment variable", name)
+		default:
+			out[name] = secretRef{Env: envName, File: "", Setec: "", src: nil}
+		}
+	}
+	for name, secretName := range setecMap {
+		if _, inEnv := envMap[name]; inEnv {
+			fail("headers_setec", "header %s is set in both headers_env and headers_setec", name)
+			continue
+		}
+		switch {
+		case name == "":
+			fail("headers_setec", "header name is empty")
+		case secretName == "":
+			fail("headers_setec", "header %s has an empty secret name", name)
+		default:
+			out[name] = secretRef{Env: "", File: "", Setec: secretName, src: nil}
+		}
+	}
+	return out
 }
 
 func resolveSinkFilters(fail func(key, format string, args ...any), rs rawSink, s *SinkConfig) {
@@ -342,17 +428,38 @@ func resolveHeartbeat(errs *[]error, rh *rawHeartbeat) *HeartbeatConfig {
 		return nil
 	}
 	hb := &HeartbeatConfig{
-		URL:      secretRef{Env: rh.URLEnv, File: rh.URLFile},
+		URL:      secretRef{Env: rh.URLEnv, File: rh.URLFile, Setec: rh.URLSetec, src: nil},
 		Interval: defaultHeartbeatEvery,
 	}
-	if (rh.URLEnv == "") == (rh.URLFile == "") {
-		*errs = append(*errs, errors.New("heartbeat.url: exactly one of url_env or url_file is required"))
+	if secretSourceCount(rh.URLEnv, rh.URLFile, rh.URLSetec) != 1 {
+		*errs = append(*errs, fmt.Errorf("heartbeat.url: exactly one of url_env, url_file or url_setec is required%s",
+			setSourcesNote("url", rh.URLEnv, rh.URLFile, rh.URLSetec)))
 	}
 	applyDur(errs, "heartbeat.interval", rh.Interval, &hb.Interval)
 	if hb.Interval <= 0 {
 		*errs = append(*errs, errors.New("heartbeat.interval: interval must be positive"))
 	}
 	return hb
+}
+
+// bindSecrets attaches src to every URL, HMAC secret, header and heartbeat
+// ref. Env and file refs ignore src. Header map entries are copied because
+// ranging a map yields values, not references.
+func (c *Config) bindSecrets(src secretSource) {
+	if c == nil || src == nil {
+		return
+	}
+	for i := range c.Sinks {
+		c.Sinks[i].URL.src = src
+		c.Sinks[i].Secret.src = src
+		for name, ref := range c.Sinks[i].Headers {
+			ref.src = src
+			c.Sinks[i].Headers[name] = ref
+		}
+	}
+	if c.Heartbeat != nil {
+		c.Heartbeat.URL.src = src
+	}
 }
 
 // resolveSecrets fails fast when any referenced secret cannot be read now.
@@ -393,8 +500,8 @@ func (s SinkConfig) checkSecrets() error {
 			errs = append(errs, fmt.Errorf("sink %s: secret: %w", s.Name, err))
 		}
 	}
-	for header, env := range s.HeadersEnv {
-		if _, err := (secretRef{Env: env, File: ""}).resolve(); err != nil {
+	for header, ref := range s.Headers {
+		if _, err := ref.resolve(); err != nil {
 			errs = append(errs, fmt.Errorf("sink %s: header %s: %w", s.Name, header, err))
 		}
 	}
@@ -639,6 +746,9 @@ func describeSink(s SinkConfig) string {
 	}
 	if len(match) > 0 {
 		line += " match=" + strings.Join(match, " ")
+	}
+	if s.URL.Setec != "" {
+		line += " url=setec:" + s.URL.Setec
 	}
 	return line
 }

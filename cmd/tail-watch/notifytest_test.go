@@ -227,3 +227,48 @@ func TestNotifyTestBatchedWebhookUsesBatchID(t *testing.T) {
 		t.Fatalf("Tail-Watch-Batch-Id %q, want a bat_ id", id)
 	}
 }
+
+//nolint:paralleltest // replaces the setec HTTP client.
+func TestNotifyTestSetecURL(t *testing.T) {
+	rc := newReceiver(t)
+	fake := newSetecFake()
+	fake.set("prod/hook/url", rc.srv.URL)
+	srv := startSetecTLS(t, fake)
+	path := writeCfg(t, "collector:\n  setec:\n    server: "+srv.URL+"\n"+
+		"targets:\n  - {name: nas, addr: 10.0.0.1, checks: [icmp]}\n"+
+		"sinks:\n  - {name: hook, type: webhook, url_setec: prod/hook/url}\n")
+	var out, errOut strings.Builder
+	code := runNotifyTestWith([]string{"--config", path}, &out, &errOut,
+		notifyTestDeps{identity: staticIdentity, env: nil, clock: nil})
+	if code != 0 || rc.count() != 1 || !strings.Contains(out.String(), "hook webhook 200") {
+		t.Fatalf("exit %d requests %d\n%s\n%s", code, rc.count(), out.String(), errOut.String())
+	}
+}
+
+func TestNotifyTestSetecUnreachable(t *testing.T) {
+	withSetecTimeout(t, 500*time.Millisecond)
+	rc := newReceiver(t)
+	t.Setenv("TW_NT_OK", rc.srv.URL)
+	path := writeCfg(t, `
+collector:
+  setec:
+    server: https://127.0.0.1:1
+targets:
+  - {name: nas, addr: 10.0.0.1, checks: [icmp]}
+sinks:
+  - {name: hook, type: webhook, url_setec: prod/hook/url}
+  - {name: other, type: webhook, url_env: TW_NT_OK}
+`)
+	var out, errOut strings.Builder
+	code := runNotifyTestWith([]string{"--config", path}, &out, &errOut,
+		notifyTestDeps{identity: staticIdentity, env: nil, clock: nil})
+	if code != 1 {
+		t.Fatalf("exit %d\n%s\n%s", code, out.String(), errOut.String())
+	}
+	text := out.String()
+	for _, want := range []string{"hook webhook", "prod/hook/url", "127.0.0.1:1", "other webhook 200"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in\n%s", want, text)
+		}
+	}
+}
