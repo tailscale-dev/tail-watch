@@ -1204,9 +1204,9 @@ func startTailWatch(t *testing.T, bin, sock, cfg string) string {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, bin, "--config", cfg, "--socket", sock)
-	var stderr bytes.Buffer
+	var stderr, stdout syncBuffer
 	cmd.Stderr = &stderr
-	cmd.Stdout = &bytes.Buffer{}
+	cmd.Stdout = &stdout
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
