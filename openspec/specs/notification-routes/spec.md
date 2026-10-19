@@ -204,7 +204,8 @@ its down. The preview SHALL change nothing, run no check, and apply the same
 Every request that changes a route SHALL pass the same `Content-Type`, `Origin` and
 authorization decision as a monitor write, before any change. The collector SHALL log
 every route create, replace and delete, accepted or refused, at info level with the
-operation, the route name, the outcome and the caller's remote address.
+operation, the route name, the outcome, the caller's remote address and the verified
+identity fields defined by `ui-authorization`.
 
 #### Scenario: Route write is logged
 
@@ -215,3 +216,8 @@ operation, the route name, the outcome and the caller's remote address.
 
 - **WHEN** a `POST /api/v1/routes` carries `Content-Type: text/plain`
 - **THEN** the response is 415 and no route changes
+
+#### Scenario: Route write by a viewer
+
+- **WHEN** authorization is on and a `viewer` sends `POST /api/v1/routes`
+- **THEN** the response is 403 and no route changes

@@ -45,19 +45,16 @@ Phase 2 of the original design, ordered by value to an operator who already runs
 Items that use more of Tailscale's own features, per the "Dogfooding Tailscale" section of
 [CONTEXT.md](CONTEXT.md).
 
-- [ ] Identity-based UI authorization: fill in the `authorize` hook from the app
-  capabilities that `tailscale serve --accept-app-caps` forwards in
-  `Tailscale-App-Capabilities` (a grant with a viewer, editor or admin role), so `probe` and
-  monitor writes can be granted apart. Spiked on 2026-10-16: serve overwrites forged
-  capability, login and `X-Forwarded-For` headers, and no grant means no header. The
-  capability name must be in a domain we choose, not `tailscale.com`. The header comes from
-  grants to the host node's tag, so a grant to `svc:` alone is not enough; add an `app`-only
-  grant to the tag. It works through a `svc:` Service over HTTPS and for a user-owned
-  caller, who also gets `Tailscale-User-Login`. Over a Service `X-Forwarded-For` can be
-  IPv6, and the host needs manual approval [M]
-- [ ] Harden the audit identity: cross-check `Tailscale-User-Login` and `X-Forwarded-For`
-  against `LocalClient().WhoIs`, so a local process cannot forge the login in the audit
-  log [S]
+- [x] Identity-based UI authorization: `collector.authorization` reads a
+  `viewer` or `editor` role from tailscaled `WhoIs` (or `WhoIsForService` when
+  `service` is set). Off by default. `GET /api/v1/me` reports the role. The
+  2026-10-16 spike still stands: an app grant to the host node's tag was
+  required before serve forwarded the capability, and the name must be in a
+  domain the operator controls [M]
+- [x] Harden the audit identity: create, replace and delete lines take `user`,
+  `node` and `tags` from `WhoIs`, and record `identity_mismatch` when
+  `Tailscale-User-Login` disagrees. A local process can still claim an
+  editor's address; the Unix-socket listener is the open item below [S]
 - [ ] Close the local-process gap in UI identity: listen on a Unix socket
   (`collector.listen: unix:/path`, mode `0600`) that only `tailscale serve` and the
   collector's user can open, so a process on the host cannot forge `X-Forwarded-For` for

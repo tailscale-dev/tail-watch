@@ -2,6 +2,7 @@
 go = "1.27.2"
 golangci-lint = "2.14.0"
 goreleaser = "2.18.2"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
 bun = "1.4.2"
 "npm:@fission-ai/openspec" = "1.13.2"
 
@@ -27,3 +28,7 @@ depends = ["build", "test", "lint"]
 [tasks.release-check]
 description = "Validate release configuration and build local snapshot archives"
 run = "goreleaser check && goreleaser release --snapshot --clean"
+
+[tasks.vulncheck]
+description = "Scan dependencies and code for known vulnerabilities"
+run = "govulncheck ./..."

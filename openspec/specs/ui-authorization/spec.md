@@ -1,6 +1,14 @@
-# Spec Delta
+# ui-authorization Specification
 
-## ADDED Requirements
+## Purpose
+
+Limit who may read or change monitors, routes and probes in the monitor UI and API by
+the caller's tailnet identity. The collector resolves the caller through the local
+tailscaled `WhoIs`, takes a viewer or editor role from the `example.com/cap/tail-watch`
+app capability, and refuses callers without a sufficient role. With authorization unset,
+every request is permitted.
+
+## Requirements
 
 ### Requirement: Authorization is opt-in
 
@@ -22,7 +30,9 @@ everything `viewer` allows and also `POST`, `PUT` and `DELETE` on targets and ro
 `POST /api/v1/validate`, `POST /api/v1/probe` and `POST /api/v1/route-preview`. A request
 whose role does not allow its operation SHALL return 403 with a JSON error naming the
 role the operation needs, and SHALL change nothing. A request that needs a role and has
-none SHALL return 403 with a JSON error saying no role was granted. The content-type
+none SHALL return 403 with a JSON error saying no role was granted. A request whose
+caller cannot be identified SHALL return 403 with a JSON error saying the caller could
+not be identified. The content-type
 and origin checks SHALL run before the role check, as they do before the decision today.
 
 #### Scenario: Viewer reads
@@ -110,8 +120,8 @@ unidentified and SHALL be denied with 403 and logged at `warn`.
 
 `GET /api/v1/me` SHALL be available to any request that reaches the listener and SHALL
 return a JSON object with `authorization` (boolean), `user` (the login, empty for a
-tagged node), `node` (the node name), `tags` (list) and `role` (`viewer`, `editor` or an
-empty string). When authorization is off, `role` SHALL be `editor`, so the UI behaves as
+tagged node), `node` (the node name), `tags` (list), `role` (`viewer`, `editor` or an
+empty string) and `identified` (boolean, false when tailscaled could not identify the caller). When authorization is off, `role` SHALL be `editor`, so the UI behaves as
 it does today. A caller with no role SHALL receive 200 with `role: ""`, not 403, so the
 UI can explain the denial.
 
@@ -156,7 +166,7 @@ caller that connects directly has no identity and is denied.
 
 The audit line for every create, replace and delete of a monitor or route SHALL carry
 the caller's `user`, `node` and `tags` as tailscaled reports them, and the `role` when
-authorization is on. This SHALL apply with authorization on or off. When the request
+authorization is on, empty when the caller holds none. This SHALL apply with authorization on or off. When the request
 carries a `Tailscale-User-Login` that differs from the login tailscaled reports, the line
 SHALL carry `identity_mismatch: true` and the login tailscaled reports. When the caller
 cannot be resolved, the line SHALL omit `user`, `node` and `tags`. An audit line SHALL

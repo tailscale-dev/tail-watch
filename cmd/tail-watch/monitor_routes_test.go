@@ -566,7 +566,7 @@ func TestRouteGuard(t *testing.T) {
 		withHeader("Content-Type", "text/plain")); s != 415 {
 		t.Fatalf("preview content type %d %s", s, b)
 	}
-	e.mgr.authorize = func(*http.Request) error { return errors.New("read-only viewer") }
+	e.mgr.authorize = func(*http.Request, role) error { return errors.New("read-only viewer") }
 	if s, b := e.do(t, http.MethodPost, "/api/v1/routes", body); s != 403 || !strings.Contains(b, "read-only viewer") {
 		t.Fatalf("denied create %d %s", s, b)
 	}
@@ -576,17 +576,25 @@ func TestRouteGuard(t *testing.T) {
 	if s, b := e.do(t, http.MethodDelete, "/api/v1/routes/yaml-team", ""); s != 403 {
 		t.Fatalf("denied delete %d %s", s, b)
 	}
-	if _, ok := routeByName(e.routeList(t), "db-team"); ok {
+	e.mgr.mu.Lock()
+	created := false
+	for _, ent := range e.mgr.routeEntries {
+		if ent.Name == "db-team" {
+			created = true
+		}
+	}
+	e.mgr.mu.Unlock()
+	if created {
 		t.Fatal("a denied write created a route")
 	}
-	if s, _ := e.do(t, http.MethodPost, "/api/v1/route-preview",
-		`{"name":"x","addr":"10.0.0.9","checks":["icmp"]}`); s != 200 {
-		t.Fatalf("preview must not need authorization: %d", s)
+	if s, b := e.do(t, http.MethodPost, "/api/v1/route-preview",
+		`{"name":"x","addr":"10.0.0.9","checks":["icmp"]}`); s != 403 || !strings.Contains(b, "read-only viewer") {
+		t.Fatalf("preview must be authorized: %d %s", s, b)
 	}
 	if !strings.Contains(e.logs.String(), `"remote":"127.0.0.1:`) {
 		t.Fatalf("denied write was not audited:\n%s", e.logs.String())
 	}
-	e.mgr.authorize = func(*http.Request) error { return nil }
+	e.mgr.authorize = func(*http.Request, role) error { return nil }
 	e.logs.Reset()
 	e.do(t, http.MethodPost, "/api/v1/routes", body)
 	e.do(t, http.MethodPost, "/api/v1/routes", body)

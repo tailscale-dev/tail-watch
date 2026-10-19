@@ -22,6 +22,8 @@ need to do.
 - [Manage monitors in the UI](how-to/monitor-ui.md)
 - [Expose the UI as a Tailscale Service](how-to/monitor-ui-service.md): an
   HTTPS name on the tailnet, with the listener left on loopback.
+- [Give the monitor UI viewer and editor roles](how-to/monitor-ui-roles.md):
+  an optional role check taken from the tailnet policy.
 - [Route notifications](how-to/notification-routes.md): choose `page` or `warn`
   and which sinks hear a monitor.
 - [Send alerts to Slack](how-to/slack-sink.md)

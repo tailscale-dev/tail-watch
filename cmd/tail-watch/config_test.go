@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -492,7 +493,8 @@ func TestListenFlagOverride(t *testing.T) {
 	cfg := &Config{
 		Collector: CollectorConfig{
 			Listen: "127.0.0.1:1", StateDir: "", UI: false, LocalOnly: false,
-			Setec: setecSettings{Server: "", PollInterval: 0, pollTicker: nil},
+			Setec:         setecSettings{Server: "", PollInterval: 0, pollTicker: nil},
+			Authorization: Authorization{Capability: "", Service: ""},
 		},
 		Targets:    nil,
 		Sinks:      nil,
@@ -771,4 +773,174 @@ heartbeat:
 			t.Fatalf("empty section resolved %+v", cfg.Collector.Setec)
 		}
 	})
+}
+
+func TestAuthorizationUIFlagOverridesFile(t *testing.T) {
+	t.Parallel()
+	fileOff, err := parseConfig([]byte("collector:\n  authorization:\n    capability: example.com/cap/tail-watch\n"))
+	if err != nil {
+		t.Fatalf("ui unset in file: %v", err)
+	}
+	if uiErr := fileOff.requireAuthzUI(true); uiErr != nil {
+		t.Fatalf("--ui with collector.ui unset: %v", uiErr)
+	}
+	if uiErr := fileOff.requireAuthzUI(false); uiErr == nil {
+		t.Fatal("UI off with authorization set was accepted")
+	}
+}
+
+func TestAuthorizationConfig(t *testing.T) {
+	t.Parallel()
+	const valid = `
+collector:
+  ui: true
+  state_dir: /var/lib/tail-watch
+  authorization:
+    capability: example.com/cap/tail-watch
+    service: svc:tail-watch
+`
+	cfg, err := parseConfig([]byte(valid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Collector.Authorization.On() || cfg.Collector.Authorization.Service != "svc:tail-watch" {
+		t.Fatalf("authorization %+v", cfg.Collector.Authorization)
+	}
+	if uiErr := cfg.requireAuthzUI(false); uiErr == nil || !strings.Contains(uiErr.Error(), "collector.authorization") {
+		t.Fatalf("--ui=false: %v", uiErr)
+	}
+
+	absent, err := parseConfig([]byte("collector: {ui: true}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if absent.Collector.Authorization.On() {
+		t.Fatal("absent section turned authorization on")
+	}
+
+	tests := []struct {
+		name  string
+		src   string
+		wants []string
+	}{
+		{
+			name: "empty capability",
+			src: `
+collector:
+  ui: true
+  authorization:
+    capability: ""
+`,
+			wants: []string{"collector.authorization.capability"},
+		},
+		{
+			name: "no cap segment",
+			src: `
+collector:
+  ui: true
+  authorization:
+    capability: example.com/tail-watch
+`,
+			wants: []string{"collector.authorization.capability", "no /cap/ segment"},
+		},
+		{
+			name: "tailscale.com domain",
+			src: `
+collector:
+  ui: true
+  authorization:
+    capability: tailscale.com/cap/x
+`,
+			wants: []string{"collector.authorization.capability", "tailscale.com"},
+		},
+		{
+			name: "https tailscale.com name",
+			src: `
+collector:
+  ui: true
+  authorization:
+    capability: https://tailscale.com/cap/tail-watch
+`,
+			wants: []string{"collector.authorization.capability", "tailscale.com"},
+		},
+		{
+			name: "bad service",
+			src: `
+collector:
+  ui: true
+  authorization:
+    capability: example.com/cap/tail-watch
+    service: tail-watch
+`,
+			wants: []string{"collector.authorization.service"},
+		},
+		{
+			name: "local only",
+			src: `
+collector:
+  local_only: true
+  ui: true
+  authorization:
+    capability: example.com/cap/tail-watch
+`,
+			wants: []string{"collector.authorization", "local-only", "collector.ui"},
+		},
+		{
+			name: "every problem",
+			src: `
+collector:
+  local_only: true
+  authorization:
+    capability: ""
+    service: tail-watch
+`,
+			wants: []string{
+				"collector.authorization.capability",
+				"collector.authorization.service",
+				"collector.authorization",
+				"local-only",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, parseErr := parseConfig([]byte(tt.src))
+			if parseErr == nil {
+				t.Fatal("expected error")
+			}
+			for _, want := range tt.wants {
+				if !strings.Contains(parseErr.Error(), want) {
+					t.Errorf("error %q missing %q", parseErr, want)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckConfigAuthorization(t *testing.T) {
+	t.Parallel()
+	ok := writeCfg(t, `
+collector:
+  ui: true
+  state_dir: /var/lib/tail-watch
+  authorization:
+    capability: example.com/cap/tail-watch
+`)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"check-config", "--config", ok}, &stdout, &stderr); code != 0 {
+		t.Fatalf("valid: code %d\n%s%s", code, stdout.String(), stderr.String())
+	}
+	bad := writeCfg(t, `
+collector:
+  ui: true
+  authorization:
+    capability: tailscale.com/cap/x
+`)
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"check-config", "--config", bad}, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "collector.authorization.capability") {
+		t.Fatalf("invalid: code %d\n%s%s", code, stdout.String(), stderr.String())
+	}
 }

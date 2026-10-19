@@ -2,42 +2,42 @@ package main
 
 import (
 	"log/slog"
-	"net"
 	"net/http"
-	"net/netip"
 	"strings"
 )
 
-// callerIdentity returns the tailnet user login and client address that
-// tailscale serve puts in Tailscale-User-Login and X-Forwarded-For. The headers are
-// read only when the connection itself is from loopback, which is where serve
-// connects from; on any other connection a client could have written them. A process
-// on the collector host can still forge them, as it can reach the unauthenticated API.
-func callerIdentity(r *http.Request) (string, string) {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+// callerAttrs returns the verified identity attributes for r. The login, node
+// and tags come from tailscaled through rs, never from a request header. role
+// is included only when authorization is on. A Tailscale-User-Login that
+// disagrees with the login tailscaled reports sets identity_mismatch, and the
+// user attribute stays the login tailscaled reports. When rs is nil or the
+// caller cannot be resolved, the result is empty: the audit line then carries
+// only the connection's remote address. X-Forwarded-For is read only for a
+// loopback connection, inside rs.
+func callerAttrs(r *http.Request, rs *resolver) []slog.Attr {
+	if rs == nil || r == nil {
+		return nil
+	}
+	c, err := rs.resolve(r)
 	if err != nil {
-		return "", ""
+		return nil
 	}
-	if ip, perr := netip.ParseAddr(host); perr != nil || !ip.IsLoopback() {
-		return "", ""
-	}
-	caller := ""
-	first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
-	if ip, perr := netip.ParseAddr(strings.TrimSpace(first)); perr == nil {
-		caller = ip.String()
-	}
-	return r.Header.Get("Tailscale-User-Login"), caller
-}
-
-// callerAttrs returns the identity log attributes for r, omitting any that are empty.
-func callerAttrs(r *http.Request) []slog.Attr {
-	user, caller := callerIdentity(r)
 	var attrs []slog.Attr
-	if user != "" {
-		attrs = append(attrs, slog.String("user", user))
+	if c.User != "" {
+		attrs = append(attrs, slog.String("user", c.User))
 	}
-	if caller != "" {
-		attrs = append(attrs, slog.String("caller", caller))
+	if c.Node != "" {
+		attrs = append(attrs, slog.String("node", c.Node))
+	}
+	if len(c.Tags) > 0 {
+		attrs = append(attrs, slog.Any("tags", c.Tags))
+	}
+	if rs.enabled {
+		attrs = append(attrs, slog.String("role", string(c.Role)))
+	}
+	header := strings.TrimSpace(r.Header.Get("Tailscale-User-Login"))
+	if header != "" && header != c.User {
+		attrs = append(attrs, slog.Bool("identity_mismatch", true))
 	}
 	return attrs
 }

@@ -71,7 +71,19 @@ type CollectorConfig struct {
 	// Setec is the setec server used by *_setec secret keys. An empty
 	// Server means the config does not use setec.
 	Setec setecSettings
+	// Authorization is the optional role check for the monitor API.
+	// A zero Capability leaves the check off.
+	Authorization Authorization
 }
+
+// Authorization is the collector.authorization section.
+type Authorization struct {
+	Capability string
+	Service    string
+}
+
+// On reports whether the role check is configured.
+func (a Authorization) On() bool { return a.Capability != "" }
 
 // Target is one monitored device with its checks and resolved timings.
 type Target struct {
@@ -155,11 +167,18 @@ type rawConfig struct {
 }
 
 type rawCollector struct {
-	Listen    string    `yaml:"listen"`
-	StateDir  string    `yaml:"state_dir"`
-	UI        *bool     `yaml:"ui"`
-	LocalOnly *bool     `yaml:"local_only"`
-	Setec     *rawSetec `yaml:"setec"`
+	Listen        string            `yaml:"listen"`
+	StateDir      string            `yaml:"state_dir"`
+	UI            *bool             `yaml:"ui"`
+	LocalOnly     *bool             `yaml:"local_only"`
+	Setec         *rawSetec         `yaml:"setec"`
+	Authorization *rawAuthorization `yaml:"authorization"`
+}
+
+// rawAuthorization is the collector.authorization section before validation.
+type rawAuthorization struct {
+	Capability string `yaml:"capability"`
+	Service    string `yaml:"service"`
 }
 
 // rawSetec is the collector.setec section before validation.
@@ -285,11 +304,12 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 	var noSetec setecSettings
 	cfg := &Config{
 		Collector: CollectorConfig{
-			Listen:    raw.Collector.Listen,
-			StateDir:  raw.Collector.StateDir,
-			UI:        raw.Collector.UI != nil && *raw.Collector.UI,
-			LocalOnly: localOnly,
-			Setec:     noSetec,
+			Listen:        raw.Collector.Listen,
+			StateDir:      raw.Collector.StateDir,
+			UI:            raw.Collector.UI != nil && *raw.Collector.UI,
+			LocalOnly:     localOnly,
+			Setec:         noSetec,
+			Authorization: Authorization{Capability: "", Service: ""},
 		},
 		Targets:    nil,
 		Routes:     nil,
@@ -305,9 +325,59 @@ func resolveConfig(raw rawConfig) (*Config, []error) {
 	cfg.Targets = targets
 	cfg.Heartbeat = resolveHeartbeat(&errs, raw.Heartbeat)
 	cfg.Collector.Setec = resolveSetec(&errs, raw.Collector)
+	cfg.Collector.Authorization = resolveAuthorization(&errs, raw.Collector, localOnly)
 	serverSet := raw.Collector.Setec != nil && raw.Collector.Setec.Server != ""
 	rejectSetecKeys(&errs, raw, localOnly, serverSet)
 	return cfg, errs
+}
+
+// resolveAuthorization checks collector.authorization. An absent section leaves
+// the check off. Every problem is reported with its field.
+func resolveAuthorization(errs *[]error, raw rawCollector, localOnly bool) Authorization {
+	if raw.Authorization == nil {
+		return Authorization{}
+	}
+	capName := strings.TrimSpace(raw.Authorization.Capability)
+	svc := strings.TrimSpace(raw.Authorization.Service)
+	if capName == "" {
+		*errs = append(*errs, errors.New("collector.authorization.capability: must not be empty"))
+	} else {
+		if !strings.Contains(capName, "/cap/") {
+			*errs = append(*errs, fmt.Errorf("collector.authorization.capability: %q has no /cap/ segment", capName))
+		}
+		if capabilityInTailscaleDomain(capName) {
+			*errs = append(*errs, fmt.Errorf(
+				"collector.authorization.capability: %q is in the tailscale.com domain", capName,
+			))
+		}
+	}
+	if svc != "" && !strings.HasPrefix(svc, "svc:") {
+		*errs = append(*errs, fmt.Errorf("collector.authorization.service: %q must have the svc: prefix", svc))
+	}
+	if localOnly {
+		*errs = append(*errs, errors.New("collector.authorization: unavailable in local-only mode"))
+	}
+	return Authorization{Capability: capName, Service: svc}
+}
+
+// requireAuthzUI reports authorization configured while the effective UI is
+// off. --ui overrides collector.ui in both directions, so only the resolved
+// value can be checked.
+func (c *Config) requireAuthzUI(uiOn bool) error {
+	if c == nil || !c.Collector.Authorization.On() || uiOn {
+		return nil
+	}
+	return errors.New("collector.authorization: requires the UI")
+}
+
+func capabilityInTailscaleDomain(name string) bool {
+	rest := name
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	host, _, _ := strings.Cut(rest, "/")
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "tailscale.com" || strings.HasSuffix(host, ".tailscale.com")
 }
 
 func resolveDefaults(errs *[]error, d rawDefaults) timing {

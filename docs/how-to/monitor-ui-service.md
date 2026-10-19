@@ -75,12 +75,13 @@ Verify: `curl https://tail-watch.<tailnet>.ts.net/healthz` prints `ok`, and
 - The Service exposes the whole listener, so `/metrics` and `/healthz` are
   reachable by everyone the grant allows, not only the UI.
 - `remote` in the audit log is the proxy, a loopback address such as
-  `127.0.0.1:43322`. serve also tells tail-watch who called, so every `monitor write` and
-  `route write` line carries `user` (the caller's tailnet login) and `caller` (their tailnet
-  address), and so do the request lines. When serve sends no login, the line has no `user`.
+  `127.0.0.1:43322`. tail-watch asks tailscaled who that connection's
+  `X-Forwarded-For` address is, and the write line carries that `user`,
+  `node` and `tags`. With [roles](monitor-ui-roles.md) on, it also carries
+  `role`. A tagged node has no `user`.
   Keep the grant to the smallest set of admins. See
-  [Monitor UI risks](../explanation/monitor-ui-risks.md) for what `user` does and does not
-  prove.
+  [Monitor UI risks](../explanation/monitor-ui-risks.md) for what that
+  identity does and does not prove.
 
 ## If the Service does not work
 

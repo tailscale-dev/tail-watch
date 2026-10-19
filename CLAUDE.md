@@ -8,14 +8,15 @@
   `mise.toml` sets `npm.package_manager` to `bun`. There is no Node app and
   no `package.json`.
 - `mise run build` writes `bin/tail-watch`. `mise run check` builds, tests, and
-  lints.
+  lints. `mise run vulncheck` runs `govulncheck ./...` (pinned in `mise.toml`).
 
 ## Layout
 
 - Collector code is `package main` in `cmd/tail-watch/`: `main.go`, `netenv.go`,
   `config.go`, `checks.go`, `results.go`, `presence.go`, `classify.go`,
   `learn.go`, `alert.go` (plus `alert_emit.go`, `alert_flap.go`,
-  `alert_graph.go`, `alert_target.go`, `alert_log.go`), `recheck.go`, and
+  `alert_graph.go`, `alert_target.go`, `alert_log.go`), `recheck.go`,
+  `authz.go` (roles, `WhoIs` caller resolution and the role decision), and
   `setec.go` (the in-memory setec store and `collector.setec` validation).
   Tests sit next to that code.
   The binary is `tail-watch`. Prometheus series use the `tailwatch_` prefix
@@ -34,11 +35,19 @@
 - `POST /api/v1/probe` holds the manager mutex only for validation, then runs each check
   through `runCheckWith` (the prober's error normalization) after `bindChecks` gives
   `tsping` the shared resolver. A failing probe never refuses a save server-side; the UI
-  gates Save on it with a confirm dialog. `guard` takes the audit `op` at registration;
-  an empty op means unaudited and unauthorized (validate and
-  `POST /route-preview`). `GET /routes` and `GET /sinks`, like `GET /targets`,
-  are not wrapped. Route writes use `route.create`,
-  `route.replace` and `route.delete` and log `route write`. The manager's
+  gates Save on it with a confirm dialog. `guard` takes the audit `op` and always
+  requires `editor`; an empty op is unaudited but still authorized
+  (validate and `POST /route-preview` need `editor`). `guardRead` wraps `GET`
+  targets, peers, routes and sinks with `viewer`. `GET /api/v1/me` is not
+  wrapped. With `collector.authorization` unset, `authorize` permits every
+  request. `callerAttrs` takes `user`, `node` and `tags` from the resolver
+  (`WhoIs` on `X-Forwarded-For`, loopback only), not from request headers, and
+  adds `role` only when authorization is on. `GET /api/v1/me` also returns `identified`
+  (false when `WhoIs` could not resolve the caller); `app.js` asks `/me` again on every
+  refresh while the role is empty or the request failed, and a failed `/me` never counts as
+  an empty role, so a transient lookup failure cannot lock a user out of the monitors.
+  Route writes use `route.create`, `route.replace` and `route.delete` and log
+  `route write`. The manager's
   `published` pointer is the notifier's route table when a notifier exists, so
   the next down sees a route write. A route edit does not re-register monitors
   or close incidents. The field is not named `routes`: that is the method that
@@ -216,6 +225,19 @@
   use the tailscale image, not alpine: a locally cached `alpine` may be arm64 and `sh` then
   fails with `exec format error`. Passed live on 2026-10-17 (about 2 minutes). The collector's
   tailscale node needs `TS_ACCEPT_DNS` on (`TS_LIVE_ACCEPT_DNS`) to resolve its name.
+- `TestLiveAuthzWhoIs` (`TAIL_WATCH_LIVE_AUTHZ=1`, caller in `TAIL_WATCH_LIVE_CALLER`)
+  asks the live-stack container's tailscaled `WhoIs` and `WhoIsForService` and
+  logs the capability maps. It never uses the host client. The policy and the
+  three caller states are in `docs/contributing/live-authz-test.md`. Passed live on
+  2026-10-17, including the collector end to end: the fixture nodes are the callers (a
+  grant `src` may be a bare tailnet IP, so one policy gives editor, viewer and no-grant),
+  `tailscale serve --service=svc:<name> --http=80 --bg 127.0.0.1:9109` runs in the
+  tailscale container, and the callers use busybox `wget` against the Service VIP with a
+  `Host:` header. The lab policy has no `svc:tail-watch`, so use a throwaway Service name,
+  define it with `PUT /tailnet/-/services/<name>`, and give it an `autoApprovers.services`
+  entry for `tag:monitor`. After pushing a temporary policy, restore it by comparing parsed
+  JSON, not bytes: the policy API re-aligns whitespace, so a byte `diff` of the saved
+  original reports a change that is not one.
 - `TestLiveTeams` (`TAIL_WATCH_LIVE_TEAMS=1`) posts real cards to a Teams workflow with no
   tailnet. It needs its own gate because operators export `TEAMS_WEBHOOK_URL` to run the
   collector, and `mise run test` must not post to their channel. A Workflows trigger

@@ -1102,3 +1102,128 @@ func TestCollectorFromPrefersIPv4(t *testing.T) {
 		}
 	}
 }
+
+//nolint:paralleltest // run installs a process-wide logger.
+func TestRunUIFalseRejectsAuthorization(t *testing.T) {
+	previous := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	path := writeCfg(t, `
+collector:
+  ui: true
+  state_dir: /var/lib/tail-watch
+  authorization:
+    capability: example.com/cap/tail-watch
+targets:
+  - {name: a, addr: 10.0.0.1, checks: [icmp]}
+`)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--config", path, "--ui=false"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "collector.authorization") {
+		t.Fatalf("code %d\n%s", code, stderr.String())
+	}
+}
+
+func TestRunAuthorizationStartup(t *testing.T) {
+	t.Parallel()
+	bin := buildTailWatch(t)
+	sock, closeAPI := fakeTailscaled(t, runningStatus(), nil)
+	t.Cleanup(closeAPI)
+	dir := t.TempDir()
+	off := writeCfg(t, fmt.Sprintf(`
+collector:
+  ui: true
+  state_dir: %q
+  listen: 127.0.0.1:%d
+targets:
+  - {name: a, addr: 127.0.0.1, checks: [icmp]}
+`, dir, freePort(t)))
+	offLog := startTailWatch(t, bin, sock, off)
+	if !strings.Contains(offLog, "write API enabled") || strings.Contains(offLog, "ui authorization") ||
+		strings.Contains(offLog, "direct connections") {
+		t.Fatalf("authorization off changed the startup log:\n%s", offLog)
+	}
+
+	onPort := freePort(t)
+	on := writeCfg(t, fmt.Sprintf(`
+collector:
+  ui: true
+  state_dir: %q
+  listen: 0.0.0.0:%d
+  authorization:
+    capability: example.com/cap/tail-watch
+    service: svc:tail-watch
+targets:
+  - {name: a, addr: 127.0.0.1, checks: [icmp]}
+`, dir, onPort))
+	onLog := startTailWatch(t, bin, sock, on)
+	for _, want := range []string{
+		"write API enabled", "controlled only by the network",
+		"ui authorization enabled", "example.com/cap/tail-watch", `"service":true`,
+		"direct connections have no identity and are denied",
+	} {
+		if !strings.Contains(onLog, want) {
+			t.Errorf("startup log missing %s:\n%s", want, onLog)
+		}
+	}
+
+	base := fmt.Sprintf("http://127.0.0.1:%d", onPort)
+	waitHTTP(t, base+"/healthz")
+	if got := httpGet(t, base+"/metrics"); !strings.Contains(got, "tailwatch_") {
+		t.Fatalf("/metrics with authorization on: %s", got[:min(200, len(got))])
+	}
+	resp, err := http.Get(base + "/api/v1/targets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("/api/v1/targets without identity = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestCheckConfigAuthorizationUI(t *testing.T) {
+	t.Parallel()
+	path := writeCfg(t, "collector:\n  authorization:\n    capability: example.com/cap/tail-watch\n")
+	for _, tt := range []struct {
+		args []string
+		want int
+	}{
+		{[]string{"check-config", "--config", path}, 1},
+		{[]string{"check-config", "--config", path, "--ui=false"}, 1},
+		{[]string{"check-config", "--config", path, "--ui"}, 0},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(tt.args, &stdout, &stderr); code != tt.want {
+			t.Errorf("%v: code %d, want %d\n%s", tt.args, code, tt.want, stderr.String())
+		}
+	}
+}
+
+func startTailWatch(t *testing.T, bin, sock, cfg string) string {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	cmd := exec.CommandContext(ctx, bin, "--config", cfg, "--socket", sock)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = &bytes.Buffer{}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		_ = cmd.Wait()
+	})
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(stderr.String(), "write API enabled") || strings.Contains(stderr.String(), "http server") {
+			return stderr.String()
+		}
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	t.Fatalf("collector did not log startup:\n%s", stderr.String())
+	return ""
+}

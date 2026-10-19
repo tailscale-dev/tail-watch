@@ -82,7 +82,7 @@ beyond loopback.
 ## `check-config`
 
 ```bash
-tail-watch check-config [--config <file>]
+tail-watch check-config [--config <file>] [--ui[=false]]
 ```
 
 Loads and validates the config. It does not contact tailscaled, does not
@@ -94,6 +94,9 @@ configured, then exits 0. A route line is `route <name> severity=<page|warn>
 sinks=<names>`. Each target line ends with `route=<name|none>` and
 `sinks=<candidates>`. An unrouted target lists every configured sink. `none`
 means the target or the route has no candidate sink.
+
+With `collector.authorization` set, `check-config` exits 1 when the UI would be off.
+`--ui` and `--ui=false` override `collector.ui` as they do for the collector.
 
 ```text
 nyc-router interval=15s timeout=5s network=tailnet checks=tsping route=none sinks=ops-webhook,ops-slack
@@ -168,7 +171,8 @@ Served on the listen address by the collector, not under `--once`.
 | `/` | Prober status page: each check's recent results, latency, and state. |
 | `/metrics` | Prometheus text exposition. See [Metrics](metrics.md). |
 | `/healthz` | `200` with body `ok`. Says the process is serving, not that targets are up. |
-| `/ui/` | Monitor UI. `404` unless the UI is on. |
+| `/ui/` | Monitor UI. `404` unless the UI is on. Not covered by the role check. |
+| `/api/v1/me` | Monitor API: `GET` the caller's login, node, tags, role and `identified`. `200` with `role: ""` when no role was granted, and `identified: false` when tailscaled could not identify the caller. With authorization off, `authorization` is false and `role` is `editor`. |
 | `/api/v1/targets` | Monitor API: `GET` list, `POST` create. `404` unless the UI is on. |
 | `/api/v1/targets/{name}` | Monitor API: `PUT` replace, `DELETE` remove. |
 | `/api/v1/validate` | Monitor API: `POST` validate a monitor without saving it. |
@@ -194,8 +198,19 @@ carries `name` (MagicDNS short name, else host name), `dns_name`,
 `tailscaled` and whenever the connection to it is down.
 
 Write requests to `/api/v1/` must be `application/json` and must not carry an
-`Origin` for another host. There is no authentication. See
-[Manage monitors in the UI](../how-to/monitor-ui.md) and
+`Origin` for another host. Those checks run before the role check. A request
+that fails them is `415` or `403` and changes nothing.
+
+With `collector.authorization` unset, every request that reaches the listener
+is permitted. With it set, `GET /api/v1/targets`, `/peers`, `/routes` and
+`/sinks` need `viewer`. `POST`, `PUT` and `DELETE` on targets and routes,
+`POST /api/v1/validate`, `POST /api/v1/probe` and `POST /api/v1/route-preview`
+need `editor`. A missing role is `403` with an `errors` list that names the
+role or says that no role was granted, and nothing changes. `GET /api/v1/me`
+does not need a role. `/metrics`, `/healthz`, `/` and `/ui/` are not checked.
+
+See [Manage monitors in the UI](../how-to/monitor-ui.md),
+[Roles](../how-to/monitor-ui-roles.md) and
 [Monitor UI risks](../explanation/monitor-ui-risks.md).
 
 ## Signals

@@ -61,8 +61,12 @@ exists. This is a project rule, not a preference.
   headers are never logged, persisted, returned by the API, or editable from the UI.
 - **No credentials for discovery.** The peer picker uses the local node's view, never the
   Tailscale HTTP API, `tscli` or an API key.
-- **No UI authentication of its own.** Access is the tailnet ACL plus the Origin and
-  Content-Type guards. The UI does not edit YAML targets, sinks, `defaults` or heartbeat.
+- **No UI authentication of its own.** Identity is the tailnet's. tail-watch
+  has no login, session or user store. A role check is opt-in
+  (`collector.authorization`): it reads a `viewer` or `editor` grant from
+  tailscaled. With it unset, access is the tailnet ACL plus the Origin and
+  Content-Type guards. The UI does not edit YAML targets, sinks, `defaults`
+  or heartbeat.
 - **No acting on failures.** tail-watch reports; it does not unadvertise a Service,
   restart a peer or change routes.
 - **Dependencies:** a new Go dependency must be Tailscale-owned: `tailscale.com` or a

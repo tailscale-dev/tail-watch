@@ -38,21 +38,19 @@ func setAuditName(w http.ResponseWriter, name string) {
 	}
 }
 
-// guard wraps a handler that changes a monitor. The order is: audit the
-// outcome, require JSON (415), reject a foreign Origin (403), then ask
-// authorize (403). Nothing changes unless all of them pass. op is the audit
-// operation. The dry-run validation call passes an empty op: it changes
-// nothing, so it is neither audited nor authorized. The routing preview passes
-// an empty op for the same reason. Plain GETs, like the list of targets, routes
-// and sinks, are not wrapped at all. The probe passes "probe"
-// even though it persists nothing: it emits network traffic toward an address
-// the caller names, so it is authorized and audited like a write.
+// guard wraps a handler. The order is: audit the outcome, require JSON (415),
+// reject a foreign Origin (403), then ask authorize (403). Nothing changes
+// unless all of them pass. op is the audit operation and the role required is
+// roleEditor. An empty op is not audited, and it is still authorized: validate
+// and the routing preview change nothing but need roleEditor. The probe passes
+// "probe" even though it persists nothing: it emits network traffic toward an
+// address the caller names, so it is authorized and audited like a write.
 func (m *monitorManager) guard(next http.HandlerFunc, op string) http.HandlerFunc {
-	write := op != ""
+	audited := op != ""
 	return func(rw http.ResponseWriter, r *http.Request) {
 		w := &auditWriter{ResponseWriter: rw, status: 0, name: r.PathValue("name")}
 		defer func() {
-			if !write {
+			if !audited {
 				return
 			}
 			msg, nameKey := "monitor write", "target"
@@ -66,7 +64,7 @@ func (m *monitorManager) guard(next http.HandlerFunc, op string) http.HandlerFun
 				slog.String("outcome", outcomeOf(w.status)),
 				slog.String("remote", r.RemoteAddr),
 			}
-			m.log.LogAttrs(r.Context(), slog.LevelInfo, msg, append(attrs, callerAttrs(r)...)...)
+			m.log.LogAttrs(r.Context(), slog.LevelInfo, msg, append(attrs, callerAttrs(r, m.authz)...)...)
 		}()
 		if !isJSON(r.Header.Get("Content-Type")) {
 			writeAPIError(w, fail(http.StatusUnsupportedMediaType, "Content-Type must be application/json"))
@@ -76,11 +74,19 @@ func (m *monitorManager) guard(next http.HandlerFunc, op string) http.HandlerFun
 			writeAPIError(w, fail(http.StatusForbidden, "cross-origin request refused"))
 			return
 		}
-		if !write {
-			next(w, r)
+		if err := m.authorize(r, roleEditor); err != nil {
+			writeAPIError(w, fail(http.StatusForbidden, err.Error()))
 			return
 		}
-		if err := m.authorize(r); err != nil {
+		next(w, r)
+	}
+}
+
+// guardRead wraps a GET that needs roleViewer. It does not audit and it does
+// not check content type or Origin. GET /api/v1/me is not wrapped.
+func (m *monitorManager) guardRead(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := m.authorize(r, roleViewer); err != nil {
 			writeAPIError(w, fail(http.StatusForbidden, err.Error()))
 			return
 		}
@@ -115,18 +121,19 @@ func sameOrigin(r *http.Request) bool {
 
 // routes registers the monitor API on mux.
 func (m *monitorManager) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/targets", m.handleList)
-	mux.HandleFunc("GET /api/v1/peers", m.handlePeers)
+	mux.HandleFunc("GET /api/v1/me", m.handleMe)
+	mux.HandleFunc("GET /api/v1/targets", m.guardRead(m.handleList))
+	mux.HandleFunc("GET /api/v1/peers", m.guardRead(m.handlePeers))
 	mux.HandleFunc("POST /api/v1/targets", m.guard(m.handleCreate, "create"))
 	mux.HandleFunc("PUT /api/v1/targets/{name}", m.guard(m.handleReplace, "replace"))
 	mux.HandleFunc("DELETE /api/v1/targets/{name}", m.guard(m.handleDelete, "delete"))
 	mux.HandleFunc("POST /api/v1/validate", m.guard(m.handleValidate, ""))
 	mux.HandleFunc("POST /api/v1/probe", m.guard(m.handleProbe, "probe"))
-	mux.HandleFunc("GET /api/v1/routes", m.handleListRoutes)
+	mux.HandleFunc("GET /api/v1/routes", m.guardRead(m.handleListRoutes))
 	mux.HandleFunc("POST /api/v1/routes", m.guard(m.handleCreateRoute, "route.create"))
 	mux.HandleFunc("PUT /api/v1/routes/{name}", m.guard(m.handleReplaceRoute, "route.replace"))
 	mux.HandleFunc("DELETE /api/v1/routes/{name}", m.guard(m.handleDeleteRoute, "route.delete"))
-	mux.HandleFunc("GET /api/v1/sinks", m.handleListSinks)
+	mux.HandleFunc("GET /api/v1/sinks", m.guardRead(m.handleListSinks))
 	mux.HandleFunc("POST /api/v1/route-preview", m.guard(m.handleRoutePreview, ""))
 	mux.HandleFunc("/api/v1/", notFoundJSON)
 }

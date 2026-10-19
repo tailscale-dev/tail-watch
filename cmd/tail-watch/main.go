@@ -102,7 +102,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
-	ui, uiErr := resolveUI(cfg, *flags.ui, *flags.once)
+	ui, uiErr := openUI(cfg, *flags.ui, *flags.once)
 	if uiErr != nil {
 		_, _ = fmt.Fprintln(stderr, uiErr)
 		return 1
@@ -245,6 +245,16 @@ func registerUIFlag(fs *flag.FlagSet) **bool {
 	return &value
 }
 
+// openUI decides whether the monitor UI is on and rejects authorization when
+// that UI is off. --once does not serve the API, so it skips the role check.
+func openUI(cfg *Config, flag *bool, once bool) (bool, error) {
+	ui, err := resolveUI(cfg, flag, once)
+	if err != nil || once {
+		return ui, err
+	}
+	return ui, cfg.requireAuthzUI(ui)
+}
+
 // resolveUI decides whether the monitor UI is on. --once ignores it, it is
 // unavailable in local-only mode, and it needs a state_dir to keep the
 // monitors it creates.
@@ -292,6 +302,7 @@ func runCheckConfig(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-config", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configFlag := fs.String("config", "", "config file path (overrides TAIL_WATCH_CONFIG)")
+	uiFlag := registerUIFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -302,6 +313,10 @@ func runCheckConfig(args []string, stdout, stderr io.Writer) int {
 	cfg, err := loadConfig(path)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+		return 1
+	}
+	if uiErr := cfg.requireAuthzUI(cfg.UIEnabled(*uiFlag)); uiErr != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", uiErr)
 		return 1
 	}
 	for _, r := range cfg.Routes {
@@ -557,12 +572,43 @@ func (a *app) mountMonitorUI(mux *http.ServeMux) {
 		mgr.closeIncident = a.notify.closeRemoved
 		mgr.published = &a.notify.routes
 	}
+	a.installCallerResolver(mgr)
 	mgr.routes(mux)
 	mux.Handle("/ui/", uiHandler())
 	a.log.Info("monitor write API enabled", "addr", a.listen)
 	if !loopbackListen(a.listen) {
 		a.log.Warn("monitor write API is reachable beyond loopback; access is controlled only by the network",
 			"addr", a.listen)
+	}
+	if auth := a.cfg.Collector.Authorization; auth.On() {
+		a.log.Info("ui authorization enabled", "capability", auth.Capability, "service", auth.Service != "")
+		if !loopbackListen(a.listen) {
+			a.log.Warn("direct connections have no identity and are denied", "addr", a.listen)
+		}
+	}
+}
+
+// installCallerResolver wires WhoIs for the audit log, and the role check when
+// collector.authorization is set. A zero LocalClient has no socket, which is
+// the test fake; production kernelEnv always sets one. Skipping that client
+// avoids asking the host tailscaled from a unit test. Authorization on still
+// installs it, so a missing socket denies requests instead of permitting them.
+func (a *app) installCallerResolver(mgr *monitorManager) {
+	if a == nil || a.env == nil || mgr == nil || a.cfg == nil {
+		return
+	}
+	client := a.env.LocalClient()
+	if client == nil {
+		return
+	}
+	auth := a.cfg.Collector.Authorization
+	wired := client.Socket != "" || client.UseSocketOnly
+	if !auth.On() && !wired {
+		return
+	}
+	mgr.authz = newResolver(client, auth)
+	if auth.On() {
+		mgr.authorize = mgr.authorizeRequest
 	}
 }
 

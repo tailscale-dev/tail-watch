@@ -75,12 +75,24 @@ Unix-socket listener as its own item, "Close the local-process gap in UI identit
 `local.Client` has `WhoIs`, `WhoIsForService(ctx, addr, svc)` and `WhoIsForIP`. The
 last two scope the returned capability map to a destination. The spike's finding that
 the header came from grants to the node, and not to `svc:`, was observed in what `serve`
-forwards. It may not describe what `WhoIsForService` returns. So `collector.authorization.service`
-is optional: unset, the plain `WhoIs` is used and operators grant the capability to the
-host's tag; set, `WhoIsForService` is used and the grant may name the Service.
-Task 1.1 settles which grants each call honors against a real tailnet before the
-code and docs commit to a recommendation. If `WhoIsForService` honors `svc:` grants,
-the how-to leads with it. The `service` key stays optional either way.
+forwards. It does not describe what `WhoIsForService` returns.
+
+Checked on 2026-10-17 against the lab tailnet, from the live-stack Docker node
+(`tag:monitor`), never the host client. The caller was an untagged member node.
+`svc:tail-watch` was a VIP service tagged `tag:monitor`, hosted by the collector
+and approved automatically. The capability was `example.com/cap/tail-watch`.
+
+- Grant to the node tag only (`dst: tag:monitor`, role `viewer`). Plain `WhoIs`
+  and `WhoIsForService` both returned that grant.
+- Grant to the Service only (`dst: svc:tail-watch`, role `editor`). Plain `WhoIs`
+  returned no capability. `WhoIsForService` returned the editor grant.
+- No capability grant, with the network grant left in place. Both calls found
+  the peer and returned no capability.
+
+So `WhoIsForService` honors a grant that names the Service, and plain `WhoIs`
+does not. Setting `collector.authorization.service` removes the need for the
+node-tag app grant. The `service` key stays optional: unset, plain `WhoIs` is
+used and the grant targets the host's tag. The how-to leads with the Service.
 
 ### D3: Two roles, hierarchical
 
@@ -131,7 +143,11 @@ so the audit log is verified in both modes (this is ROADMAP.md "Harden the audit
 identity"). It adds `node`, `tags` and `role`, and `identity_mismatch` when the
 `Tailscale-User-Login` header and tailscaled disagree, which is the signal a forged
 header leaves. If the lookup fails the line carries only the remote address and no
-`user`: an unverified login is worse than none, because it reads like a fact.
+`user`: an unverified login is worse than none, because it reads like a fact. The old
+`caller` attribute, the `X-Forwarded-For` address, is dropped: the verified `user` and
+`node` replace it, and `remote` still carries the connection address. A caller who
+resolves but holds no role logs `role=""`; one that does not resolve logs no identity
+fields at all.
 
 ### D7: Config
 
@@ -183,14 +199,18 @@ the how-to says operators should keep the listener on loopback behind `serve`.
 
 ## Not verified
 
-These came from the spike or from reading `tailscale.com@v1.102.5`, and are checked by
-tasks, not assumed:
+These came from the spike or from reading `tailscale.com@v1.102.5`, and were
+checked against the lab tailnet on 2026-10-17:
 
-- Whether `WhoIsForService` returns capabilities granted to `svc:` (task 1.1).
-- That `WhoIs` accepts a bare IPv6 address with no port (task 1.2).
-- What `WhoIs` returns for a user-owned caller whose grant is only to the node's tag,
-  and whether the capability name used in a real policy matches one a normal operator
-  would choose.
+- `WhoIsForService` returns a capability granted only to `svc:`. Plain `WhoIs`
+  does not. See D2.
+- `WhoIs` accepts a bare IPv4 address, a bare IPv6 address, and an `ip:port`.
+  The caller's `100.64.76.111`, `fd7a:115c:a1e0::1c34:4c70`, and
+  `100.64.76.111:1` all resolved. A bare IPv6 address is not rejected, so the
+  caller-address helper does not rewrite it into a bracketed port form.
+- A user-owned caller whose only app grant targets the node's tag is resolved
+  by plain `WhoIs`, and the capability map contains that grant. The name
+  `example.com/cap/tail-watch` was accepted by the policy API.
 
 ## Open Questions
 

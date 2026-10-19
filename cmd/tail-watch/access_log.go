@@ -32,7 +32,7 @@ func accessLogged(log *slog.Logger, h tsweb.ReturnHandler) http.Handler {
 			if rec.Err != "" {
 				attrs = append(attrs, slog.String("err", rec.Err))
 			}
-			log.LogAttrs(r.Context(), slog.LevelInfo, "http request", append(attrs, callerAttrs(r)...)...)
+			log.LogAttrs(r.Context(), slog.LevelInfo, "http request", append(attrs, callerAttrs(r, nil)...)...)
 		},
 	})
 }

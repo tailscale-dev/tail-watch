@@ -1,12 +1,19 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/mxschmitt/playwright-go"
+	"tailscale.com/client/tailscale/apitype"
+	"tailscale.com/tailcfg"
 	"tailscale.com/types/opt"
 )
 
@@ -70,6 +77,292 @@ func uiPeers() peerSource {
 		Online:     opt.Bool(""),
 	})
 	return &fakePeerSource{peers: peers, seeded: true}
+}
+
+// switchingIdentity is a fake tailscaled whose answer the test can change
+// after the page has loaded.
+type switchingIdentity struct {
+	mu  sync.Mutex
+	who *apitype.WhoIsResponse
+	err error
+}
+
+func (s *switchingIdentity) WhoIs(context.Context, string) (*apitype.WhoIsResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.who, s.err
+}
+
+func (s *switchingIdentity) WhoIsForService(
+	context.Context, string, tailcfg.ServiceName,
+) (*apitype.WhoIsResponse, error) {
+	return s.WhoIs(context.Background(), "")
+}
+
+func (s *switchingIdentity) set(who *apitype.WhoIsResponse) {
+	s.mu.Lock()
+	s.who = who
+	s.err = nil
+	s.mu.Unlock()
+}
+
+func roleWho(grant string) *apitype.WhoIsResponse {
+	return whoisCaller("alice@example.com", "phone", nil, grant)
+}
+
+// uiRolePage serves the UI with authorization on. Requests without
+// X-Forwarded-For get one, which is what tailscale serve adds and what the
+// resolver requires on a loopback connection.
+func uiRolePage(t *testing.T, e *apiEnv, src *switchingIdentity) playwright.Page {
+	t.Helper()
+	e.mgr.authz = roleResolver(src, "", true)
+	e.mgr.authorize = e.mgr.authorizeRequest
+	e.mgr.peers = uiPeers()
+	mux := http.NewServeMux()
+	e.mgr.routes(mux)
+	mux.Handle("/ui/", uiHandler())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Forwarded-For") == "" {
+			r.Header.Set("X-Forwarded-For", "100.64.0.7")
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	page := browserPage(t)
+	if _, err := page.Goto(srv.URL + "/ui/"); err != nil {
+		t.Fatal(err)
+	}
+	return page
+}
+
+const uiPollInterval = 5 * time.Second
+
+func waitVisibleWithin(t *testing.T, page playwright.Page, sel string, d time.Duration) {
+	t.Helper()
+	if err := page.Locator(sel).First().WaitFor(playwright.LocatorWaitForOptions{
+		State:   playwright.WaitForSelectorStateVisible,
+		Timeout: new(float64(d.Milliseconds())),
+	}); err != nil {
+		t.Fatalf("%s not visible within %s: %v", sel, d, err)
+	}
+}
+
+func waitHidden(t *testing.T, page playwright.Page, sel string) {
+	t.Helper()
+	if err := page.Locator(sel).WaitFor(playwright.LocatorWaitForOptions{
+		State:   playwright.WaitForSelectorStateHidden,
+		Timeout: nil,
+	}); err != nil {
+		t.Fatalf("%s stayed visible: %v", sel, err)
+	}
+}
+
+func TestUIBrowserViewerIsReadOnly(t *testing.T) {
+	t.Parallel()
+	e := newRouteEnv(t)
+	src := &switchingIdentity{mu: sync.Mutex{}, who: roleWho(`{"role":"editor"}`), err: nil}
+	e.mgr.authz = roleResolver(src, "", true)
+	e.mgr.authorize = e.mgr.authorizeRequest
+	if status, body := e.do(t, http.MethodPost, "/api/v1/targets", labNAS,
+		withHeader("X-Forwarded-For", "100.64.0.7")); status != http.StatusCreated {
+		t.Fatalf("seed monitor %d %s", status, body)
+	}
+	const routeBody = `{"name":"ui-team","sinks":["hook"]}`
+	if status, body := e.do(t, http.MethodPost, "/api/v1/routes", routeBody,
+		withHeader("X-Forwarded-For", "100.64.0.7")); status != http.StatusCreated {
+		t.Fatalf("seed route %d %s", status, body)
+	}
+	src.set(roleWho(`{"role":"viewer"}`))
+	page := uiRolePage(t, e, src)
+	waitHidden(t, page, "#add")
+	if err := page.Locator("[data-name=lab-nas]").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	n, err := page.Locator("[aria-label^='Edit']").Count()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("viewer sees %d edit buttons", n)
+	}
+	who, whoErr := page.Locator("#who").TextContent()
+	if whoErr != nil || who != "alice@example.com · viewer" {
+		t.Fatalf("who = %q, %v", who, whoErr)
+	}
+	if _, navErr := page.Goto(page.URL() + "#routes"); navErr != nil {
+		t.Fatal(navErr)
+	}
+	if waitErr := page.Locator("[data-route=ui-team]").WaitFor(); waitErr != nil {
+		t.Fatal(waitErr)
+	}
+	waitHidden(t, page, "#add-route")
+	n, err = page.Locator("[aria-label^='Edit']").Count()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("viewer routes page sees %d edit buttons", n)
+	}
+}
+
+func TestUIBrowserEmptyRoutesHintFollowsRole(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		role     string
+		wantHint bool
+	}{
+		{"viewer", false},
+		{"editor", true},
+	} {
+		t.Run(tt.role, func(t *testing.T) {
+			t.Parallel()
+			e := newAPIEnv(t)
+			src := &switchingIdentity{mu: sync.Mutex{}, who: roleWho(`{"role":"` + tt.role + `"}`), err: nil}
+			page := uiRolePage(t, e, src)
+			if err := page.Locator("#who").WaitFor(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := page.Goto(page.URL() + "#routes"); err != nil {
+				t.Fatal(err)
+			}
+			if err := page.Locator("#routes-empty").WaitFor(); err != nil {
+				t.Fatal(err)
+			}
+			visible, err := page.Locator("#routes-empty .write-hint").IsVisible()
+			if err != nil || visible != tt.wantHint {
+				t.Fatalf("add hint visible = %v (err %v), want %v", visible, err, tt.wantHint)
+			}
+		})
+	}
+}
+
+func TestUIBrowserEditorCanAdd(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	src := &switchingIdentity{mu: sync.Mutex{}, who: roleWho(`{"role":"editor"}`), err: nil}
+	page := uiRolePage(t, e, src)
+	if err := page.Locator("#who").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	openAddForm(t, page)
+	who, err := page.Locator("#who").TextContent()
+	if err != nil || who != "alice@example.com · editor" {
+		t.Fatalf("who = %q, %v", who, err)
+	}
+}
+
+func TestUIBrowserNoRoleShowsMessage(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	src := &switchingIdentity{mu: sync.Mutex{}, who: roleWho(`{"role":"owner"}`), err: nil}
+	page := uiRolePage(t, e, src)
+	if err := page.Locator("#banner").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	text, err := page.Locator("#banner").TextContent()
+	if err != nil || !strings.Contains(text, "has not granted this user a role") {
+		t.Fatalf("banner %q, %v", text, err)
+	}
+	n, err := page.Locator("[data-name]").Count()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("no-role page lists %d monitors", n)
+	}
+	waitHidden(t, page, "#add")
+}
+
+func TestUIBrowserBlockedPageRecoversWhenRoleIsGranted(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	src := &switchingIdentity{mu: sync.Mutex{}, who: roleWho(`{"role":"owner"}`), err: nil}
+	page := uiRolePage(t, e, src)
+	if err := page.Locator("#banner").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	src.set(roleWho(`{"role":"editor"}`))
+	waitVisibleWithin(t, page, "#add", 3*uiPollInterval)
+	waitHidden(t, page, "#banner")
+	if err := page.Locator("[data-name]").First().WaitFor(); err != nil {
+		t.Fatalf("monitors did not appear after the grant: %v", err)
+	}
+}
+
+func TestUIBrowserUnidentifiedCallerIsToldWhy(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	src := &switchingIdentity{mu: sync.Mutex{}, who: nil, err: errors.New("tailscaled down")}
+	page := uiRolePage(t, e, src)
+	if err := page.Locator("#banner").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	text, err := page.Locator("#banner").TextContent()
+	if err != nil || !strings.Contains(text, "could not identify you") || strings.Contains(text, "has not granted") {
+		t.Fatalf("banner %q, %v", text, err)
+	}
+	src.set(roleWho(`{"role":"viewer"}`))
+	waitVisibleWithin(t, page, "[data-name]", 3*uiPollInterval)
+	waitHidden(t, page, "#banner")
+}
+
+func TestUIBrowserFailedMeRequestDoesNotBlock(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	src := &switchingIdentity{mu: sync.Mutex{}, who: roleWho(`{"role":"editor"}`), err: nil}
+	page := uiRolePage(t, e, src)
+	if err := page.Locator("#add").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Route("**/api/v1/me", func(r playwright.Route) { _ = r.Abort() }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := page.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Locator("[data-name]").First().WaitFor(); err != nil {
+		t.Fatalf("a failed /me request hid the monitors: %v", err)
+	}
+	text, _ := page.Locator("main").TextContent()
+	if strings.Contains(text, "has not granted") {
+		t.Fatalf("a failed /me request reported no role: %q", text)
+	}
+	if err := page.Unroute("**/api/v1/me"); err != nil {
+		t.Fatal(err)
+	}
+	waitVisibleWithin(t, page, "#add", 3*uiPollInterval)
+}
+
+func TestUIBrowserRefusedSaveShowsRole(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	src := &switchingIdentity{mu: sync.Mutex{}, who: roleWho(`{"role":"editor"}`), err: nil}
+	page := uiRolePage(t, e, src)
+	openAddForm(t, page)
+	fill(t, page, "#f-name", "lab-refused")
+	fill(t, page, "#f-addr", "10.9.0.8")
+	src.set(roleWho(`{"role":"viewer"}`))
+	if err := page.Locator("#save").Click(); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Locator("#form-error").WaitFor(); err != nil {
+		t.Fatal(err)
+	}
+	text, err := page.Locator("#form-error").TextContent()
+	if err != nil || !strings.Contains(text, "role editor is required") {
+		t.Fatalf("form error %q, %v", text, err)
+	}
+	e.mgr.mu.Lock()
+	created := false
+	for _, ent := range e.mgr.entries {
+		if ent.Name == "lab-refused" {
+			created = true
+		}
+	}
+	e.mgr.mu.Unlock()
+	if created {
+		t.Fatal("a refused save created a monitor")
+	}
 }
 
 func openAddForm(t *testing.T, page playwright.Page) {

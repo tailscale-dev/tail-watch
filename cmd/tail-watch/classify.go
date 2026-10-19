@@ -355,7 +355,7 @@ func (c *classifier) classify(ctx context.Context, res Result) Classified {
 	if needsICMP(in) {
 		in.deviceICMPOK = c.deviceState(ctx, res)
 	}
-	out.Layer = decide(in)
+	out.Layer = decideLayer(in)
 	return out
 }
 
@@ -745,7 +745,7 @@ func answeredByError(class errClass) bool {
 	return false
 }
 
-func decide(in classifyInput) layer {
+func decideLayer(in classifyInput) layer {
 	if in.local {
 		return decideDevice(in)
 	}

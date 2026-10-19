@@ -71,6 +71,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monosp
   margin: 0 auto;
   padding: 20px 16px 12px;
 }
+.bar-actions { display: flex; align-items: center; gap: 12px; }
+.who { color: var(--muted); font-size: 13px; }
 .brand { display: flex; align-items: baseline; gap: 12px; }
 .brand h1 { font-size: 20px; letter-spacing: -0.01em; }
 .views { display: flex; gap: 14px; }

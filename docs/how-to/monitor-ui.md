@@ -219,11 +219,12 @@ Behavior to expect when editing or deleting:
   logs `routes.json is present but the UI is off; leaving it unread`.
 
 Every monitor write is logged with the caller's address as a `monitor write`
-line with `op`, `target`, `status`, `outcome` and `remote`, and `user` and `caller` when
-the request came through [a Tailscale Service](monitor-ui-service.md). A probe from
-**Check** or **Save** is logged the same way with `op` set to `probe`. A route
-write is a `route write` line instead; see [Change a route](#change-a-route).
-To find writes, filter the JSON log on that message.
+line with `op`, `target`, `status`, `outcome` and `remote`. When tailscaled
+can resolve the caller it also has `user`, `node` and `tags`, and `role` when
+[roles](monitor-ui-roles.md) are on. A probe from **Check** or **Save** is
+logged the same way with `op` set to `probe`. A route write is a `route write`
+line instead; see [Change a route](#change-a-route). To find writes, filter
+the JSON log on that message.
 
 ## Read routes and sinks
 
@@ -246,8 +247,9 @@ header value, or the name of the environment variable or file that holds one.
 Sinks are not created, changed or deleted through the API. They stay in the
 config file.
 
-Both calls send `Content-Type: application/json` and pass the same Origin
-check as a monitor write. They are not authorized and they are not audited.
+Both calls are not audited. With
+[roles](monitor-ui-roles.md) on they need `viewer`. With roles off they are
+permitted, as every other request that reaches the listener is.
 
 ## Change a route
 
@@ -276,8 +278,9 @@ saves, routes to the sinks that remain, and lists the missing name in
 
 These writes are authorized like a monitor write. Each one, accepted or
 refused, is logged at info as `route write` with `op` (`route.create`,
-`route.replace` or `route.delete`), `route`, `status`, `outcome` and `remote`, plus `user`
-and `caller` behind a Tailscale Service.
+`route.replace` or `route.delete`), `route`, `status`, `outcome` and
+`remote`, plus the same verified `user`, `node` and `tags` as a monitor
+write.
 
 ## Preview where an event would go
 
@@ -306,5 +309,5 @@ reason `match.tags`. A filter that fails earlier, such as site or severity,
 still decides.
 
 The preview calls the same routing functions delivery uses. It requires JSON
-and the same Origin check as a monitor write. It is not authorized and it is
-not audited.
+and the same Origin check as a monitor write. It is not audited. With
+[roles](monitor-ui-roles.md) on it needs `editor`.

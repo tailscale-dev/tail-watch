@@ -125,6 +125,7 @@ heartbeat:
 | `listen` | string | no | `127.0.0.1:9109` | HTTP listen address, `host:port`. `--listen` overrides it. |
 | `state_dir` | string | no | unset | Directory for durable state. Created with mode `0700` when missing. |
 | `ui` | bool | no | `false` | Serve the monitor UI and API. `--ui` overrides it, and `--ui=false` turns it off. |
+| `authorization` | mapping | no | unset | Optional role check for the monitor API. See below. |
 | `local_only` | bool | no | `false` | Run without tailscaled. See below. |
 
 `state_dir` holds:
@@ -139,6 +140,27 @@ heartbeat:
 
 `state_dir` is required when `ui` is on (startup exits with an error otherwise)
 and when any sink sets `queue: disk`. `--once` ignores `ui`.
+
+### `authorization`
+
+Optional. When the section is absent, every request that reaches the listener
+is permitted. When it is set, `/api/v1` requests other than `GET /api/v1/me`
+need a role from the tailnet policy. See
+[Give the monitor UI viewer and editor roles](../how-to/monitor-ui-roles.md).
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `capability` | string | yes, when the section is present | unset | Capability name in a domain you control, containing `/cap/`. Not a `tailscale.com` name. |
+| `service` | string | no | unset | Tailscale Service, starting with `svc:`. Scopes the capability lookup to that Service. |
+
+`check-config` applies the same rules and names each field. It rejects:
+
+- an empty `capability`
+- a `capability` with no `/cap/` segment
+- a `capability` in the `tailscale.com` domain, including a subdomain
+- a `service` that does not start with `svc:`
+- the section while the UI is off (`collector.ui` and `--ui`)
+- the section with `local_only: true`
 
 ### `setec`
 
@@ -167,6 +189,7 @@ Local-only mode changes what the loader accepts:
 - A target with `network: tailnet` is rejected.
 - A `tsping` check is rejected.
 - `ui: true` is rejected, and so is the `--ui` flag.
+- `collector.authorization` is rejected.
 - `collector.setec` is rejected.
 - `url_setec`, `secret_setec`, `headers_setec`, and `heartbeat.url_setec`
   are rejected.

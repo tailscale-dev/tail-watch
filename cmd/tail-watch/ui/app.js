@@ -13,7 +13,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const app = {
   monitors: [], routes: [], sinks: [], signature: "", editing: null, deleting: null, probeSave: null,
   lastOk: true, peers: [], pickedName: "", checks: [], routingGen: 0, routingTouched: false,
-  previewGen: 0, previewTimer: 0, routeEditing: null, routeDeleting: null,
+  previewGen: 0, previewTimer: 0, routeEditing: null, routeDeleting: null, me: null,
 };
 
 async function api(method, path, body) {
@@ -31,6 +31,65 @@ async function api(method, path, body) {
     }
   }
   return { status: res.status, ok: res.ok, data };
+}
+
+// --- role: pure, no DOM; ui_role_test.go runs this block ---
+function canWrite(me) {
+  if (!me) return false;
+  if (me.authorization === false) return true;
+  return me.role === "editor";
+}
+
+function roleLabel(me) {
+  if (!me) return "";
+  const who = me.user || me.node || "";
+  if (!me.role) return who;
+  return who ? `${who} · ${me.role}` : me.role;
+}
+
+function blockedMessage(me) {
+  if (me && me.identified === false) {
+    return "tail-watch could not identify you. Open it through its Tailscale Service address, not the collector's IP and port.";
+  }
+  return "The tailnet policy has not granted this user a role.";
+}
+
+function denialMessage(status, body) {
+  if (status !== 403) return "";
+  const errors = body && Array.isArray(body.errors) ? body.errors : [];
+  if (errors.length > 0) return errors.join(" ");
+  return "The tailnet policy refused this request.";
+}
+// --- end role ---
+
+function failureLines(res, fallback) {
+  const denied = denialMessage(res.status, res.data);
+  if (denied) return [denied];
+  if (res.data && Array.isArray(res.data.errors) && res.data.errors.length > 0) return res.data.errors;
+  return [fallback];
+}
+
+async function loadMe() {
+  const res = await api("GET", "/api/v1/me").catch(() => null);
+  if (!res || !res.ok || !res.data) return;
+  app.me = res.data;
+  applyRole();
+}
+
+function applyRole() {
+  const me = app.me;
+  const label = roleLabel(me);
+  const who = $("#who");
+  who.textContent = label;
+  who.hidden = !me || me.authorization === false || label === "";
+  const write = canWrite(me);
+  $("#save").disabled = !write;
+  $("#route-save").disabled = !write;
+  showView();
+}
+
+function roleBlocked() {
+  return Boolean(app.me && app.me.authorization && !app.me.role);
 }
 
 function el(tag, props = {}, ...children) {
@@ -52,6 +111,18 @@ function showBanner(message, kind = "info") {
 }
 
 async function refresh() {
+  if (!app.me || roleBlocked()) await loadMe();
+  if (roleBlocked()) {
+    app.monitors = [];
+    app.routes = [];
+    app.signature = "";
+    app.lastOk = false;
+    showBanner(blockedMessage(app.me), "error");
+    $("#rows").replaceChildren();
+    $("#empty").hidden = true;
+    $(".table-wrap").hidden = true;
+    return;
+  }
   try {
     const res = await api("GET", "/api/v1/targets");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -95,7 +166,7 @@ function rowFor(m) {
     text: m.source === "config" ? "Config file" : "UI",
   });
   const actions = el("td", { class: "row-actions" });
-  if (!m.readonly) {
+  if (!m.readonly && canWrite(app.me)) {
     const edit = el("button", { type: "button", text: "Edit", "aria-label": `Edit ${m.name}` });
     edit.addEventListener("click", () => openEditor(m));
     const del = el("button", { type: "button", class: "quiet-danger", text: "Delete", "aria-label": `Delete ${m.name}` });
@@ -701,11 +772,11 @@ async function persist(def) {
       await refresh();
       return;
     }
-    showErrors(res.data?.errors ?? [`Request failed (HTTP ${res.status}).`]);
+    showErrors(failureLines(res, `Request failed (HTTP ${res.status}).`));
   } catch {
     showErrors(["Could not reach the collector."]);
   } finally {
-    save.disabled = false;
+    save.disabled = !canWrite(app.me);
   }
 }
 
@@ -723,14 +794,14 @@ async function submit(event) {
   } catch {
     probe = null;
   } finally {
-    save.disabled = false;
+    save.disabled = !canWrite(app.me);
   }
   if (!probe) {
     showErrors(["Could not reach the collector."]);
     return;
   }
   if (!probe.ok) {
-    showErrors(probe.data?.errors ?? [`Probe failed (HTTP ${probe.status}).`]);
+    showErrors(failureLines(probe, `Probe failed (HTTP ${probe.status}).`));
     return;
   }
   const failures = (probe.data?.results ?? [])
@@ -790,7 +861,7 @@ async function check() {
     else result.textContent = "No checks to run.";
     result.hidden = false;
   } else {
-    showErrors(res.data?.errors ?? [`Request failed (HTTP ${res.status}).`]);
+    showErrors(failureLines(res, `Request failed (HTTP ${res.status}).`));
   }
 }
 
@@ -823,7 +894,7 @@ async function confirmDelete() {
     const res = await api("DELETE", `/api/v1/targets/${encodeURIComponent(m.name)}`);
     $("#confirm").close();
     if (res.ok) showBanner(`Deleted ${m.name}.`, "ok");
-    else showBanner(res.data?.errors?.join(" ") ?? `Delete failed (HTTP ${res.status}).`, "error");
+    else showBanner(failureLines(res, `Delete failed (HTTP ${res.status}).`).join(" "), "error");
     await refresh();
   } catch {
     $("#confirm").close();
@@ -839,13 +910,18 @@ function setCurrent(id, on) {
 
 function showView() {
   const routes = location.hash === "#routes";
-  $("#view-routes").hidden = !routes;
-  $("#view-monitors").hidden = routes;
-  $("#add").hidden = routes;
-  $("#add-route").hidden = !routes;
+  const write = canWrite(app.me);
+  const blocked = roleBlocked();
+  $("#view-routes").hidden = !routes || blocked;
+  $("#view-monitors").hidden = routes || blocked;
+  $("#add").hidden = routes || !write;
+  $("#add-route").hidden = !routes || !write;
+  document.querySelectorAll(".write-hint").forEach((hint) => {
+    hint.hidden = !write;
+  });
   setCurrent("#nav-routes", routes);
   setCurrent("#nav-monitors", !routes);
-  if (routes) loadRoutePage();
+  if (routes && !blocked) loadRoutePage();
 }
 
 function sinkFilterText(match) {
@@ -889,7 +965,7 @@ function routeRow(route) {
     text: route.source === "config" ? "Config file" : "UI",
   });
   const actions = el("td", { class: "row-actions" });
-  if (!route.readonly) {
+  if (!route.readonly && canWrite(app.me)) {
     const edit = el("button", { type: "button", text: "Edit", "aria-label": `Edit route ${route.name}` });
     edit.addEventListener("click", () => openRouteEditor(route));
     const del = el("button", {
@@ -985,11 +1061,11 @@ async function saveRoute(event) {
       await loadRoutePage();
       return;
     }
-    showErrors(res.data?.errors ?? [`Request failed (HTTP ${res.status}).`], $("#route-form"));
+    showErrors(failureLines(res, `Request failed (HTTP ${res.status}).`), $("#route-form"));
   } catch {
     showErrors(["Could not reach the collector."], $("#route-form"));
   } finally {
-    save.disabled = false;
+    save.disabled = !canWrite(app.me);
   }
 }
 
@@ -1021,7 +1097,7 @@ async function confirmRouteDelete() {
       return;
     }
     const warning = $("#route-confirm-warning");
-    warning.textContent = (res.data?.errors ?? [`Delete failed (HTTP ${res.status}).`]).join(" ");
+    warning.textContent = failureLines(res, `Delete failed (HTTP ${res.status}).`).join(" ");
     warning.hidden = false;
   } catch {
     const warning = $("#route-confirm-warning");
@@ -1071,8 +1147,10 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
 });
 
-showView();
-refresh();
+loadMe().then(() => {
+  showView();
+  refresh();
+});
 setInterval(() => {
   if (!document.hidden) refresh();
 }, POLL_MS);

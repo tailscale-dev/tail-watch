@@ -30,29 +30,35 @@ silence, not credential theft.
 
 ## No login, on purpose
 
-There is no login. tail-watch has no user database, no session handling and no
-password to leak. Access control is the network: the listen address decides who
-can open a socket, and the tailnet ACL decides who can reach that address.
+There is no login page. tail-watch has no user database, no session handling
+and no password to leak. Identity is the tailnet's. With
+`collector.authorization` unset, access control is the network: the listen
+address decides who can open a socket, and the tailnet ACL decides who can
+reach that address. Every request that reaches the listener is permitted.
 
-The alternatives were weighed against a small tool that is meant to run
-unattended:
+With `collector.authorization` set, the same decision reads a role from the
+tailnet policy. `viewer` can read monitors, routes and sinks. `editor` can
+change them, and can validate, preview and probe. A caller with no role gets
+`403` and nothing changes. How to grant the roles is in
+[Give the monitor UI viewer and editor roles](../how-to/monitor-ui-roles.md).
+
+The role check does not close these gaps:
+
+- It does not authenticate a caller by itself. A process that can make
+  tailscaled answer for an editor's address is treated as that editor.
+- It does not cover `/metrics`, `/healthz`, the status page or the static
+  files under `/ui/`. A network grant that opens the listener opens those too.
+- It does not add a probe-only role. Saving a monitor probes that address on
+  every interval, so a role that can write already has the probe's reach.
+
+The alternatives that were not built:
 
 - **Built-in accounts.** They add credentials to store and rotate, a login
   page to defend, and a second identity system next to the one the tailnet
-  already has. For a monitor with a handful of operators, that is more attack
-  surface than the feature is worth.
-- **Tailscale identity from the request.** This is the natural fit for a
-  tailnet service, because the caller's identity is already authenticated. It
-  is not built in today. The write path passes every request through a single
-  authorization decision made before any change, so identity-based
-  authorization can be added at that one point later. The decision currently
-  permits everything that reaches the listener.
-- **Network scoping (chosen).** It relies on controls you already run and audit
-  and it has no state of its own.
-
-The cost is that everything reachable is trusted equally. Reading the monitor
-list needs no more than reaching the port, and a grant gives write access to
-everyone it covers.
+  already has.
+- **Trusting request headers.** `serve` can forward a login and a capability,
+  and it overwrites a header a remote client forged. A process on the collector
+  host can still write both. tail-watch asks tailscaled instead.
 
 ## The listen address is the security boundary
 
@@ -150,42 +156,44 @@ YAML file and restarting remains a complete alternative.
 ## The audit log
 
 Every create, replace, delete and probe is logged at info level, whether it was
-accepted or refused. Each entry has the operation, the monitor name, the
-outcome and the caller's remote address. Refused requests are logged too,
+accepted or refused. Each entry has the operation, the monitor or route name,
+the outcome and the caller's remote address. Refused requests are logged too,
 including those rejected for content type or origin, which makes probing
-visible. `remote` is the address of the connection, so on its own the log
-answers "which device did this", never "which person", because tail-watch has no
-login. A request that arrives through a proxy or a shared network namespace shows the
-address of the intermediary instead.
+visible. `remote` is the address of the connection. Behind `tailscale serve`
+that is a loopback address.
 
-Behind `tailscale serve` there is more. serve connects from loopback and tells the
-backend who called, so when the connection is from loopback tail-watch adds `user`, the
-caller's tailnet login from `Tailscale-User-Login`, and `caller`, their tailnet address
-from `X-Forwarded-For`. A connection from anywhere else never gets these fields, because
-a remote client could have written the headers. A process on the collector host can still
-forge them (see
-[the host trust boundary](#anyone-on-the-collector-host-is-trusted)). When serve sends
-no login, for example for a tagged node, the line has no `user`. Treat `user` as
-attribution for an honest operator, not as authentication.
+The login, node and tags come from tailscaled, not from a request header.
+tail-watch reads `X-Forwarded-For` only when the connection itself is
+loopback, and asks tailscaled who that address is. The line then carries
+`user` (empty for a tagged node), `node` and `tags`. With
+`collector.authorization` set it also carries `role`. When the request's
+`Tailscale-User-Login` header disagrees with the login tailscaled reports,
+the line has `identity_mismatch: true` and the `user` tailscaled reported.
+When the lookup fails, the line has `remote` and no `user`, `node` or `tags`.
+A line never takes `user` from a header.
+
+A process on the collector host can still present another node's address.
+See [the host trust boundary](#anyone-on-the-collector-host-is-trusted).
 
 The audit log is your way to reconstruct what changed. Ship it somewhere that
 someone who can edit monitors cannot rewrite.
 
 ## Anyone on the collector host is trusted
 
-The listener cannot tell a local process from `tailscale serve`. Both connect from
-loopback, and the audit log's `user` and `caller` fields come from headers that `serve`
-writes and a local process can write too. Anyone who can run a process in the collector's
-network stack can therefore reach the write API and name any login or tailnet address as
-the caller. They can also read the configuration, the environment and `state_dir`, so on a
-host where only trusted administrators have a shell this adds little. The case to weigh
-is a shared network namespace: in the Compose layout, and in a ProxyGroup sidecar pod,
-every container in the namespace is "local".
+The listener cannot tell a local process from `tailscale serve`. Both connect
+from loopback. The role check and the audit identity use the address in
+`X-Forwarded-For`, which serve sets and a local process can set too. A process
+on the collector host can send an editor's tailnet address, and tailscaled
+will report that editor. The role check does not stop it. That process can
+also read the configuration, the environment and `state_dir`, so on a host
+where only trusted administrators have a shell this adds little. The case to
+weigh is a shared network namespace: in the Compose layout, and in a
+ProxyGroup sidecar pod, every container in the namespace is "local".
 
-tail-watch does not close this gap. Keep shell and container access to the collector host
-as tight as the access you give the UI, and treat `user` and `caller` as attribution, not
-proof. Closing the gap needs a listener that only `serve` can open, such as a Unix socket,
-which is on the [roadmap](../../ROADMAP.md).
+tail-watch does not close this gap. Keep shell and container access to the
+collector host as tight as the access you give the UI. Closing the gap needs
+a listener that only `serve` can open, such as a Unix socket, which is on the
+[roadmap](../../ROADMAP.md).
 
 ## Choosing whether to enable it
 

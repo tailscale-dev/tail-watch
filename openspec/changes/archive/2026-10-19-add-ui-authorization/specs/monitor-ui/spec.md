@@ -8,7 +8,10 @@ When the UI loads, it SHALL request `GET /api/v1/me` and adapt to the `role` it 
 For `editor` the UI SHALL behave as it does with authorization off. For `viewer` it SHALL
 list monitors, routes and sinks and SHALL hide or disable Add, Edit, Delete and Save
 controls on monitors and routes. For an empty role it SHALL show a message that the
-tailnet policy has not granted this user a role, and SHALL show no monitor data. The UI
+tailnet policy has not granted this user a role, or, when `identified` is false, that the
+caller could not be identified, and SHALL show no monitor data. While the role is empty,
+or a request for it failed, the UI SHALL ask again on its refresh interval and SHALL NOT
+treat a failed request as an empty role. The UI
 SHALL show the caller's login, or node name for a tagged node, and role. A write the
 server still refuses with 403 SHALL be shown as an error naming the missing role.
 

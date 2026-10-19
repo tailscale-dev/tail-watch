@@ -16,8 +16,11 @@
       <a href="#routes" id="nav-routes">Routes</a>
     </nav>
   </div>
-  <button type="button" id="add" class="primary">Add monitor</button>
-  <button type="button" id="add-route" class="primary" hidden>Add route</button>
+  <div class="bar-actions">
+    <p id="who" class="who" hidden></p>
+    <button type="button" id="add" class="primary">Add monitor</button>
+    <button type="button" id="add-route" class="primary" hidden>Add route</button>
+  </div>
 </header>
 
 <main>
@@ -41,7 +44,7 @@
       <tbody id="rows"></tbody>
     </table>
   </div>
-  <p id="empty" class="empty" hidden>No monitors yet. Add one to start checking a device.</p>
+  <p id="empty" class="empty" hidden>No monitors yet.<span class="write-hint"> Add one to start checking a device.</span></p>
   </section>
 
   <section id="view-routes" hidden>
@@ -81,7 +84,7 @@
         <tbody id="route-rows"></tbody>
       </table>
     </div>
-    <p id="routes-empty" class="empty" hidden>No routes yet. Add one to send a monitor to a chosen set of sinks.</p>
+    <p id="routes-empty" class="empty" hidden>No routes yet.<span class="write-hint"> Add one to send a monitor to a chosen set of sinks.</span></p>
   </section>
 </main>
 

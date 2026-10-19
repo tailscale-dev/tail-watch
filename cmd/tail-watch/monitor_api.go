@@ -51,7 +51,12 @@ type monitorManager struct {
 	alerts     snapshotSource
 	peers      peerSource
 	log        *slog.Logger
-	authorize  func(*http.Request) error
+	// authz resolves the caller. It is set whenever tailscaled can be asked,
+	// including when authorization is off, so the audit log stays verified.
+	authz *resolver
+	// authorize is the single decision. With authorization off it permits
+	// every request. need is the role the operation requires.
+	authorize  func(*http.Request, role) error
 	save       func(dir string, targets []dynamicTarget) error
 	saveRoutes func(dir string, routes []dynamicRoute) error
 	// closeIncident closes name's open incident with reason removed. Re-adding
@@ -87,7 +92,8 @@ func newMonitorManager(cfg *Config, entries []dynamicTarget, reg targetRegistry,
 		alerts:     alerts,
 		peers:      nil,
 		log:        log,
-		authorize:  func(*http.Request) error { return nil },
+		authz:      nil,
+		authorize:  func(*http.Request, role) error { return nil },
 		save:       saveDynamic,
 		saveRoutes: saveRoutes,
 
@@ -490,6 +496,61 @@ func writeAPIError(w http.ResponseWriter, e *apiError) {
 		body["used_by"] = e.usedBy
 	}
 	writeJSON(w, e.status, body)
+}
+
+// meView is the body of GET /api/v1/me.
+type meView struct {
+	Authorization bool     `json:"authorization"`
+	User          string   `json:"user"`
+	Node          string   `json:"node"`
+	Tags          []string `json:"tags"`
+	Role          string   `json:"role"`
+	Identified    bool     `json:"identified"`
+}
+
+func (m *monitorManager) handleMe(w http.ResponseWriter, r *http.Request) {
+	if m.authz == nil || !m.authz.enabled {
+		writeJSON(w, http.StatusOK, meView{
+			Authorization: false, User: "", Node: "", Tags: []string{}, Role: string(roleEditor), Identified: false,
+		})
+		return
+	}
+	c, err := m.authz.resolve(r)
+	if err != nil {
+		m.warnUnresolved(r, err)
+		writeJSON(w, http.StatusOK, meView{
+			Authorization: true, User: "", Node: "", Tags: []string{}, Role: "", Identified: false,
+		})
+		return
+	}
+	tags := c.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	writeJSON(w, http.StatusOK, meView{
+		Authorization: true, User: c.User, Node: c.Node, Tags: tags, Role: string(c.Role), Identified: true,
+	})
+}
+
+// authorizeRequest is the role check installed when collector.authorization is
+// set. An unresolved caller is denied and logged at warn.
+func (m *monitorManager) authorizeRequest(r *http.Request, need role) error {
+	if m.authz == nil || !m.authz.enabled {
+		return nil
+	}
+	c, err := m.authz.resolve(r)
+	if err != nil {
+		m.warnUnresolved(r, err)
+		return errNoIdentity
+	}
+	return decide(need, c)
+}
+
+func (m *monitorManager) warnUnresolved(r *http.Request, err error) {
+	if m.log == nil || r == nil {
+		return
+	}
+	m.log.WarnContext(r.Context(), "ui caller unresolved", "remote", r.RemoteAddr, "err", err.Error())
 }
 
 func (m *monitorManager) handleList(w http.ResponseWriter, _ *http.Request) {

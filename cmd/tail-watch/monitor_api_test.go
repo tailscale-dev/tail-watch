@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"tailscale.com/client/tailscale/apitype"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tstime"
 	"tailscale.com/types/opt"
@@ -409,7 +410,7 @@ func TestMonitorGuardRejectsBeforeChanging(t *testing.T) {
 		t.Fatalf("delete without JSON type: %d", s)
 	}
 
-	e.mgr.authorize = func(*http.Request) error { return errors.New("read-only viewer") }
+	e.mgr.authorize = func(*http.Request, role) error { return errors.New("read-only viewer") }
 	for _, r := range []struct{ method, path string }{
 		{"POST", "/api/v1/targets"}, {"PUT", "/api/v1/targets/lab-nas"}, {"DELETE", "/api/v1/targets/lab-nas"},
 	} {
@@ -417,11 +418,20 @@ func TestMonitorGuardRejectsBeforeChanging(t *testing.T) {
 			t.Errorf("%s denied write: %d %s", r.method, s, b)
 		}
 	}
-	if _, ok := e.list(t)["lab-nas"]; !ok {
+	e.mgr.mu.Lock()
+	kept := false
+	for _, ent := range e.mgr.entries {
+		if ent.Name == "lab-nas" {
+			kept = true
+		}
+	}
+	e.mgr.mu.Unlock()
+	if !kept {
 		t.Fatal("a denied delete removed the monitor")
 	}
-	if s, _ := e.do(t, http.MethodPost, "/api/v1/validate", labNAS); s != 200 {
-		t.Fatalf("validate must not need authorization: %d", s)
+	s, b := e.do(t, http.MethodPost, "/api/v1/validate", labNAS)
+	if s != 403 || !strings.Contains(b, "read-only viewer") {
+		t.Fatalf("validate must be authorized: %d %s", s, b)
 	}
 }
 
@@ -658,7 +668,7 @@ func TestMonitorProbeGuard(t *testing.T) {
 	); s != http.StatusForbidden {
 		t.Errorf("foreign origin: %d %s", s, b)
 	}
-	e.mgr.authorize = func(*http.Request) error { return errors.New("read-only viewer") }
+	e.mgr.authorize = func(*http.Request, role) error { return errors.New("read-only viewer") }
 	if s, b := e.do(t, http.MethodPost, "/api/v1/probe", body); s != http.StatusForbidden ||
 		!strings.Contains(b, "read-only viewer") {
 		t.Errorf("denied probe: %d %s", s, b)
@@ -666,7 +676,7 @@ func TestMonitorProbeGuard(t *testing.T) {
 	if dialed.Load() {
 		t.Error("a refused probe ran a check")
 	}
-	e.mgr.authorize = func(*http.Request) error { return nil }
+	e.mgr.authorize = func(*http.Request, role) error { return nil }
 	if s, b := e.do(t, http.MethodPost, "/api/v1/probe", body); s != http.StatusOK {
 		t.Fatalf("probe: %d %s", s, b)
 	}
@@ -1126,5 +1136,219 @@ func TestMonitorProbeTSPingMatchesProber(t *testing.T) {
 	checkProbeResults(t, string(b), []wantProbeResult{{check: "tsping", ok: false, err: "timeout: "}})
 	if !fetched.Load() {
 		t.Error("the probe did not use the app's resolver")
+	}
+}
+
+func (e *apiEnv) useIdentity(who *apitype.WhoIsResponse) {
+	e.mgr.authz = roleResolver(ident(who, nil), "", true)
+	e.mgr.authorize = e.mgr.authorizeRequest
+}
+
+//nolint:gocognit // Each subtest is one role against the route table.
+func TestAuthorizationByRole(t *testing.T) {
+	t.Parallel()
+	reads := []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/targets"},
+		{http.MethodGet, "/api/v1/peers"},
+		{http.MethodGet, "/api/v1/routes"},
+		{http.MethodGet, "/api/v1/sinks"},
+	}
+	writes := []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/targets", labNAS},
+		{http.MethodPut, "/api/v1/targets/lab-nas", labNAS},
+		{http.MethodDelete, "/api/v1/targets/lab-nas", ""},
+		{http.MethodPost, "/api/v1/validate", labNAS},
+		{http.MethodPost, "/api/v1/probe", labNAS},
+		{http.MethodPost, "/api/v1/routes", `{"name":"db-team","sinks":["hook"]}`},
+		{http.MethodPut, "/api/v1/routes/db-team", `{"name":"db-team","sinks":["hook"]}`},
+		{http.MethodDelete, "/api/v1/routes/db-team", ""},
+		{http.MethodPost, "/api/v1/route-preview", `{"name":"x","addr":"10.0.0.1","checks":["icmp"]}`},
+	}
+	as := func(t *testing.T, e *apiEnv, method, path, body string, opts ...reqOpt) (int, string) {
+		t.Helper()
+		opts = append(opts, withHeader("X-Forwarded-For", "100.64.0.7"))
+		return e.do(t, method, path, body, opts...)
+	}
+	t.Run("viewer", func(t *testing.T) {
+		t.Parallel()
+		e := newAPIEnv(t)
+		e.useIdentity(whoisCaller("alice@example.com", "phone", nil, `{"role":"viewer"}`))
+		for _, r := range reads {
+			if s, b := as(t, e, r.method, r.path, ""); s != http.StatusOK {
+				t.Errorf("%s %s: %d %s", r.method, r.path, s, b)
+			}
+		}
+		for _, r := range writes {
+			s, b := as(t, e, r.method, r.path, r.body)
+			if s != http.StatusForbidden || !strings.Contains(b, "role editor is required") {
+				t.Errorf("%s %s: %d %s", r.method, r.path, s, b)
+			}
+		}
+		e.mgr.mu.Lock()
+		created := len(e.mgr.entries)
+		e.mgr.mu.Unlock()
+		if created != 0 {
+			t.Fatal("a viewer created a monitor")
+		}
+		s, b := as(t, e, http.MethodPost, "/api/v1/targets", labNAS, withHeader("Content-Type", "text/plain"))
+		if s != http.StatusUnsupportedMediaType {
+			t.Fatalf("content type before the role check: %d %s", s, b)
+		}
+		s, b = as(t, e, http.MethodPost, "/api/v1/targets", labNAS, withHeader("Origin", "https://example.com"))
+		if s != http.StatusForbidden || !strings.Contains(b, "cross-origin") || strings.Contains(b, "role editor") {
+			t.Fatalf("origin before the role check: %d %s", s, b)
+		}
+	})
+	t.Run("editor", func(t *testing.T) {
+		t.Parallel()
+		e := newAPIEnv(t)
+		e.useIdentity(whoisCaller("alice@example.com", "phone", nil, `{"role":"editor"}`))
+		for _, r := range reads {
+			if s, b := as(t, e, r.method, r.path, ""); s != http.StatusOK {
+				t.Errorf("%s %s: %d %s", r.method, r.path, s, b)
+			}
+		}
+		for _, r := range writes {
+			if s, b := as(t, e, r.method, r.path, r.body); s == http.StatusForbidden {
+				t.Errorf("%s %s forbidden: %s", r.method, r.path, b)
+			}
+		}
+	})
+	t.Run("no role", func(t *testing.T) {
+		t.Parallel()
+		e := newAPIEnv(t)
+		e.useIdentity(whoisCaller("alice@example.com", "phone", nil, `{"role":"owner"}`))
+		for _, r := range append(reads, []struct{ method, path string }{
+			{http.MethodPost, "/api/v1/targets"},
+		}...) {
+			body := ""
+			if r.method != http.MethodGet {
+				body = labNAS
+			}
+			s, b := as(t, e, r.method, r.path, body)
+			if s != http.StatusForbidden || !strings.Contains(b, "no role was granted") {
+				t.Errorf("%s %s: %d %s", r.method, r.path, s, b)
+			}
+		}
+		for _, r := range writes {
+			s, b := as(t, e, r.method, r.path, r.body)
+			if s != http.StatusForbidden || !strings.Contains(b, "no role was granted") {
+				t.Errorf("%s %s: %d %s", r.method, r.path, s, b)
+			}
+		}
+	})
+	t.Run("off", func(t *testing.T) {
+		t.Parallel()
+		e := newAPIEnv(t)
+		for _, r := range reads {
+			if s, b := e.do(t, r.method, r.path, ""); s != http.StatusOK {
+				t.Errorf("%s %s: %d %s", r.method, r.path, s, b)
+			}
+		}
+		for _, r := range writes {
+			if s, b := e.do(t, r.method, r.path, r.body); s == http.StatusForbidden {
+				t.Errorf("%s %s forbidden while authorization is off: %s", r.method, r.path, b)
+			}
+		}
+	})
+}
+
+//nolint:gocognit // Each subtest is one caller of GET /api/v1/me.
+func TestMe(t *testing.T) {
+	t.Parallel()
+	t.Run("editor", func(t *testing.T) {
+		t.Parallel()
+		e := newAPIEnv(t)
+		e.useIdentity(whoisCaller("alice@example.com", "phone", nil, `{"role":"editor"}`))
+		status, body := e.do(t, http.MethodGet, "/api/v1/me", "",
+			withHeader("X-Forwarded-For", "100.64.0.7"),
+			withHeader("Tailscale-User-Login", "forged@example.com"),
+			withHeader("Tailscale-App-Capabilities", `{"example.com/cap/tail-watch":[{"role":"viewer"}]}`),
+		)
+		if status != http.StatusOK {
+			t.Fatalf("me %d %s", status, body)
+		}
+		var got meView
+		if err := json.Unmarshal([]byte(body), &got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.Authorization || got.Role != "editor" || got.User != "alice@example.com" || got.Node != "phone" ||
+			!got.Identified {
+			t.Fatalf("me %+v", got)
+		}
+		if strings.Contains(body, "forged@example.com") || strings.Contains(body, "Tailscale-App-Capabilities") {
+			t.Fatalf("response includes a header value: %s", body)
+		}
+	})
+	t.Run("authorization off", func(t *testing.T) {
+		t.Parallel()
+		e := newAPIEnv(t)
+		status, body := e.do(t, http.MethodGet, "/api/v1/me", "",
+			withHeader("Tailscale-User-Login", "forged@example.com"),
+		)
+		if status != http.StatusOK || strings.Contains(body, "forged@example.com") {
+			t.Fatalf("me %d %s", status, body)
+		}
+		var got meView
+		if err := json.Unmarshal([]byte(body), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Authorization || got.Role != "editor" || got.User != "" {
+			t.Fatalf("me %+v", got)
+		}
+	})
+	t.Run("no role", func(t *testing.T) {
+		t.Parallel()
+		e := newAPIEnv(t)
+		e.useIdentity(whoisCaller("alice@example.com", "phone", nil, `{"role":"owner"}`))
+		status, body := e.do(t, http.MethodGet, "/api/v1/me", "", withHeader("X-Forwarded-For", "100.64.0.7"))
+		if status != http.StatusOK {
+			t.Fatalf("me %d %s", status, body)
+		}
+		var got meView
+		if err := json.Unmarshal([]byte(body), &got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.Authorization || got.Role != "" || got.User != "alice@example.com" || !got.Identified {
+			t.Fatalf("me %+v", got)
+		}
+	})
+	t.Run("unidentified", func(t *testing.T) {
+		t.Parallel()
+		e := newAPIEnv(t)
+		e.useIdentity(whoisCaller("alice@example.com", "phone", nil, `{"role":"editor"}`))
+		status, body := e.do(t, http.MethodGet, "/api/v1/me", "")
+		if status != http.StatusOK {
+			t.Fatalf("me %d %s", status, body)
+		}
+		var got meView
+		if err := json.Unmarshal([]byte(body), &got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.Authorization || got.Role != "" || got.User != "" || got.Node != "" || got.Identified {
+			t.Fatalf("me %+v", got)
+		}
+		if !strings.Contains(e.logs.String(), "ui caller unresolved") {
+			t.Fatalf("unresolved caller was not logged: %s", e.logs.String())
+		}
+	})
+}
+
+func TestViewerWriteIsAudited(t *testing.T) {
+	t.Parallel()
+	e := newAPIEnv(t)
+	e.useIdentity(whoisCaller("alice@example.com", "phone", nil, `{"role":"viewer"}`))
+	status, body := e.do(t, http.MethodPost, "/api/v1/targets", labNAS, withHeader("X-Forwarded-For", "100.64.0.7"))
+	if status != http.StatusForbidden {
+		t.Fatalf("write %d %s", status, body)
+	}
+	out := e.logs.String()
+	for _, want := range []string{
+		`"msg":"monitor write"`, `"outcome":"refused"`, `"user":"alice@example.com"`,
+		`"node":"phone"`, `"role":"viewer"`, `"remote":"127.0.0.1:`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("audit line missing %s:\n%s", want, out)
+		}
 	}
 }
