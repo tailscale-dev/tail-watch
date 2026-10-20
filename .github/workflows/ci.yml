@@ -47,3 +47,43 @@ jobs:
         with:
           version: v2.18.2
           args: release --snapshot --clean
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: |
+            docs/**/*.md
+            examples/**/*.md
+            *.md
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+      - run: npx --yes @fission-ai/openspec@1.13.2 validate --specs --strict
+
+  ui-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go run github.com/mxschmitt/playwright-go/cmd/playwright install --with-deps chromium
+      - name: Run browser tests and fail on skips
+        run: |
+          go test -count=1 -v -run 'TestUIBrowser|TestTeamsCardRender' ./cmd/tail-watch | tee browser.log
+          if grep -q -- '--- SKIP' browser.log; then
+            echo "::error::a browser test skipped; the Playwright driver or Chromium is missing"
+            exit 1
+          fi
