@@ -293,6 +293,31 @@
   cluster, the Tailscale Service `svc:tw-pg-web`, and every tailnet device with the `tw-pg`
   hostname prefix.
 
+## Fly.io example
+
+- `examples/fly/` (Dockerfile, `start.sh`, `fly.toml`, `tail-watch.yaml`) runs tail-watch
+  beside a kernel-mode `tailscaled` in one Fly Machine; `docs/how-to/deploy-fly.md` is the
+  how-to. `TestFlyExampleAgrees` (not gated) ties its `state_dir`, volume mount and
+  `chmod` together and keeps the `tailscale/tailscale` tag equal to `examples/compose.yaml`.
+- Fly Machines have `/dev/net/tun`, run as root with full capabilities, and kernel-mode
+  `tailscaled` reports `TUN: true`, so tail-watch's userspace check passes and raw ICMP
+  works. The `CONNMARK` iptables warning at startup is harmless. Deploy with `--ha=false`:
+  the default two Machines would double-alert. The whole Machine used about 70 MB.
+- A plain `tskey-auth-` key must reach `TS_AUTHKEY` unchanged. Appending
+  `?ephemeral=false&preauthorized=true` (valid only on an OAuth client secret) makes the
+  control plane answer `invalid key: unable to validate API key`. The `TS_CLIENT_SECRET`
+  in the `default/tail-watch-vm` ESC env is a plain auth key despite its name. An OAuth
+  secret has not been tried with this image.
+- `TS_ACCEPT_DNS` must be `true` there: with it off, `tcp:`/`http:` checks fail with
+  `lookup <node>: no such host` while `tsping` still works, so a `tsping`-only test hides
+  it. Test with a `tcp:` target, and expect a false DOWN alert if a sink is real. The live
+  app is `tw-fly-rshade`, deployed from `~/fly-tail-watch/` (real targets, not in the
+  repo); the UI is `svc:tail-watch-outside`, not `svc:tail-watch`, which the dogfood VM hosts.
+- Check it live with `fly ssh console -C "wget -qO- http://127.0.0.1:9109/metrics"`.
+  Set secrets from ESC without printing them: put the `fly secrets set --stage` call in
+  a short script and run `! esc run default/tail-watch-vm -- sh <script>`. A long command
+  pasted into the prompt wraps and splits at the newline.
+
 ## Dogfood VM (Proxmox)
 
 - A small customer-style deployment runs on Proxmox VM 206, `tail-watch-1`, built from

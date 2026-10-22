@@ -1,0 +1,32 @@
+# tail-watch and a kernel-mode tailscaled in one Fly Machine.
+#
+#   cd examples/fly
+#   fly launch --no-deploy --copy-config --name <app>
+#   fly volumes create tail_watch_data --size 1 --region iad
+#   fly secrets set TS_AUTHKEY=tskey-auth-... SLACK_WEBHOOK_URL=https://hooks.slack.com/...
+#   fly deploy --ha=false
+#
+# There is no [http_service]: nothing is reachable from the public internet.
+# TS_AUTHKEY is a reusable auth key. start.sh advertises tag:monitor; set TS_TAGS
+# below if the key carries another tag.
+app = "tail-watch-example"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TS_HOSTNAME = "tail-watch-fly"
+  # TS_SERVE_SERVICE = "tail-watch-outside"
+
+[[mounts]]
+  source = "tail_watch_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[[restart]]
+  policy = "always"

@@ -15,7 +15,7 @@ on amd64 and arm64, so no Go toolchain is needed. Archives are named
 URL uses the tag, which has a leading `v`; the archive name does not.
 
 ```bash
-VERSION=0.2.0   # release version, without the leading v
+VERSION=0.3.0   # release version, without the leading v
 OS=linux        # linux, darwin or windows
 ARCH=amd64      # amd64 or arm64
 
@@ -279,3 +279,8 @@ Things to know:
 - To keep notification state and UI monitors across restarts, mount a volume
   at `collector.state_dir`. See
   [Manage monitors in the UI](monitor-ui.md).
+
+## Run a second collector on Fly.io
+
+To watch the tailnet from outside your network, see
+[Monitor from outside your network with Fly.io](deploy-fly.md).

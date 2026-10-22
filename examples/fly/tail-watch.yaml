@@ -1,0 +1,42 @@
+# Baked into the image by examples/fly/Dockerfile. Edit it, then fly deploy.
+# Secrets come from fly secrets set, never from this file.
+collector:
+  listen: 127.0.0.1:9109
+  state_dir: /data/tail-watch
+  # ui: true
+
+defaults:
+  interval: 30s
+  timeout: 5s
+  fail_threshold: 3
+  recover_threshold: 2
+
+targets:
+  - name: home-router
+    addr: home-router
+    site: home
+    network: tailnet
+    checks: [tsping]
+
+  - name: home-nas
+    addr: home-nas
+    site: home
+    network: tailnet
+    parent: home-router
+    checks:
+      - tsping
+      - tcp:445
+
+sinks:
+  - name: ops-slack
+    type: slack
+    url_env: SLACK_WEBHOOK_URL
+    min_severity: warn
+    group_wait: 10s
+    queue: disk
+
+# A Machine that dies cannot alert, so also point this at a dead-man's-switch
+# service and set HEARTBEAT_URL with fly secrets set.
+# heartbeat:
+#   url_env: HEARTBEAT_URL
+#   interval: 1m
