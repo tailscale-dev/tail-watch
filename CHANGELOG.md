@@ -20,7 +20,8 @@
 
 ### Changed
 
-- Go is 1.27.2, in the module, the toolchain pin and the container image.
+- Go is 1.27.3, in the module, the toolchain pin and the container image. 1.27.3 fixes
+  GO-2026-6809 in `crypto/x509`.
 
 ## 0.2.0 - 2026-10-15
 

@@ -1,6 +1,6 @@
 module github.com/tailscale-dev/tail-watch
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/mxschmitt/playwright-go v0.6201.1
