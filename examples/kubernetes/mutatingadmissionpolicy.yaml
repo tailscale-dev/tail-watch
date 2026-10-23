@@ -49,7 +49,7 @@ spec:
               path: "/spec/containers/-",
               value: Object.spec.containers{
                 name: "tail-watch",
-                image: "ghcr.io/tailscale-dev/tail-watch:0.2.0", // x-release-please-version
+                image: "ghcr.io/tailscale-dev/tail-watch:0.3.0", // x-release-please-version
                 imagePullPolicy: "IfNotPresent",
                 args: [
                   "--config", "/etc/tail-watch/tail-watch.yaml",

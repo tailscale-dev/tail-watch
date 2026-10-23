@@ -2,6 +2,26 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## 0.3.0 - 2026-10-23
+
+### Added
+
+- `collector.authorization` limits the monitor UI and API by tailnet identity. The
+  collector asks `tailscaled` who the caller is and reads their app capability grant,
+  which gives the `viewer` or `editor` role. With the section unset, every request is
+  permitted as before. See [Give the monitor UI viewer and editor roles](docs/how-to/monitor-ui-roles.md).
+- `collector.setec` reads sink and heartbeat secrets from a setec server, through
+  `url_setec`, `secret_setec`, `headers_setec` and `heartbeat.url_setec`. A value
+  changes after the next `poll_interval`. See
+  [Read secrets from setec](docs/how-to/setec-secrets.md).
+- A how-to and `examples/fly/` for running a second collector on Fly.io, to monitor the
+  tailnet from outside your network. See
+  [Monitor from outside your network with Fly.io](docs/how-to/deploy-fly.md).
+
+### Changed
+
+- Go is 1.27.2, in the module, the toolchain pin and the container image.
+
 ## 0.2.0 - 2026-10-15
 
 ### Added

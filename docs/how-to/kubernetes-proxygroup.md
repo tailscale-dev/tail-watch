@@ -220,7 +220,7 @@ import (
 func sidecar(name string) map[string]any {
 	return map[string]any{
 		"name":            "tail-watch",
-		"image":           "ghcr.io/tailscale-dev/tail-watch:0.2.0", // x-release-please-version
+		"image":           "ghcr.io/tailscale-dev/tail-watch:0.3.0", // x-release-please-version
 		"imagePullPolicy": "IfNotPresent",
 		"args": []string{"--config", "/etc/tail-watch/tail-watch.yaml",
 			"--listen", "127.0.0.1:9109"},
