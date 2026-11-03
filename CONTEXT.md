@@ -124,7 +124,8 @@ token) are allowed only through `*_env` / `*_file` keys, like the existing sinks
 
 ## Roadmap Process
 
-ROADMAP.md is maintained read-only with respect to GitHub: `/roadmap sync` pulls issues
-in when people file them, and does not push `roadmap/*` or `effort/*` labels. Items with
-no issue are plain bullets. New behavior lands through an OpenSpec change under
-`openspec/changes/`.
+ROADMAP.md is synced with `/roadmap sync` against the commit history and the archived
+OpenSpec changes and specs only. This repo files no GitHub issues, so sync never creates or
+links an issue and never pushes `roadmap/*` or `effort/*` labels. An item flips to done when
+its OpenSpec change is archived or its commits land on main; a drafted change stays
+unchecked. New behavior lands through an OpenSpec change under `openspec/changes/`.

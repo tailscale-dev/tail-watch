@@ -5,8 +5,9 @@
 Pingdom inside the tailnet: poll devices and services, alert on state changes, and use the
 tailnet's own view to say why a check failed. Boundaries are in [CONTEXT.md](CONTEXT.md).
 
-Items have no GitHub issues yet; when one is filed, `/roadmap sync` links it here. LOE key:
-`[S]` 1-2 hours, `[M]` half a day to a day, `[L]` multi-day.
+This repo does not use GitHub issues for the roadmap. `/roadmap sync` checks each item against
+commit history and archived OpenSpec changes and specs, and never files issues or pushes labels.
+LOE key: `[S]` 1-2 hours, `[M]` half a day to a day, `[L]` multi-day.
 
 ## Immediate Focus
 
@@ -25,8 +26,6 @@ Phase 2 of the original design, ordered by value to an operator who already runs
   PagerDuty account lets us run the live check (task 6.4 of `add-pagerduty-sink`) [M]
 - [ ] incident.io sink: HTTP alert source, `firing` and `resolved` paired by
   `deduplication_key`. OpenSpec change `add-incidentio-sink` drafted [M]
-- [ ] Setec as a secret source (`*_setec` keys beside `*_env` / `*_file`). OpenSpec change
-  `add-setec-secrets` drafted [M]
 - [ ] TLS expiry check (`tls:` is rejected today). Also covers the `*.ts.net`
   certificates that Tailscale Services and Serve use [M]
 - [ ] Emit `target.degraded`: path warnings (direct to DERP or relay) with latency
@@ -65,9 +64,6 @@ Items that use more of Tailscale's own features, per the "Dogfooding Tailscale" 
 - [ ] Surface tailscaled's own health: `Status().Health` and the backend state as a metric
   and as a classifier input, so a collector that is itself partitioned does not page for
   its targets. Confirm what `presence.go` already reads first [M]
-- [ ] How-to: watch the watcher. Two collectors each run an `http:` check against the
-  other's `/healthz` through its Tailscale Service, with no shared state and no external
-  heartbeat service [S]
 - [ ] Declarative `tailscale serve` config for the systemd deployment, in place of the
   imperative `tailscale serve --service ... --bg`. Check which Tailscale version added
   it [S]
@@ -91,6 +87,10 @@ Phase 3 and deferred ideas.
 
 ### 2026-Q4
 
+- [x] `watch-the-watcher`: two collectors check each other's `/healthz` through Tailscale
+  Services; how-to and live check. Closed 2026-11-02. [S]
+- [x] `setec-secrets`: `*_setec` keys beside `*_env` / `*_file` for sink and heartbeat secrets.
+  Closed 2026-10-17. [M]
 - [x] `teams-sink`: Teams Workflows webhook sink with Adaptive Cards. Closed 2026-10-04. [L]
 - [x] `notification-routes`: named routes from YAML or the UI. Closed 2026-10-02. [L]
 - [x] `proxygroup-sidecar`: `local_only` collector as a ProxyGroup sidecar. Closed
@@ -120,7 +120,7 @@ first.
 - Not an NMS: up or down only.
 - No changes to tailscaled or the control server.
 - No shared state between collectors.
-- Secrets only in `*_env` / `*_file` keys (and `*_setec` once `add-setec-secrets` lands);
+- Secrets only in `*_env` / `*_file` keys (and `*_setec`);
   never logged, persisted or shown.
 - No credentials for discovery.
 - Reports failures; never acts on them.
