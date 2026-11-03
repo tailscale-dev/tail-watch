@@ -78,6 +78,9 @@ The subject is the first line:
 
 ### Pull requests
 
+- Do not push to `main`. Start each OpenSpec change on a branch named for it
+  (`git switch -c <change-name>` when the change is created) and open a pull
+  request when it is archived.
 - Write the PR title as a Conventional Commit (`fix: retry tsping once`), not
   a `dir: verb` line. It becomes the squash-merge commit subject that
   release-please reads. GitHub appends `(#nnnn)` when it squash-merges; do not
