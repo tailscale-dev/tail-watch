@@ -1,0 +1,25 @@
+# Tasks
+
+## 1. Live check on the Docker test tailnet (`scripts/live-stack.sh`, `docs/contributing/`)
+
+- [x] 1.1 Find out whether `scripts/live-stack.sh up` can host two collector nodes. Read `scripts/live-stack.sh` and `cmd/tail-watch/testdata/compose.live-notify.yaml`, and write the answer into the commit message or a note in this change. If it cannot, add a second collector `tailscale` service to `compose.live-notify.yaml` (hostnames prefixed like the other fixtures so `down` removes their devices). Verify `scripts/live-stack.sh up` prints two collector node addresses and `scripts/live-stack.sh down` leaves no device with that prefix in `tailscale.exe status`.
+- [x] 1.2 Define two throwaway Services (`svc:tw-mw-a`, `svc:tw-mw-b`) with `PUT /tailnet/-/services/<name>`, and prepare a temporary policy with the grant and `autoApprovers.services` entries from design.md using `tail-acl`. The agent cannot push policy, so hand over the exact `! tail-acl ... upload --if-match '"<etag>"'` command. Save the live policy first. Verify `tail-acl --file <policy> plan` shows only the expected additions before the user pushes it.
+- [x] 1.3 Run the page's steps against the two nodes: `tailscale serve --service=svc:tw-mw-a --https=443 --bg 127.0.0.1:9109` on each, a collector on each with `network: tailnet`, `accept DNS` on, and the `http:https://<svc>.<tailnet>.ts.net/healthz|ok` target for the other side. Never use the host tailnet. Verify both targets go `UP` and `GET /healthz` on each Service name returns `ok`.
+- [x] 1.4 Stop one collector and record, from the surviving one, the alert event, the failure layer the classifier reports for a Service address, and the time to `DOWN` with the check interval used. Verify the layer and timing are written into the page's verify step (task 2.1) exactly as observed. If the layer is not `service`, add the observation as a ROADMAP.md item and leave the classifier unchanged.
+- [x] 1.5 Tear down: run `scripts/live-stack.sh down`, delete both throwaway Services, and restore the saved policy through `tail-acl`. Verify `tail-acl plan` against the saved original reports no difference, comparing parsed JSON and not bytes, and `tailscale.exe status` lists no `tw-mw` node.
+
+## 2. The how-to (`docs/how-to/watch-the-watcher.md`)
+
+- [x] 2.1 Write `docs/how-to/watch-the-watcher.md` in the existing how-to shape (title, one-paragraph purpose, Prerequisites, Steps, Verify, If it does not work). Prerequisites: two collectors on `tag:monitor` with a kernel-mode `tailscaled`, tailnet DNS accepted, HTTPS enabled for the tailnet, admin access to policy and the Services page; state that a `local_only` sidecar cannot take part. Steps: define `svc:` names, the one grant and `autoApprovers`, `serve` on each host, the `http:` target and `|ok` body match on each side with `addr` equal to the URL host, and routing the alert through a sink that does not depend on the peer. Verify: stop one collector and see the other alert, with the layer and timing from task 1.4. Link, do not copy, the Services how-to's troubleshooting. State the limits from the proposal (process-only proof, shared failure modes, `/metrics` reachable by `tag:monitor`). Verify the page's YAML passes `tail-watch check-config` when saved as a file, with `mise exec -- go run ./cmd/tail-watch check-config --config <file>`.
+- [x] 2.2 Add the troubleshooting rows the live check turned up (for example `lookup <svc>...: no such host` when tailnet DNS is off, and the `no peer handles` or timeout shape for a missing grant) to the page's last section, or to `docs/how-to/troubleshoot.md` if they are generic. Verify each quoted error string appears in the recorded output of task 1.3 or 1.4 or in `docs/reference/checks.md`.
+
+## 3. Links (`docs/README.md`, `docs/how-to/heartbeat.md`, `docs/how-to/monitor-ui-service.md`)
+
+- [x] 3.1 Add the page to the How-to list in `docs/README.md` beside the Fly.io entry. Verify the link target exists and the line follows the list's style.
+- [x] 3.2 In `docs/how-to/heartbeat.md`, add one sentence near the top pointing to the new page as the option with no external service, and what it does not cover. In `docs/how-to/monitor-ui-service.md`, add one sentence under "Behavior to expect" that a Service also serves `/healthz` for a peer collector's check. Verify both links resolve from their files and neither page repeats facts that now live in the new one.
+
+## 4. Validation
+
+- [x] 4.1 Run `markdownlint-cli2` on every changed file, then `mise run lint`. Verify 0 errors.
+- [x] 4.2 Run `mise exec -- openspec validate add-mutual-watch-howto --strict` and `mise exec -- openspec validate --specs --strict`, then `mise run test` (the `TestDockerfilesAgree` and example-agreement tests must still pass). Verify all exit 0.
+- [x] 4.3 Check no absolute local path or tailnet name is in the new page or this change's files: `git grep -nE '/(home|mnt|github)/|\.ts\.net' -- docs/how-to/watch-the-watcher.md` shows only `<tailnet>.ts.net` placeholders.

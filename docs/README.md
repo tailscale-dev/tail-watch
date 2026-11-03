@@ -17,6 +17,8 @@ need to do.
   and Compose without a dedicated host.
 - [Monitor from outside your network with Fly.io](how-to/deploy-fly.md): a second
   collector on the public internet, joined to the tailnet.
+- [Watch the watcher with a second collector](how-to/watch-the-watcher.md): two
+  collectors check each other's `/healthz` through Tailscale Services.
 - [Write the ACLs](how-to/acls.md): grants for `tag:monitor`.
 - [Monitor remote subnets and local LANs](how-to/remote-subnets.md)
 - [Watch a Kubernetes ProxyGroup](how-to/kubernetes-proxygroup.md): an opt-in

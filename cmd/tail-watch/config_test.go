@@ -311,7 +311,7 @@ func TestExampleConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	kinds := map[string]bool{}
-	nets := map[Network]bool{}
+	nets := make(map[Network]bool)
 	for _, target := range cfg.Targets {
 		nets[target.Network] = true
 		for _, chk := range target.Checks {

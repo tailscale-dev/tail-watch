@@ -117,6 +117,33 @@ services:
     volumes:
       - ${SETEC_BIN:-/dev/null}:/setec:ro
 
+  # A second collector for the watch-the-watcher how-to, started only with
+  # TAIL_WATCH_LIVE_MUTUAL=1. Same shape as examples/compose.yaml; the peer's config
+  # comes from TAIL_WATCH_PEER_CONFIG_FILE. Tailnet DNS is on so it resolves a Service name.
+  tailscale-peer:
+    <<: *fixture
+    hostname: ${TS_FX_PREFIX:?}-peer
+    environment:
+      <<: *fixture-env
+      TS_AUTHKEY: ${TS_KEY_PEER:-unset}
+      TS_HOSTNAME: ${TS_FX_PREFIX:?}-peer
+      TS_ACCEPT_DNS: "true"
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
+    volumes:
+      - peer-run:/var/run/tailscale
+      - peer-state:/var/lib/tailscale
+
+  tail-watch-peer:
+    build:
+      context: ..
+    image: tail-watch:local
+    network_mode: service:tailscale-peer
+    depends_on: [tailscale-peer]
+    volumes:
+      - peer-run:/var/run/tailscale:ro
+      - ${TAIL_WATCH_PEER_CONFIG_FILE:-/dev/null}:/etc/tail-watch/tail-watch.yaml:ro
+
   lan-router:
     <<: *fixture
     hostname: ${TS_FX_PREFIX:?}-lan
@@ -137,3 +164,5 @@ services:
 volumes:
   notify-state:
   setec-state:
+  peer-run:
+  peer-state:

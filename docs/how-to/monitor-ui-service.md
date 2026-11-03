@@ -73,7 +73,9 @@ Verify: `curl https://tail-watch.<tailnet>.ts.net/healthz` prints `ok`, and
 - The request guard still passes. `Origin` and `Host` both carry the Service
   name, so creating and probing monitors works through the Service.
 - The Service exposes the whole listener, so `/metrics` and `/healthz` are
-  reachable by everyone the grant allows, not only the UI.
+  reachable by everyone the grant allows, not only the UI. A peer collector
+  uses `/healthz` this way; see
+  [Watch the watcher with a second collector](watch-the-watcher.md).
 - `remote` in the audit log is the proxy, a loopback address such as
   `127.0.0.1:43322`. tail-watch asks tailscaled who that connection's
   `X-Forwarded-For` address is, and the write line carries that `user`,

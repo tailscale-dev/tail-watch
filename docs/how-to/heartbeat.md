@@ -1,7 +1,9 @@
 # Watch the watcher with a heartbeat
 
 A dead collector cannot report itself. Point `heartbeat` at a dead-man's-switch
-service that alerts when the pings stop.
+service that alerts when the pings stop. If you run two collectors and want no
+external service, see [Watch the watcher with a second
+collector](watch-the-watcher.md); it does not cover a tailnet-wide outage.
 
 Prerequisites: an account with a dead-man's-switch or cron-monitoring service
 that gives you a ping URL and alerts when it stops receiving pings.

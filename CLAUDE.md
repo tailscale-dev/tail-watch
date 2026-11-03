@@ -242,6 +242,17 @@
   tailnet. It needs its own gate because operators export `TEAMS_WEBHOOK_URL` to run the
   collector, and `mise run test` must not post to their channel. A Workflows trigger
   answers `202`, so assert `2xx`, never `200`.
+- `TAIL_WATCH_LIVE_MUTUAL=1` with `TAIL_WATCH_LIVE_TAG=tag:monitor` makes `live-stack.sh up`
+  add a second collector node, `<project>-peer` (`tailscale-peer`, `tail-watch-peer`), for
+  `docs/how-to/watch-the-watcher.md`. Start the collectors by hand with the commands `up`
+  prints. Only a tagged node can host a Service. Passed live on 2026-11-02: each collector
+  watched the other's `/healthz` through `svc:tw-mw-a`/`svc:tw-mw-b`. A stopped peer went
+  `DOWN` in about 12s (5s interval, threshold 3) with `layer: service` and `HTTP status 502`.
+  The first probe of a new Service name times out for 45 to 50 seconds while its node
+  obtains a certificate. For the throwaway Services and temporary policy, write short
+  scripts under `/tmp/tw/` for the user to run with `!` (define the Services with
+  `PUT /tailnet/-/services/svc:<name>`, push with `tail-acl upload --if-match`, restore the
+  saved original afterwards, then delete the Services).
 
 ## VM systemd test
 

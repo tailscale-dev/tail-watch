@@ -10,6 +10,10 @@
 # on MagicDNS in the collector's tailscale node so it can resolve the server's
 # name. The policy needs the grants in cmd/tail-watch/testdata/snippet.hujson.
 #
+# Set TAIL_WATCH_LIVE_MUTUAL=1 (with TAIL_WATCH_LIVE_TAG=tag:monitor) to add a second
+# collector node, <project>-peer, for docs/how-to/watch-the-watcher.md. It has tailnet DNS
+# on, as does the first collector's node.
+#
 #   scripts/live-stack.sh up      create ephemeral nodes and print their addresses
 #   scripts/live-stack.sh down    remove the containers and this stack's devices
 set -euo pipefail
@@ -66,6 +70,13 @@ up() {
   fi
   # TAIL_WATCH_LIVE_TAG defaults to untagged; set it to tag:monitor once the policy
   # in cmd/tail-watch/testdata/snippet.hujson is merged.
+  if [ -n "${TAIL_WATCH_LIVE_MUTUAL:-}" ]; then
+    [ -n "${TAIL_WATCH_LIVE_TAG:-}" ] || { echo "TAIL_WATCH_LIVE_MUTUAL needs TAIL_WATCH_LIVE_TAG: only a tagged node can host a Service" >&2; exit 2; }
+    export TS_KEY_PEER TAIL_WATCH_PEER_CONFIG_FILE="$OUT/tail-watch-peer.yaml" TS_LIVE_ACCEPT_DNS=true
+    TS_KEY_PEER="$(mint_key "$TAIL_WATCH_LIVE_TAG")"
+    : >"$TAIL_WATCH_PEER_CONFIG_FILE"
+    services+=(tailscale-peer)
+  fi
   TS_AUTHKEY="$(mint_key "${TAIL_WATCH_LIVE_TAG:-}")"
   TS_KEY_ICMP="$(mint_key)"
   TS_KEY_TSPING="$(mint_key)"
@@ -101,13 +112,17 @@ for d in json.load(sys.stdin)["devices"]:
   echo
   echo "Write a config at $TAIL_WATCH_CONFIG_FILE, then start the collector with:"
   echo "  TAIL_WATCH_CONFIG_FILE=$TAIL_WATCH_CONFIG_FILE docker compose --project-name $PROJECT ${FILES[*]} up -d --no-deps tail-watch"
+  if [ -n "${TAIL_WATCH_LIVE_MUTUAL:-}" ]; then
+    echo "Second collector (node $PROJECT-peer): write $TAIL_WATCH_PEER_CONFIG_FILE, then"
+    echo "  TAIL_WATCH_PEER_CONFIG_FILE=$TAIL_WATCH_PEER_CONFIG_FILE docker compose --project-name $PROJECT ${FILES[*]} up -d --no-deps tail-watch-peer"
+  fi
   echo "Tear down with: scripts/live-stack.sh down"
 }
 
 down() {
   load_creds
   export TS_FX_PREFIX="$PROJECT" TS_KEY_SETEC=x TS_KEY_ICMP=x TS_KEY_TSPING=x TS_KEY_TCP=x TS_KEY_HTTP=x TS_KEY_LAN=x TS_AUTHKEY=x
-  export TAIL_WATCH_CONFIG_FILE="$OUT/tail-watch.yaml"
+  export TAIL_WATCH_CONFIG_FILE="$OUT/tail-watch.yaml" TAIL_WATCH_PEER_CONFIG_FILE="$OUT/tail-watch-peer.yaml"
   compose down --volumes --remove-orphans || true
   devices | python3 -c '
 import json,sys

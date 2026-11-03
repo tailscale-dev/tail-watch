@@ -121,3 +121,9 @@ and deletes that stack's devices.
 
 Set `TAIL_WATCH_LIVE_SETEC=1` to add the setec server to that stack. `up` then also prints
 the server's name and how to seed a secret through the `setec-cli` service.
+
+Set `TAIL_WATCH_LIVE_MUTUAL=1` and `TAIL_WATCH_LIVE_TAG=tag:monitor` to add a second
+collector node, `<project>-peer`, with tailnet DNS on, for
+[Watch the watcher with a second collector](../how-to/watch-the-watcher.md). `up` then
+prints how to start `tail-watch-peer` with its own config, and `down` deletes the node.
+Only a tagged node can host a Service, so the tag is required.
