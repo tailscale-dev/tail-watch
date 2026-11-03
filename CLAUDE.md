@@ -159,6 +159,15 @@
 - The OpenSpec CLI is pinned in `mise.toml` (`npm:@fission-ai/openspec`); run
   it as `mise exec -- openspec ...`. Project context and artifact rules live
   in `openspec/config.yaml`.
+- Every OpenSpec change gets its own branch, named for the change. When
+  `/opsx:new`, `/opsx:propose` or `/opsx:ff` creates a change, run
+  `git switch -c <change-name>` right after `openspec new change`, before
+  writing any artifact. Start from an up-to-date `main` (`git pull --rebase`
+  first). If the current branch is another change's unmerged branch, ask
+  whether to stack on it or branch from `main`. Apply, verify and archive
+  commit on that branch, and the work lands through a pull request, never a
+  direct push to `main`. This overrides the usual "stay on the current branch"
+  default, but only for a change that OpenSpec starts.
 - All 12 workflows are installed (`/opsx:propose`, `/opsx:apply`,
   `/opsx:verify`, `/opsx:archive`, ...). The workflow list is global OpenSpec
   config; after changing it, run `openspec update .` to regenerate `.claude/`.
