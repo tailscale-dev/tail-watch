@@ -71,17 +71,17 @@ that have exactly one `icmp` or one `tsping` check.
 The `checks` field SHALL be a list of check rows, not text in the check syntax. The list
 SHALL start empty when the form opens to add a monitor. The operator SHALL add a row with
 an "Add check" control and remove any row with its own control. A row SHALL have a type of
-ICMP, TSPing, TCP or HTTP. A TCP row SHALL have a port. An HTTP row SHALL have a scheme
-(`http` or `https`), an optional port, a path and an optional text the body must contain,
-and its host SHALL be taken from the address field when the form is submitted, with an IPv6
-address in brackets. On submit the form SHALL send each row, in order and without
-dropping any, as the existing check string (`icmp`, `tsping`, `tcp:<port>`,
-`http:<url>[|<text>]`). The form SHALL NOT reject an empty list itself: the server's
-validation SHALL decide. A server error that carries a row index SHALL be shown on that
-row, and one without an index SHALL be shown with the list. When editing, the form SHALL
-show the monitor's existing check strings as rows. A string that no row type can express,
-or an HTTP string whose host is not the address, SHALL be shown as a Custom row holding
-the raw string and SHALL be sent unchanged.
+ICMP, TSPing, TCP, TLS or HTTP. A TCP row and a TLS row SHALL each have a port. An HTTP
+row SHALL have a scheme (`http` or `https`), an optional port, a path and an optional text
+the body must contain, and its host SHALL be taken from the address field when the form is
+submitted, with an IPv6 address in brackets. On submit the form SHALL send each row, in
+order and without dropping any, as the existing check string (`icmp`, `tsping`,
+`tcp:<port>`, `tls:<port>`, `http:<url>[|<text>]`). The form SHALL NOT reject an empty
+list itself: the server's validation SHALL decide. A server error that carries a row index
+SHALL be shown on that row, and one without an index SHALL be shown with the list. When
+editing, the form SHALL show the monitor's existing check strings as rows. A string that
+no row type can express, or an HTTP string whose host is not the address, SHALL be shown
+as a Custom row holding the raw string and SHALL be sent unchanged.
 
 #### Scenario: Validation error shown per field
 
@@ -139,10 +139,15 @@ the raw string and SHALL be sent unchanged.
 - **THEN** the form shows an ICMP row, a TCP row with port `445`, and an HTTP row with
   scheme `https`, port `5001`, path `/` and text `DSM`
 
-#### Scenario: Unparseable check kept as a Custom row
+#### Scenario: Edit shows a TLS row
 
 - **WHEN** the operator edits a monitor whose stored check is `tls:443`
-- **THEN** the form shows a Custom row holding `tls:443` and sends it unchanged, and the
+- **THEN** the form shows a TLS row with port `443` and sends `tls:443`
+
+#### Scenario: Unparseable check kept as a Custom row
+
+- **WHEN** the operator edits a monitor whose stored check is `snmp:1`
+- **THEN** the form shows a Custom row holding `snmp:1` and sends it unchanged, and the
   server's error for it is shown on that row
 
 #### Scenario: HTTP check for another host kept as a Custom row

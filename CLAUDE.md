@@ -34,7 +34,8 @@
   snapshot, so the manager closes the incident directly with `closeRemoved`.
 - `POST /api/v1/probe` holds the manager mutex only for validation, then runs each check
   through `runCheckWith` (the prober's error normalization) after `bindChecks` gives
-  `tsping` the shared resolver. A failing probe never refuses a save server-side; the UI
+  `tsping` the shared resolver and a `tls:` check its clock and that resolver. A
+  failing probe never refuses a save server-side; the UI
   gates Save on it with a confirm dialog. `guard` takes the audit `op` and always
   requires `editor`; an empty op is unaudited but still authorized
   (validate and `POST /route-preview` need `editor`). `guardRead` wraps `GET`
@@ -54,6 +55,9 @@
   registers the HTTP handlers.
 - `presence.go` is the IPN bus view. `tsping` name resolution uses it and
   falls back to the 30s `Status()` cache only while that view is unseeded.
+  A `tls:` check dials through `netEnv`, takes the verified name from the
+  owning peer's DNS name and not from a subnet route, and fails when the leaf
+  expires within 7 days.
 - `collector.local_only` runs the collector with no tailscaled (the ProxyGroup
   sidecar placement): `config.go` defaults a network-less target to `local`
   and rejects `network: tailnet`, `tsping`, the UI, `collector.setec`, and

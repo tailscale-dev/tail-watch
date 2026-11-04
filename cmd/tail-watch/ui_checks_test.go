@@ -68,6 +68,7 @@ func TestUICheckConversion(t *testing.T) {
 		toCase("", checkRow("icmp", nil), "icmp"),
 		toCase("", checkRow("tsping", nil), "tsping"),
 		toCase("", checkRow("tcp", map[string]string{"port": " 445 "}), "tcp:445"),
+		toCase("", checkRow("tls", map[string]string{"port": " 443 "}), "tls:443"),
 		toCase("", checkRow("tcp", nil), "tcp:"),
 		toCase(
 			"10.20.0.50",
@@ -79,14 +80,15 @@ func TestUICheckConversion(t *testing.T) {
 		toCase("nas2", checkRow("http", map[string]string{"path": "status"}), "http:http://nas2/status"),
 		toCase("nas", checkRow("http", map[string]string{"path": ""}), "http:http://nas/"),
 		toCase("nas", checkRow("http", map[string]string{"text": "a|b"}), "http:http://nas/|a|b"),
-		toCase("", checkRow("custom", map[string]string{"raw": " tls:443 "}), "tls:443"),
+		toCase("", checkRow("custom", map[string]string{"raw": " snmp:1 "}), "snmp:1"),
 
 		fromCase("", "icmp", checkRow("icmp", nil)),
 		fromCase("", "tsping", checkRow("tsping", nil)),
 		fromCase("", "tcp:445", checkRow("tcp", map[string]string{"port": "445"})),
 		fromCase("", "tcp:70000", checkRow("tcp", map[string]string{"port": "70000"})),
 		fromCase("", "tcp:x", checkRow("custom", map[string]string{"raw": "tcp:x"})),
-		fromCase("", "tls:443", checkRow("custom", map[string]string{"raw": "tls:443"})),
+		fromCase("", "tls:443", checkRow("tls", map[string]string{"port": "443"})),
+		fromCase("", "snmp:1", checkRow("custom", map[string]string{"raw": "snmp:1"})),
 		fromCase(
 			"10.20.0.50",
 			"http:https://10.20.0.50:5001/|DSM",
@@ -137,7 +139,7 @@ func TestUICheckConversion(t *testing.T) {
 func TestUICheckRoundTrip(t *testing.T) {
 	t.Parallel()
 	strs := []string{
-		"icmp", "tsping", "tcp:445", "tcp:70000", "tls:443", "tcp:x",
+		"icmp", "tsping", "tcp:445", "tcp:70000", "tls:443", "snmp:1", "tcp:x",
 		"http:https://10.20.0.50:5001/|DSM", "http:http://10.20.0.50/", "http:http://10.20.0.50:80/status?x=1|ok",
 		"http:http://other.lab/", "http:http://10.20.0.50/#f",
 	}

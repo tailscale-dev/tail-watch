@@ -26,9 +26,104 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tstest"
 	"tailscale.com/tstime"
 	"tailscale.com/types/views"
 )
+
+func TestBindChecksTLS(t *testing.T) {
+	t.Parallel()
+	clk := tstest.NewClock(tstest.ClockOpts{
+		Start:            time.Time{},
+		Step:             0,
+		TimerChannelSize: 0,
+		FollowRealTime:   false,
+	})
+	resolver := newTSResolver(clk, nil, func(context.Context) (*ipnstate.Status, error) {
+		return &ipnstate.Status{}, nil
+	})
+	wired := &app{
+		cfg: nil, env: nil, log: nil, clock: clk, pub: nil, stdout: nil,
+		socket: "", listen: "", ui: false,
+		dynamic: nil, uiRoutes: nil, registry: nil,
+		resolver: resolver, presence: nil, class: nil, learner: nil,
+		alerts: nil, notify: nil, metrics: nil,
+		collector: CollectorInfo{Name: "", TailscaleIP: ""},
+		watch:     nil, probeMu: sync.Mutex{}, probes: nil,
+	}
+	target := &Target{
+		Dynamic: false, Name: "nas", Addr: "nas", Checks: []check{
+			tlsCheck{port: 443, clock: nil, resolver: nil, roots: nil},
+			tspingCheck{resolver: nil},
+		},
+		Site: "", Severity: "", Parent: "", InsecureTLS: false,
+		Interval: 0, Timeout: 0, FailThreshold: 0, RecoverThreshold: 0,
+		FlapLimit: 0, FlapWindow: 0, Network: "", Implicit: false,
+		StableID: "", NodeID: 0, Route: "",
+	}
+	wired.bindChecks(target)
+	got := target.Checks[0].(tlsCheck)
+	if got.clock != clk || got.resolver != resolver {
+		t.Fatalf("clock %v resolver %v", got.clock != nil, got.resolver != nil)
+	}
+	if target.Checks[1].(tspingCheck).resolver != resolver {
+		t.Fatal("tsping resolver was not set")
+	}
+
+	local := &app{
+		cfg: nil, env: nil, log: nil, clock: clk, pub: nil, stdout: nil,
+		socket: "", listen: "", ui: false,
+		dynamic: nil, uiRoutes: nil, registry: nil,
+		resolver: nil, presence: nil, class: nil, learner: nil,
+		alerts: nil, notify: nil, metrics: nil,
+		collector: CollectorInfo{Name: "", TailscaleIP: ""},
+		watch:     nil, probeMu: sync.Mutex{}, probes: nil,
+	}
+	bare := &Target{
+		Dynamic: false, Name: "web", Addr: "web.example",
+		Checks: []check{tlsCheck{port: 443, clock: nil, resolver: nil, roots: nil}},
+		Site:   "", Severity: "", Parent: "", InsecureTLS: false,
+		Interval: 0, Timeout: 0, FailThreshold: 0, RecoverThreshold: 0,
+		FlapLimit: 0, FlapWindow: 0, Network: "", Implicit: false,
+		StableID: "", NodeID: 0, Route: "",
+	}
+	local.bindChecks(bare)
+	unwired := bare.Checks[0].(tlsCheck)
+	if unwired.clock != clk || unwired.resolver != nil {
+		t.Fatalf("local clock %v resolver %v", unwired.clock != nil, unwired.resolver != nil)
+	}
+}
+
+func TestBoundTLSCheckUsesAppClock(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clk := tstest.NewClock(tstest.ClockOpts{
+		Start:            start,
+		Step:             0,
+		TimerChannelSize: 0,
+		FollowRealTime:   false,
+	})
+	ca := newTestCA(t, start.Add(-48*time.Hour), start.Add(365*24*time.Hour))
+	env := startTLS(t, ca.leaf(t, "web.example.ts.net", start.Add(-time.Hour), start.Add(6*24*time.Hour)))
+	local := &app{
+		cfg: nil, env: nil, log: nil, clock: clk, pub: nil, stdout: nil,
+		socket: "", listen: "", ui: false,
+		dynamic: nil, uiRoutes: nil, registry: nil,
+		resolver: nil, presence: nil, class: nil, learner: nil,
+		alerts: nil, notify: nil, metrics: nil,
+		collector: CollectorInfo{Name: "", TailscaleIP: ""},
+		watch:     nil, probeMu: sync.Mutex{}, probes: nil,
+	}
+	target := tlsTarget("web.example.ts.net", false)
+	target.Checks = []check{mustCheck(t, "tls:443")}
+	local.bindChecks(target)
+	bound := target.Checks[0].(tlsCheck)
+	bound.roots = ca.pool
+	_, err := bound.Run(context.Background(), env, target)
+	if err == nil || !strings.Contains(err.Error(), "certificate expires") {
+		t.Fatalf("err %v, want certificate expires", err)
+	}
+}
 
 func TestVersionAndCheckConfig(t *testing.T) {
 	t.Parallel()

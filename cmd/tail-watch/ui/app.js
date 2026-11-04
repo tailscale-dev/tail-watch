@@ -431,7 +431,8 @@ function checkToString(row, addr) {
     case "tsping":
       return row.type;
     case "tcp":
-      return `tcp:${row.port.trim()}`;
+    case "tls":
+      return `${row.type}:${row.port.trim()}`;
     case "http": {
       const port = row.port.trim();
       const path = row.path.trim().startsWith("/") ? row.path.trim() : `/${row.path.trim()}`;
@@ -448,8 +449,8 @@ function checkToString(row, addr) {
 // that keeps the raw string.
 function checkFromString(s, addr) {
   if (s === "icmp" || s === "tsping") return blankCheck(s);
-  const tcp = /^tcp:(\d{1,5})$/.exec(s);
-  if (tcp) return { ...blankCheck("tcp"), port: tcp[1] };
+  const port = /^(tcp|tls):(\d{1,5})$/.exec(s);
+  if (port) return { ...blankCheck(port[1]), port: port[2] };
   const http = /^http:(https?):\/\/(\[[^\]/?#|]+\]|[^/:?#|[\]]+)(?::(\d+))?(\/[^#|]*)?(?:\|([\s\S]*))?$/.exec(s);
   if (http && normalHost(http[2]) === normalHost(addr)) {
     return { ...blankCheck("http"), scheme: http[1], port: http[3] ?? "", path: http[4] ?? "", text: http[5] ?? "" };
@@ -636,6 +637,7 @@ const CHECK_TYPE_LABELS = [
   ["icmp", "Ping (ICMP)"],
   ["tsping", "Tailscale ping"],
   ["tcp", "TCP port"],
+  ["tls", "TLS certificate"],
   ["http", "HTTP request"],
 ];
 
@@ -659,8 +661,9 @@ function checkRowEl(row, i) {
     renderChecks(i);
   });
   box.append(type);
-  if (row.type === "tcp") {
-    box.append(checkInput(row, i, "check-port", "port", "port", { inputmode: "numeric", placeholder: "445" }));
+  if (row.type === "tcp" || row.type === "tls") {
+    const placeholder = row.type === "tls" ? "443" : "445";
+    box.append(checkInput(row, i, "check-port", "port", "port", { inputmode: "numeric", placeholder }));
   } else if (row.type === "http") {
     const scheme = el("select", { class: "check-scheme", "aria-label": `Check ${i + 1} scheme` },
       el("option", { value: "http", text: "http" }), el("option", { value: "https", text: "https" }));

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -32,12 +33,28 @@ const (
 	statusCacheTTL = 30 * time.Second
 
 	icmpPermissionMsg = "cannot open an ICMP socket: set net.ipv4.ping_group_range or grant CAP_NET_RAW"
+
+	// tlsExpiryWindow is how far out a leaf must remain valid. A leaf inside
+	// this window fails even though clients still accept it.
+	tlsExpiryWindow = 7 * 24 * time.Hour
 )
+
+type checkBinder interface {
+	bind(clock tstime.Clock, resolver *tsResolver) check
+}
 
 type check interface {
 	String() string
 	Kind() string
 	Run(ctx context.Context, env netEnv, t *Target) (Result, error)
+}
+
+func parsePort(portStr, kind string) (int, error) {
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("invalid %s port %q", kind, portStr)
+	}
+	return port, nil
 }
 
 func parseCheck(s string) (check, error) {
@@ -47,12 +64,15 @@ func parseCheck(s string) (check, error) {
 	case s == checkTSPing:
 		return tspingCheck{}, nil
 	case strings.HasPrefix(s, "tls:"):
-		return nil, errors.New("tls checks are not supported in this version")
+		port, err := parsePort(strings.TrimPrefix(s, "tls:"), "TLS")
+		if err != nil {
+			return nil, err
+		}
+		return tlsCheck{port: port, clock: nil, resolver: nil, roots: nil}, nil
 	case strings.HasPrefix(s, "tcp:"):
-		portStr := strings.TrimPrefix(s, "tcp:")
-		port, err := strconv.Atoi(portStr)
-		if err != nil || port < 1 || port > 65535 {
-			return nil, fmt.Errorf("invalid TCP port %q", portStr)
+		port, err := parsePort(strings.TrimPrefix(s, "tcp:"), "TCP")
+		if err != nil {
+			return nil, err
 		}
 		return tcpCheck{port: port}, nil
 	case strings.HasPrefix(s, "http:"):
@@ -175,6 +195,145 @@ func (c tcpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, error
 	return res, nil
 }
 
+type tlsCheck struct {
+	port     int
+	clock    tstime.Clock
+	resolver *tsResolver
+	// roots is the test trust pool. Nil uses the system roots.
+	roots *x509.CertPool
+}
+
+func (c tlsCheck) String() string { return fmt.Sprintf("tls:%d", c.port) }
+func (c tlsCheck) Kind() string   { return "tls" }
+
+func (c tlsCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, error) {
+	res := Result{Target: t, Check: c.String(), Kind: c.Kind(),
+		Start:      time.Time{},
+		Generation: 0,
+		Latency:    0,
+		Err:        nil,
+		Ping:       nil,
+	}
+	name := c.verifiedName(ctx, t.Addr)
+	cfg := &tls.Config{
+		ServerName: name,
+		RootCAs:    c.roots,
+		Time:       c.now,
+	}
+	if t.InsecureTLS {
+		cfg.InsecureSkipVerify = true
+	}
+	start := time.Now()
+	raw, err := env.Dial(ctx, "tcp", net.JoinHostPort(t.Addr, strconv.Itoa(c.port)))
+	if err != nil {
+		res.Latency = time.Since(start)
+		err = classifyProbeErr(err, false)
+		res.Err = err
+		return res, err
+	}
+	conn := tls.Client(raw, cfg)
+	err = conn.HandshakeContext(ctx)
+	res.Latency = time.Since(start)
+	var leafErr error
+	if err == nil {
+		leafErr = checkLeaf(conn.ConnectionState().PeerCertificates, c.now())
+	}
+	if cerr := conn.Close(); cerr != nil {
+		//nolint:sloglint // Checks use the CLI-configured process logger.
+		slog.DebugContext(ctx, "close tls", "err", cerr)
+	}
+	if err != nil {
+		err = classifyProbeErr(err, false)
+		res.Err = err
+		return res, err
+	}
+	if leafErr != nil {
+		res.Err = leafErr
+		return res, leafErr
+	}
+	return res, nil
+}
+
+func (c tlsCheck) bind(clock tstime.Clock, resolver *tsResolver) check {
+	c.clock = clock
+	if resolver != nil {
+		c.resolver = resolver
+	}
+	return c
+}
+
+func (c tlsCheck) now() time.Time {
+	if c.clock == nil {
+		return tstime.StdClock{}.Now()
+	}
+	return c.clock.Now()
+}
+
+// verifiedName is the certificate name for addr. A status failure leaves the
+// address itself, so a missing tailscaled does not fail a name that needs no peer.
+func (c tlsCheck) verifiedName(ctx context.Context, addr string) string {
+	if name, ok := c.resolver.peerDNS(ctx, addr); ok {
+		return name
+	}
+	trimmed := strings.TrimSuffix(strings.TrimSpace(addr), ".")
+	if ip, err := netip.ParseAddr(trimmed); err == nil {
+		return ip.Unmap().String()
+	}
+	return trimmed
+}
+
+type leafDateError interface {
+	error
+	leafDate()
+}
+
+type certExpiryError struct {
+	notAfter time.Time
+	name     string
+}
+
+func (*certExpiryError) leafDate() {}
+
+func (e *certExpiryError) Error() string {
+	return fmt.Sprintf("certificate expires %s: %s", e.notAfter.UTC().Format(time.RFC3339), e.name)
+}
+
+type certNotYetValidError struct {
+	notBefore time.Time
+	name      string
+}
+
+func (*certNotYetValidError) leafDate() {}
+
+func (e *certNotYetValidError) Error() string {
+	return fmt.Sprintf("certificate is not valid before %s: %s", e.notBefore.UTC().Format(time.RFC3339), e.name)
+}
+
+func checkLeaf(certs []*x509.Certificate, now time.Time) error {
+	if len(certs) == 0 || certs[0] == nil {
+		return errors.New("server presented no certificate")
+	}
+	leaf := certs[0]
+	name := leafName(leaf)
+	if leaf.NotBefore.After(now) {
+		return &certNotYetValidError{notBefore: leaf.NotBefore, name: name}
+	}
+	if leaf.NotAfter.Before(now.Add(tlsExpiryWindow)) {
+		return &certExpiryError{notAfter: leaf.NotAfter, name: name}
+	}
+	return nil
+}
+
+func leafName(cert *x509.Certificate) string {
+	if cert == nil {
+		return ""
+	}
+	if len(cert.DNSNames) > 0 {
+		return cert.DNSNames[0]
+	}
+	return cert.Subject.String()
+}
+
 type httpCheck struct {
 	raw   string
 	url   string
@@ -228,7 +387,7 @@ func (c httpCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, erro
 	}
 	if t != nil && t.InsecureTLS {
 		// Devices such as a NAS often present a self-signed certificate.
-		// Certificate expiry is the phase-2 tls check.
+		// Certificate expiry is the tls: check.
 		transport.TLSClientConfig = &tls.Config{
 			InsecureSkipVerify: true, //nolint:gosec // Per-target insecure_tls opt-in.
 		}
@@ -284,6 +443,13 @@ type tspingCheck struct {
 
 func (tspingCheck) String() string { return checkTSPing }
 func (tspingCheck) Kind() string   { return checkTSPing }
+
+func (c tspingCheck) bind(_ tstime.Clock, resolver *tsResolver) check {
+	if resolver != nil {
+		c.resolver = resolver
+	}
+	return c
+}
 
 func (c tspingCheck) Run(ctx context.Context, env netEnv, t *Target) (Result, error) {
 	r := c.resolver

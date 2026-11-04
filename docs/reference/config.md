@@ -235,7 +235,7 @@ Constraints are checked on each target after defaults and overrides are merged.
 | `route` | string | no | empty | Name of a route in `routes`. That route's severity and sinks apply. Mutually exclusive with `severity`. |
 | `network` | string | no | `tailnet` | `tailnet` or `local`. |
 | `parent` | string | no | empty | Name of another target whose only check is `icmp` or `tsping`. |
-| `insecure_tls` | bool | no | `false` | Skip certificate verification for `http:` checks on this target. |
+| `insecure_tls` | bool | no | `false` | Skip certificate verification for `http:` and `tls:` checks on this target. A `tls:` check still enforces the leaf's dates. |
 | `interval` | duration | no | `defaults.interval` | Time between runs of each check. |
 | `timeout` | duration | no | `defaults.timeout` | Per-run cancellation time. |
 | `fail_threshold` | integer | no | `defaults.fail_threshold` | Consecutive failures that mark the target `DOWN`. |

@@ -137,6 +137,9 @@ func TestCheckParsing(t *testing.T) {
 		"icmp",
 		"tcp:1",
 		"tcp:65535",
+		"tls:1",
+		"tls:443",
+		"tls:65535",
 		"tsping",
 		"http:https://10.0.0.1/|DSM",
 		"http:http://host.example/health",
@@ -154,7 +157,10 @@ func TestCheckParsing(t *testing.T) {
 		{"tcp:0", "invalid TCP port"},
 		{"tcp:abc", "invalid TCP port"},
 		{"http:not a url", "invalid HTTP URL"},
-		{"tls:10.20.0.50:443", "tls checks are not supported in this version"},
+		{"tls:70000", "invalid TLS port"},
+		{"tls:0", "invalid TLS port"},
+		{"tls:abc", "invalid TLS port"},
+		{"tls:10.20.0.50:443", "invalid TLS port"},
 		{"snmp", "unknown check type"},
 	}
 	for _, tt := range bad {
@@ -200,7 +206,12 @@ targets:
 		{
 			name:  "tls phase 2",
 			src:   "targets: [{name: nas, addr: 10.20.0.50, checks: ['tls:10.20.0.50:443']}]",
-			wants: []string{"tls checks are not supported in this version"},
+			wants: []string{"targets[0].checks[0]", "nas", "tls:10.20.0.50:443", "invalid TLS port"},
+		},
+		{
+			name:  "tls port out of range",
+			src:   "targets: [{name: nas, addr: 10.20.0.50, checks: ['tls:70000']}]",
+			wants: []string{"targets[0].checks[0]", "nas", "tls:70000", "invalid TLS port"},
 		},
 		{
 			name:  "timeout not below interval",
@@ -269,6 +280,14 @@ targets:
 				}
 			}
 		})
+	}
+
+	cfg, err := parseConfig([]byte("targets: [{name: nas, addr: nas.tailnet.ts.net, checks: ['tls:443']}]"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Targets[0].Checks[0].String(); got != "tls:443" {
+		t.Fatalf("check %q", got)
 	}
 }
 

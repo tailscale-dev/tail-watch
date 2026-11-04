@@ -145,9 +145,10 @@ target's severity is the route's.
 ### Requirement: Check syntax
 
 Each entry in a target's `checks` list SHALL be one of: `icmp`; `tcp:<port>`;
-`http:<url>` optionally followed by `|<text>` where `<text>` must appear in the
-response body; or `tsping`. The config loader SHALL reject any other form. It
-SHALL reject `tls` checks with an error stating that they arrive in phase 2.
+`tls:<port>`; `http:<url>` optionally followed by `|<text>` where `<text>` must
+appear in the response body; or `tsping`. `<port>` SHALL be an integer from 1 to
+65535. The config loader SHALL reject any other form, including a `tls:` value
+that is not `tls:<port>`.
 
 #### Scenario: HTTP check with body match
 
@@ -160,11 +161,20 @@ SHALL reject `tls` checks with an error stating that they arrive in phase 2.
 - **WHEN** a target lists `tcp:70000`
 - **THEN** loading fails with an error naming the target and the check
 
+#### Scenario: TLS port check
+
+- **WHEN** a target lists `tls:443`
+- **THEN** the target loads and the check string is `tls:443`
+
+#### Scenario: Invalid TLS port
+
+- **WHEN** a target lists `tls:70000`
+- **THEN** loading fails with an error naming the target and the check
+
 #### Scenario: Phase 2 check type
 
 - **WHEN** a target lists `tls:10.20.0.50:443`
-- **THEN** loading fails with an error saying `tls` checks are not supported in
-  this version
+- **THEN** loading fails with an error naming the target and the check
 
 ### Requirement: Config validation
 

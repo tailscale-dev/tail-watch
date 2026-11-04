@@ -2,8 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,10 +21,12 @@ import (
 	"testing"
 	"time"
 
+	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tstest"
 	"tailscale.com/tstime"
 	"tailscale.com/types/key"
+	"tailscale.com/types/views"
 )
 
 func TestTCPOpenAndRefused(t *testing.T) {
@@ -713,4 +723,360 @@ func mustCheck(t *testing.T, s string) check {
 		t.Fatal(err)
 	}
 	return c
+}
+
+func TestTLSCheck(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clk := tstest.NewClock(tstest.ClockOpts{
+		Start:            start,
+		Step:             0,
+		TimerChannelSize: 0,
+		FollowRealTime:   false,
+	})
+	ca := newTestCA(t, start.Add(-48*time.Hour), start.Add(365*24*time.Hour))
+
+	nas := &ipnstate.PeerStatus{
+		NodeID:       8,
+		HostName:     "nas",
+		DNSName:      "nas.tailnet.ts.net.",
+		TailscaleIPs: []netip.Addr{netip.MustParseAddr("100.64.0.8")},
+	}
+	routerRoutes := views.SliceOf([]netip.Prefix{netip.MustParsePrefix("10.20.0.0/24")})
+	router := &ipnstate.PeerStatus{
+		NodeID:        7,
+		HostName:      "nyc-router",
+		DNSName:       "nyc-router.tailnet.ts.net.",
+		TailscaleIPs:  []netip.Addr{netip.MustParseAddr("100.64.0.7")},
+		PrimaryRoutes: &routerRoutes,
+	}
+	withPeers := statusWith(nas, router)
+	noPeers := statusWith()
+
+	leaf := func(dns string, notBefore, notAfter time.Time) tls.Certificate {
+		t.Helper()
+		return ca.leaf(t, dns, notBefore, notAfter)
+	}
+	day := 24 * time.Hour
+	valid := leaf("nas.tailnet.ts.net", start.Add(-time.Hour), start.Add(30*day))
+
+	peers := statusResolver(withPeers)
+	none := statusResolver(noPeers)
+	tests := []tlsTrial{
+		tlsTrialOf("leaf beyond 7 days", "nas.tailnet.ts.net", valid, peers, false, ""),
+		tlsTrialOf("leaf exactly 7 days", "nas.tailnet.ts.net",
+			leaf("nas.tailnet.ts.net", start.Add(-time.Hour), start.Add(tlsExpiryWindow)), peers, false, ""),
+		tlsTrialOf("leaf inside 7 days", "nas.tailnet.ts.net",
+			leaf("nas.tailnet.ts.net", start.Add(-time.Hour), start.Add(6*day)), peers, false,
+			"certificate expires "+start.Add(6*day).UTC().Format(time.RFC3339)),
+		tlsTrialOf("leaf already expired", "nas.tailnet.ts.net",
+			leaf("nas.tailnet.ts.net", start.Add(-48*time.Hour), start.Add(-time.Hour)), peers, false, "expired"),
+		tlsTrialOf("tailscale ip uses peer dns name", "100.64.0.8", valid, peers, false, ""),
+		tlsTrialOf("short name uses peer dns name", "nas", valid, peers, false, ""),
+		tlsTrialOf("full name uses peer dns name", "nas.tailnet.ts.net", valid, peers, false, ""),
+		tlsTrialOf("subnet route does not supply the name", "10.20.0.50",
+			leaf("nyc-router.tailnet.ts.net", start.Add(-time.Hour), start.Add(30*day)), peers, false, "certificate"),
+		tlsTrialOf("service name with no peer", "web.tailnet.ts.net",
+			leaf("web.tailnet.ts.net", start.Add(-time.Hour), start.Add(30*day)), none, false, ""),
+		tlsTrialOf("trailing dot is stripped", "web.tailnet.ts.net.",
+			leaf("web.tailnet.ts.net", start.Add(-time.Hour), start.Add(30*day)), none, false, ""),
+		tlsTrialOf("short name with no peer stays short", "nas", valid, none, false, "certificate"),
+		tlsTrialOf("nil resolver dials the dns name", "web.example.ts.net",
+			leaf("web.example.ts.net", start.Add(-time.Hour), start.Add(30*day)), nil, false, ""),
+		tlsTrialOf("status error still dials a dns name", "web.example.ts.net",
+			leaf("web.example.ts.net", start.Add(-time.Hour), start.Add(30*day)),
+			newTSResolver(clk, nil, func(context.Context) (*ipnstate.Status, error) {
+				return nil, errors.New("status down")
+			}), false, ""),
+		tlsTrialOf("insecure self-signed leaf beyond the window", "nas",
+			selfSignedLeaf(t, "nas", start.Add(-time.Hour), start.Add(30*day)), nil, true, ""),
+		tlsTrialOf("insecure self-signed leaf inside the window", "nas",
+			selfSignedLeaf(t, "nas", start.Add(-time.Hour), start.Add(2*day)), nil, true,
+			"certificate expires "+start.Add(2*day).UTC().Format(time.RFC3339)),
+		tlsTrialOf("insecure leaf names the subject when it has no san", "nas",
+			selfSignedLeaf(t, "", start.Add(-time.Hour), start.Add(2*day)), nil, true, "CN=nas-device"),
+		tlsTrialOf("insecure leaf not yet valid", "nas",
+			selfSignedLeaf(t, "nas", start.Add(time.Hour), start.Add(30*day)), nil, true,
+			"certificate is not valid before "+start.Add(time.Hour).UTC().Format(time.RFC3339)),
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runTLSTrial(t, clk, ca, tt)
+		})
+	}
+
+	t.Run("seeded presence owns the ip and ignores the subnet", func(t *testing.T) {
+		t.Parallel()
+		pres := newPresence(nil, clk, nil)
+		pres.apply(ipn.Notify{InitialStatus: withPeers})
+		resolver := statusResolver(noPeers)
+		resolver.presence = pres
+
+		env := startTLS(t, valid)
+		owned := mustCheck(t, "tls:443").(tlsCheck)
+		owned.clock = clk
+		owned.resolver = resolver
+		owned.roots = ca.pool
+		if _, err := owned.Run(context.Background(), env, tlsTarget("100.64.0.8", false)); err != nil {
+			t.Fatal(err)
+		}
+
+		routed := startTLS(t, leaf("nyc-router.tailnet.ts.net", start.Add(-time.Hour), start.Add(30*day)))
+		miss := owned
+		if _, err := miss.Run(context.Background(), routed, tlsTarget("10.20.0.50", false)); err == nil {
+			t.Fatal("subnet route supplied the certificate name")
+		}
+	})
+
+	t.Run("expired leaf fails verification, not the window", func(t *testing.T) {
+		t.Parallel()
+		env := startTLS(t, leaf("nas.tailnet.ts.net", start.Add(-48*time.Hour), start.Add(-time.Hour)))
+		chk := mustCheck(t, "tls:443").(tlsCheck)
+		chk.clock = clk
+		chk.roots = ca.pool
+		_, err := chk.Run(context.Background(), env, tlsTarget("nas.tailnet.ts.net", false))
+		var expiry *certExpiryError
+		if err == nil || errors.As(err, &expiry) {
+			t.Fatalf("err %v, want a verification error", err)
+		}
+		if classifyErr(err) != errTLS {
+			t.Fatalf("class %v, want errTLS", classifyErr(err))
+		}
+	})
+
+	t.Run("seeded presence miss falls back to status for self", func(t *testing.T) {
+		t.Parallel()
+		pres := newPresence(nil, clk, nil)
+		pres.apply(ipn.Notify{InitialStatus: withPeers})
+		withSelf := statusWith(nas)
+		withSelf.Self = &ipnstate.PeerStatus{
+			NodeID:       1,
+			HostName:     "collector",
+			DNSName:      "collector.tailnet.ts.net.",
+			TailscaleIPs: []netip.Addr{netip.MustParseAddr("100.64.0.1")},
+		}
+		resolver := statusResolver(withSelf)
+		resolver.presence = pres
+
+		env := startTLS(t, leaf("collector.tailnet.ts.net", start.Add(-time.Hour), start.Add(30*day)))
+		chk := mustCheck(t, "tls:443").(tlsCheck)
+		chk.clock = clk
+		chk.resolver = resolver
+		chk.roots = ca.pool
+		if _, err := chk.Run(context.Background(), env, tlsTarget("100.64.0.1", false)); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+type tlsTrial struct {
+	name     string
+	addr     string
+	insecure bool
+	cert     tls.Certificate
+	resolver *tsResolver
+	wantErr  string
+}
+
+func tlsTrialOf(name, addr string, cert tls.Certificate, resolver *tsResolver, insecure bool, wantErr string) tlsTrial {
+	return tlsTrial{
+		name: name, addr: addr, insecure: insecure,
+		cert: cert, resolver: resolver, wantErr: wantErr,
+	}
+}
+
+func runTLSTrial(t *testing.T, clk tstime.Clock, ca testCA, tt tlsTrial) {
+	t.Helper()
+	env := startTLS(t, tt.cert)
+	chk := mustCheck(t, "tls:443").(tlsCheck)
+	chk.clock = clk
+	chk.resolver = tt.resolver
+	if !tt.insecure {
+		chk.roots = ca.pool
+	}
+	res, err := chk.Run(context.Background(), env, tlsTarget(tt.addr, tt.insecure))
+	if tt.wantErr == "" {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Check != "tls:443" || res.Latency <= 0 {
+			t.Fatalf("result %+v", res)
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+		t.Fatalf("err %v, want %q", err, tt.wantErr)
+	}
+}
+
+func statusWith(peers ...*ipnstate.PeerStatus) *ipnstate.Status {
+	tailnet := new(ipnstate.TailnetStatus)
+	tailnet.MagicDNSSuffix = "tailnet.ts.net"
+	st := &ipnstate.Status{
+		CurrentTailnet: tailnet,
+		Peer:           map[key.NodePublic]*ipnstate.PeerStatus{},
+	}
+	for _, ps := range peers {
+		st.Peer[key.NewNode().Public()] = ps
+	}
+	return st
+}
+
+func statusResolver(st *ipnstate.Status) *tsResolver {
+	return newTSResolver(tstime.StdClock{}, nil, func(context.Context) (*ipnstate.Status, error) {
+		return st, nil
+	})
+}
+
+func tlsTarget(addr string, insecure bool) *Target {
+	return &Target{
+		Dynamic:          false,
+		Name:             "",
+		Addr:             addr,
+		Site:             "",
+		Severity:         "",
+		Parent:           "",
+		InsecureTLS:      insecure,
+		Interval:         0,
+		Timeout:          0,
+		FailThreshold:    0,
+		RecoverThreshold: 0,
+		FlapLimit:        0,
+		FlapWindow:       0,
+		Network:          "",
+		Checks:           nil,
+		Implicit:         false,
+		StableID:         "",
+		NodeID:           0,
+		Route:            "",
+	}
+}
+
+func startTLS(t *testing.T, cert tls.Certificate) *fakeEnv {
+	t.Helper()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			go func() {
+				defer func() { _ = conn.Close() }()
+				_, _ = io.Copy(io.Discard, conn)
+			}()
+		}
+	}()
+	return dialingEnv(func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, ln.Addr().String())
+	})
+}
+
+type testCA struct {
+	cert *x509.Certificate
+	key  crypto.Signer
+	pool *x509.CertPool
+}
+
+func newTestCA(t *testing.T, notBefore, notAfter time.Time) testCA {
+	t.Helper()
+	key := p256Key(t)
+	var subject pkix.Name
+	subject.CommonName = "test-ca"
+	tmpl := new(x509.Certificate)
+	tmpl.SerialNumber = big.NewInt(1)
+	tmpl.Subject = subject
+	tmpl.NotBefore = notBefore
+	tmpl.NotAfter = notAfter
+	tmpl.IsCA = true
+	tmpl.KeyUsage = x509.KeyUsageCertSign
+	tmpl.BasicConstraintsValid = true
+	der := createCert(t, tmpl, tmpl, key.Public(), key)
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+	return testCA{cert: cert, key: key, pool: pool}
+}
+
+func (ca testCA) leaf(t *testing.T, dns string, notBefore, notAfter time.Time) tls.Certificate {
+	t.Helper()
+	key := p256Key(t)
+	var subject pkix.Name
+	subject.CommonName = dns
+	tmpl := new(x509.Certificate)
+	tmpl.SerialNumber = big.NewInt(2)
+	tmpl.Subject = subject
+	tmpl.NotBefore = notBefore
+	tmpl.NotAfter = notAfter
+	tmpl.DNSNames = []string{dns}
+	tmpl.KeyUsage = x509.KeyUsageDigitalSignature
+	tmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+	der := createCert(t, tmpl, ca.cert, key.Public(), ca.key)
+	parsed, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out tls.Certificate
+	out.Certificate = [][]byte{der, ca.cert.Raw}
+	out.PrivateKey = key
+	out.Leaf = parsed
+	return out
+}
+
+func selfSignedLeaf(t *testing.T, dns string, notBefore, notAfter time.Time) tls.Certificate {
+	t.Helper()
+	key := p256Key(t)
+	cn := dns
+	if cn == "" {
+		cn = "nas-device"
+	}
+	var subject pkix.Name
+	subject.CommonName = cn
+	tmpl := new(x509.Certificate)
+	tmpl.SerialNumber = big.NewInt(3)
+	tmpl.Subject = subject
+	tmpl.NotBefore = notBefore
+	tmpl.NotAfter = notAfter
+	tmpl.KeyUsage = x509.KeyUsageDigitalSignature
+	tmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+	if dns != "" {
+		tmpl.DNSNames = []string{dns}
+	}
+	der := createCert(t, tmpl, tmpl, key.Public(), key)
+	parsed, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out tls.Certificate
+	out.Certificate = [][]byte{der}
+	out.PrivateKey = key
+	out.Leaf = parsed
+	return out
+}
+
+func p256Key(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+func createCert(t *testing.T, tmpl, parent *x509.Certificate, pub any, priv any) []byte {
+	t.Helper()
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, pub, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
 }
