@@ -347,16 +347,13 @@ func (a *app) bindResolver() {
 }
 
 func (a *app) bindChecks(t *Target) {
-	if a == nil || a.resolver == nil || t == nil {
+	if a == nil || t == nil {
 		return
 	}
 	for j, c := range t.Checks {
-		ts, ok := c.(tspingCheck)
-		if !ok {
-			continue
+		if b, ok := c.(checkBinder); ok {
+			t.Checks[j] = b.bind(a.clock, a.resolver)
 		}
-		ts.resolver = a.resolver
-		t.Checks[j] = ts
 	}
 }
 

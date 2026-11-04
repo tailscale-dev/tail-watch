@@ -93,6 +93,7 @@ Steps:
    | Ping (ICMP) | none |
    | Tailscale ping | none |
    | TCP port | the port |
+   | TLS certificate | the port |
    | HTTP request | scheme, optional port, path, and optional text the body must contain |
 
    An HTTP check always uses the Address as its host, so there is no host

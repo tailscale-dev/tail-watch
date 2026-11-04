@@ -474,6 +474,80 @@ func TestFreshICMPSkipsSupplementalProbe(t *testing.T) {
 	}
 }
 
+func TestClassifyTLSAnswer(t *testing.T) {
+	t.Parallel()
+	leaf := new(x509.Certificate)
+	leaf.DNSNames = []string{"other.example"}
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "certificate expires",
+			err: &certExpiryError{
+				notAfter: time.Date(2026, 1, 7, 0, 0, 0, 0, time.UTC),
+				name:     "nas.tailnet.ts.net",
+			},
+		},
+		{
+			name: "certificate is not valid before",
+			err: &certNotYetValidError{
+				notBefore: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+				name:      "nas.tailnet.ts.net",
+			},
+		},
+		{
+			name: "hostname mismatch",
+			err:  x509.HostnameError{Certificate: leaf, Host: "10.20.0.50"},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.name == "certificate expires" && !strings.Contains(tt.err.Error(), tt.name) {
+				t.Fatal(tt.err)
+			}
+			c, nas, icmps := tlsAnswerRig(t)
+			got := c.observeOne(Result{
+				Target: nas, Kind: "tls", Check: "tls:443", Err: tt.err,
+				Start: time.Time{}, Generation: 0, Latency: 0, Ping: nil,
+			})
+			if got.Layer != layerService || icmps.Load() != 0 {
+				t.Fatalf("layer %q icmps %d", got.Layer, icmps.Load())
+			}
+		})
+	}
+}
+
+func tlsAnswerRig(t *testing.T) (*classifier, *Target, *atomic.Int32) {
+	t.Helper()
+	router := peerTarget("nyc-subnet-router", "nyc-router")
+	nas := &Target{
+		Dynamic: false, Name: "nyc-nas", Addr: "10.20.0.50", Network: NetworkTailnet,
+		Interval: 30 * time.Second, Timeout: time.Second,
+		Site: "", Severity: "", Parent: "", InsecureTLS: false,
+		FailThreshold: 0, RecoverThreshold: 0, FlapLimit: 0, FlapWindow: 0,
+		Checks: nil, Implicit: false, StableID: "", NodeID: 0, Route: "",
+	}
+	c, pres := newTestClassifier(t, new(fakeEnv), router, nas)
+	seedRouter(pres)
+	icmps := new(atomic.Int32)
+	c.pingFn = func(context.Context, netip.Addr, time.Duration) (*ipnstate.PingResult, error) {
+		return &ipnstate.PingResult{
+			Endpoint: "1.2.3.4:1", NodeIP: "100.64.0.7",
+			IP: "", NodeName: "", Err: "", LatencySeconds: 0.01,
+			PeerRelay: "", DERPRegionID: 0, DERPRegionCode: "",
+			PeerAPIPort: 0, PeerAPIURL: "", IsLocalIP: false,
+		}, nil
+	}
+	c.icmpFn = func(context.Context, netip.Addr, time.Duration) bool {
+		icmps.Add(1)
+		return false
+	}
+	c.learnRound(context.Background())
+	return c, nas, icmps
+}
+
 func TestObserveLayers(t *testing.T) {
 	t.Parallel()
 	router := peerTarget("nyc-subnet-router", "nyc-router")

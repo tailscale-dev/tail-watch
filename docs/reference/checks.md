@@ -11,7 +11,7 @@ burst.
 | TCP connect | `tcp:<port>` | A TCP connection to `addr:<port>` is established. |
 | HTTP request | `http:<url>` or `http:<url>\|<text>` | The status is 2xx or 3xx and, if `<text>` is given, the body contains it. |
 | Tailscale ping | `tsping` | tailscaled reports a disco pong. |
-| TLS | `tls:...` | Rejected. Not supported in this version. |
+| TLS certificate | `tls:<port>` | The handshake succeeds and the leaf expires at least 7 days from now. |
 
 The same check string cannot appear twice in one target. Every check that fails
 gets a failure layer; see [Failure layers](../explanation/failure-layers.md).
@@ -99,10 +99,23 @@ Failures:
 | `tsping returned no result` | tailscaled answered without a result. |
 | other text | The error reported by tailscaled. |
 
-## `tls:` (rejected)
+## `tls:<port>`
 
-Any check starting with `tls:` is rejected at load time with
-`tls checks are not supported in this version`.
+`<port>` is an integer from 1 to 65535. `tls:443` dials `addr:443` and completes a
+TLS handshake. A value that is not a port, such as `tls:10.20.0.50:443`, fails
+to load and the error names the target and the check.
+
+The verified name is the owning peer's DNS name when `addr` is that peer's
+Tailscale IP, its short name, or its full MagicDNS name. A subnet route does
+not supply the name. Address a Service or Serve endpoint that is not a peer by
+its full `name.tailnet.ts.net` name. A short name with no matching peer is
+used as written, with one trailing dot removed.
+
+The check passes when the handshake succeeds and the leaf's `NotAfter` is at
+least 7 days after the check. A leaf that expires sooner fails with
+`certificate expires` and the expiry time in UTC. Chain and hostname checks
+use the system roots. With `insecure_tls: true`, those checks are skipped and
+the leaf dates still apply. The check does not consult a CRL or OCSP.
 
 ## Parent rules
 

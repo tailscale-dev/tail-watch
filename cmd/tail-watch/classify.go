@@ -798,7 +798,8 @@ func classifyErr(err error) errClass {
 	if errors.As(err, &status) || errors.As(err, &body) {
 		return errHTTP
 	}
-	if certErr(err) {
+	var leaf leafDateError
+	if errors.As(err, &leaf) || certErr(err) {
 		return errTLS
 	}
 	return errOther

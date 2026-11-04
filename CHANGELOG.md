@@ -2,6 +2,16 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## Unreleased
+
+### Added
+
+- `tls:<port>` checks the certificate a service presents. It fails when the leaf expires
+  within 7 days or is not yet valid, and it verifies the owning peer's MagicDNS name, so a
+  Tailscale IP, a short name and a `*.ts.net` name all work. `insecure_tls` skips chain and
+  name verification but still checks the leaf dates. The monitor UI has a TLS certificate
+  row. See [Checks](docs/reference/checks.md).
+
 ## 0.3.0 - 2026-10-23
 
 ### Added

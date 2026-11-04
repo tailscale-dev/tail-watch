@@ -26,8 +26,10 @@ Phase 2 of the original design, ordered by value to an operator who already runs
   PagerDuty account lets us run the live check (task 6.4 of `add-pagerduty-sink`) [M]
 - [ ] incident.io sink: HTTP alert source, `firing` and `resolved` paired by
   `deduplication_key`. OpenSpec change `add-incidentio-sink` drafted [M]
-- [ ] TLS expiry check (`tls:` is rejected today). Also covers the `*.ts.net`
+- [x] TLS expiry check. Also covers the `*.ts.net`
   certificates that Tailscale Services and Serve use [M]
+- [ ] Per-check TLS expiry window (for example `tls:443|14d`) and tiered severity, so a
+  leaf can warn at 14 days and page at 3. The `tls:` check has a fixed 7-day window [M]
 - [ ] Emit `target.degraded`: path warnings (direct to DERP or relay) with latency
   baselines, without paging [L]
 - [ ] `tsnetEnv` collector for hosts without a daemon or root. It also unlocks setec where

@@ -308,8 +308,8 @@ func TestUIBrowserCustomRowKeepsUnparseableCheck(t *testing.T) {
 	page := uiPage(t, uiPeers())
 	stored := `[{"name":"old","addr":"nas.lab","site":"","severity":"page","parent":"","insecure_tls":false,
 "interval":"30s","timeout":"5s","fail_threshold":3,"recover_threshold":2,"flap_limit":4,"flap_window":"15m0s",
-"network":"tailnet","checks":["tls:443","http:http://other.lab/"],"source":"ui","readonly":false,"state":"UP",
-"definition":{"name":"old","addr":"nas.lab","checks":["tls:443","http:http://other.lab/"]}}]`
+"network":"tailnet","checks":["snmp:1","http:http://other.lab/"],"source":"ui","readonly":false,"state":"UP",
+"definition":{"name":"old","addr":"nas.lab","checks":["snmp:1","http:http://other.lab/"]}}]`
 	if err := page.Route("**/api/v1/targets", func(r playwright.Route) {
 		_ = r.Fulfill(playwright.RouteFulfillOptions{
 			Status: new(200), ContentType: new("application/json"), Body: stored,
@@ -324,7 +324,7 @@ func TestUIBrowserCustomRowKeepsUnparseableCheck(t *testing.T) {
 	if err := page.Locator(`button[aria-label="Edit old"]`).Click(); err != nil {
 		t.Fatal(err)
 	}
-	for i, want := range []string{"tls:443", "http:http://other.lab/"} {
+	for i, want := range []string{"snmp:1", "http:http://other.lab/"} {
 		row := checkRowLoc(page, i)
 		if typ, _ := row.Locator(".check-type").InputValue(); typ != "custom" {
 			t.Errorf("row %d type = %q, want custom", i+1, typ)
@@ -340,8 +340,39 @@ func TestUIBrowserCustomRowKeepsUnparseableCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	msg, _ := checkRowLoc(page, 0).Locator(".check-error").TextContent()
-	if !strings.Contains(msg, "tls checks are not supported") {
+	if !strings.Contains(msg, "unknown check type") {
 		t.Errorf("row 1 error = %q", msg)
+	}
+}
+
+// An edited tls:443 is a TLS certificate row with its port, not a custom string.
+func TestUIBrowserTLS(t *testing.T) {
+	t.Parallel()
+	page := uiPage(t, uiPeers())
+	stored := `[{"name":"old","addr":"nas.lab","site":"","severity":"page","parent":"","insecure_tls":false,
+"interval":"30s","timeout":"5s","fail_threshold":3,"recover_threshold":2,"flap_limit":4,"flap_window":"15m0s",
+"network":"tailnet","checks":["tls:443"],"source":"ui","readonly":false,"state":"UP",
+"definition":{"name":"old","addr":"nas.lab","checks":["tls:443"]}}]`
+	if err := page.Route("**/api/v1/targets", func(r playwright.Route) {
+		_ = r.Fulfill(playwright.RouteFulfillOptions{
+			Status: new(200), ContentType: new("application/json"), Body: stored,
+			Headers: nil, Path: nil, Response: nil,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := page.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Locator(`button[aria-label="Edit old"]`).Click(); err != nil {
+		t.Fatal(err)
+	}
+	row := checkRowLoc(page, 0)
+	if typ, err := row.Locator(".check-type").InputValue(); err != nil || typ != "tls" {
+		t.Fatalf("type = %q (%v), want tls", typ, err)
+	}
+	if port, err := row.Locator(".check-port").InputValue(); err != nil || port != "443" {
+		t.Fatalf("port = %q (%v), want 443", port, err)
 	}
 }
 
